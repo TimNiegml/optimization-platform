@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .demo import demo_vocs, optical_bench
+from .demo import BENCHES, bench_func, demo_vocs, optical_bench
 from .evaluator import Evaluator
 from .graph import GraphRunner
 from .hardware import HardwareEvaluator, SafetyLimits, SimulatedMeter, SimulatedStage
@@ -38,9 +38,12 @@ _WEB = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
 
 class EvaluatorConfig(BaseModel):
     mode: str = "function"          # "function" | "hardware_sim"
+    bench: str = "single_peak"      # which simulated bench (see /benches)
     noise: float = 0.0
     averages: int = 1
     safety: bool = False
+    # optional per-variable safe range override: {"x1": [low, high], ...}
+    safety_limits: Optional[dict[str, list[float]]] = None
 
 
 class RunRequest(BaseModel):
@@ -62,14 +65,25 @@ def _build_vocs(v: Optional[dict]) -> VOCS:
     return VOCS(**v) if v else demo_vocs()
 
 
+def _safety_limits(vocs: VOCS, cfg: EvaluatorConfig) -> Optional[SafetyLimits]:
+    if not cfg.safety:
+        return None
+    if cfg.safety_limits:
+        limits = {n: (float(lohi[0]), float(lohi[1]))
+                  for n, lohi in cfg.safety_limits.items() if len(lohi) == 2}
+    else:
+        limits = {n: (v.low, v.high) for n, v in vocs.variables.items()}
+    return SafetyLimits(limits)
+
+
 def _build_evaluator(vocs: VOCS, cfg: EvaluatorConfig):
+    func = bench_func(cfg.bench)
     if cfg.mode == "hardware_sim":
         stage = SimulatedStage(vocs.initial_point())
-        meter = SimulatedMeter(stage, optical_bench, noise=cfg.noise, seed=0)
-        safety = SafetyLimits({n: (v.low, v.high) for n, v in vocs.variables.items()}) \
-            if cfg.safety else None
-        return HardwareEvaluator(stage, meter, averages=cfg.averages, safety=safety)
-    return Evaluator(optical_bench)
+        meter = SimulatedMeter(stage, func, noise=cfg.noise, seed=0)
+        return HardwareEvaluator(stage, meter, averages=cfg.averages,
+                                 safety=_safety_limits(vocs, cfg))
+    return Evaluator(func)
 
 
 def _result(res: dict) -> dict[str, Any]:
@@ -91,6 +105,13 @@ def health():
 @app.get("/catalog")
 def catalog():
     return {"algorithms": algorithm_catalog()}
+
+
+@app.get("/benches")
+def benches():
+    """Selectable simulated evaluation scenarios for the canvas 场景 dropdown."""
+    return {"benches": [{"name": n, "label": b["label"], "desc": b["desc"]}
+                        for n, b in BENCHES.items()]}
 
 
 @app.get("/vocs")

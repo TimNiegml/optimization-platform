@@ -62,7 +62,13 @@
   - 节点**目标模式**可配（最大/最小/逼近目标值/扫描，引擎按 `objective_mode`/`objective_target` 覆盖 VOCS 默认）；
   - **字号**滑块（缩放画布字体）；**连线**改进（DOM 精准锚点 + 橡皮筋预览 + 加宽点击区）与**删除**（选中删/`Delete`/右键）；
   - **帮助**说明文档弹窗 + 关键处 ⓘ 悬浮提示；算法节点显示**中文名**（registry 加 `label`/`desc`，参数带中文 `label`，`name` 仍为英文 ID）。
-- **测试**：`python -m pytest -q` → **26 项全过**（algorithms / graph / p1b / api）。
+- **P2b 画布进阶**（Chromium 全流程验证，无控制台报错）：
+  - **轨迹图三视图**：收敛(目标/变量 vs 评估次数，下方**算子色带**标注每段属于哪个算子) / **1D**(单自变量→目标) / **2D**(双自变量,颜色=目标值,等高线式,带 colorbar)；**下载轨迹 CSV**(全部 x/y)。
+  - **多仿真场景**：`demo.py` 加 `BENCHES`(单峰/多峰/偏斜峰) + `bench_func`；`api` 加 `/benches`、`EvaluatorConfig.bench`；画布可选场景。
+  - **逐变量安全限位**：`EvaluatorConfig.safety_limits` 覆盖；勾选后画布逐自变量填 low/high。模拟硬件下有**接口映射**占位(自变量↔执行器 / 目标↔功率计)。
+  - **节点配色 + 循环回边绕行布线**（回边/自环走下方，避免交叉）；**保存/加载方案 JSON**；**表格式目标条件**(until 构建器) + 原始表达式。
+  - **更轻盈的浅色主题**(默认) + 深色切换；帮助补**可用表达式**说明(比较/and·or·not/abs·min·max/变量名)。
+- **测试**：`python -m pytest -q` → **29 项全过**（algorithms / graph / p1b / api）。
 
 算法库（8 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
 `nelder_mead` `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula` `bayesian`。

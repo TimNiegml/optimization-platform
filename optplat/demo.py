@@ -14,14 +14,54 @@ import math
 from .vocs import VOCS, Objective, ObjectiveMode, Variable
 
 
+def _lobe(x1, x2, cx, cy, amp, w):
+    return amp * math.exp(-((x1 - cx) ** 2 + (x2 + cy) ** 2) / (2 * w ** 2))
+
+
 def optical_bench(x: dict[str, float]) -> dict[str, float]:
+    """单峰光纤耦合：一个高斯主瓣，峰在 (x1,x2)=(2,-1)。"""
     x1, x2, x3 = x["x1"], x["x2"], x["x3"]
-    # Gaussian coupling lobe centred at (2, -1)
-    r2 = (x1 - 2.0) ** 2 + (x2 + 1.0) ** 2
-    y1 = math.exp(-r2 / (2 * 1.2 ** 2))                     # in [0, 1]
+    y1 = _lobe(x1, x2, 2.0, 1.0, 1.0, 1.2)                  # in [0, 1]
     # y2: balance metric, best (=1) near x3=0.6, but coupling-dependent
     y2 = y1 * math.exp(-((x3 - 0.6) ** 2) / (2 * 0.25 ** 2))
     return {"y1": round(y1, 6), "y2": round(y2, 6)}
+
+
+def multi_peak_bench(x: dict[str, float]) -> dict[str, float]:
+    """多峰光耦合：主瓣 + 几个旁瓣（局部极大），全局搜索/找光才不会卡在旁瓣。"""
+    x1, x2, x3 = x["x1"], x["x2"], x["x3"]
+    y1 = max(_lobe(x1, x2, 2.0, 1.0, 1.00, 0.8),            # 全局主瓣
+             _lobe(x1, x2, -1.0, -1.5, 0.75, 0.7),          # 旁瓣
+             _lobe(x1, x2, 4.5, 2.0, 0.85, 0.9),            # 旁瓣
+             _lobe(x1, x2, 0.0, 2.0, 0.60, 0.6))            # 旁瓣
+    y2 = y1 * math.exp(-((x3 - 0.6) ** 2) / (2 * 0.25 ** 2))
+    return {"y1": round(y1, 6), "y2": round(y2, 6)}
+
+
+def skew_bench(x: dict[str, float]) -> dict[str, float]:
+    """偏斜/相关峰：主瓣沿一条斜轴拉长且 x1,x2 相关，逐轴下降会慢、单纯形/贝叶斯更好。"""
+    x1, x2, x3 = x["x1"], x["x2"], x["x3"]
+    u = (x1 - 2.0) + (x2 + 1.0)          # 长轴方向
+    v = (x1 - 2.0) - (x2 + 1.0)          # 短轴方向
+    y1 = math.exp(-(u ** 2) / (2 * 2.4 ** 2) - (v ** 2) / (2 * 0.5 ** 2))
+    y2 = y1 * math.exp(-((x3 - 0.6) ** 2) / (2 * 0.25 ** 2))
+    return {"y1": round(y1, 6), "y2": round(y2, 6)}
+
+
+# Selectable simulated benches (the canvas 场景 dropdown reads this via /benches).
+# All share the same variable space (x1,x2,x3 / y1,y2) so one VOCS stays valid.
+BENCHES = {
+    "single_peak": {"label": "单峰光纤耦合", "func": optical_bench,
+                    "desc": "一个高斯主瓣，经典找光→精调，最好上手。"},
+    "multi_peak": {"label": "多峰光耦合", "func": multi_peak_bench,
+                   "desc": "主瓣+多个旁瓣（局部极大），考验找光/全局搜索是否会卡旁瓣。"},
+    "skew_peak": {"label": "偏斜相关峰", "func": skew_bench,
+                  "desc": "峰沿斜轴拉长、两轴相关，逐轴下降慢，单纯形/贝叶斯更优。"},
+}
+
+
+def bench_func(name: str):
+    return BENCHES.get(name, BENCHES["single_peak"])["func"]
 
 
 def demo_vocs() -> VOCS:

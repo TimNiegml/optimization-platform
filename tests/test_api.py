@@ -43,6 +43,34 @@ def test_run_graph_hardware_sim():
     assert r.json()["objectives"]["y1"] > 0.95
 
 
+def test_benches_lists_scenarios():
+    d = client.get("/benches").json()["benches"]
+    names = {b["name"] for b in d}
+    assert {"single_peak", "multi_peak", "skew_peak"} <= names
+    assert all(b["label"] and b["desc"] for b in d)
+
+
+def test_run_graph_multi_peak_bench():
+    # the multi-peak bench runs and the workflow climbs *a* lobe (may be a
+    # sidelobe — that is the scenario's point: naive local search can stick).
+    r = client.post("/run/graph", json={"graph": TWO_PHASE_GRAPH,
+                                        "evaluator": {"mode": "function", "bench": "multi_peak"}})
+    assert r.status_code == 200
+    assert r.json()["objectives"]["y1"] > 0.7
+
+
+def test_safety_limits_override_clamps():
+    # cap x1 at 0 via safety_limits; the peak at x1=2 is unreachable -> y1 stays low
+    graph = {"nodes": [{"id": "n", "type": "algorithm", "data": {
+        "algorithm": "coordinate_descent", "variables": ["x1", "x2"], "objective": "y1",
+        "stop": {"max_iter": 100}}}], "edges": []}
+    r = client.post("/run/graph", json={"graph": graph, "evaluator": {
+        "mode": "hardware_sim", "safety": True,
+        "safety_limits": {"x1": [-2.0, 0.0], "x2": [-5.0, 3.0]}}})
+    assert r.status_code == 200
+    assert r.json()["objectives"]["y1"] < 0.7        # clamped away from the x1=2 peak
+
+
 def test_bad_algorithm_returns_400():
     r = client.post("/run/graph", json={"graph": {
         "nodes": [{"id": "n", "type": "algorithm",
