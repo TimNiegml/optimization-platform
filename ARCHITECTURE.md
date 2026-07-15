@@ -77,12 +77,19 @@ flowchart TB
 - 约束两类：**硬约束**（提点时过滤，如安全区）与**软约束/keep**（违反则罚分+回退，如 `y1 > k`）。
 - Pydantic 建模 → 自动导出 JSON Schema，同一份 schema 驱动表单生成、LLM 输出校验、后端校验（三处一源）。
 
-### 2.2 算法层 Generator（已实现 2 个 + wrapper 路线）
+### 2.2 算法层 Generator（已实现 6 种 + wrapper 路线）
 - 统一 `ask()/tell()/done/failed/best_x`，与 Xopt 接口兼容——将来可直接挂它的 generator。
-- **自研只留两类**：坐标梯度（compass search + 步长收缩）；拟合定峰家族 `SurrogateFit`
-  （二次顶点 / 高斯中心，统一在"score 空间"拟合，天然覆盖 max/min/target 三种 mode；
-  内置 **R² 守门**、**外推限幅（clip 回信赖域）**、可配采样设计：一维等距 N 点 / 二维小网格、平均次数抗噪）。
-- **其余全部 wrapper 接开源**：贝叶斯→scikit-optimize(BSD)/Optuna(MIT)；多目标帕累托→pymoo(Apache)；
+- **已实现算法库**（`optplat/generators.py`，全部 ask/tell，仅依赖 numpy/scipy/lmfit）：
+
+  | algorithm | 类别 | 说明 |
+  |---|---|---|
+  | `grid_scan` / `line_scan` | 找光 (Phase 1) | 栅格/线扫描，配 stage `stop.target` 到阈值即停 |
+  | `coordinate_descent` | 局部优化 | compass search + 步长收缩 |
+  | `nelder_mead` | 局部优化 | 单纯形下降（reflect/expand/contract/shrink，ask/tell 驱动） |
+  | `quadratic_fit` / `gaussian_fit` | 拟合定峰 | 最小二乘（lmfit），**R² 守门 + 外推限幅**，score 空间统一覆盖 max/min/target |
+  | `formula` (公式法) | 解析 | 三点抛物线闭式解峰，**无回归**；曲率非凹则 failed→fallback |
+
+- **其余 wrapper 接开源**：贝叶斯→scikit-optimize(BSD)/Optuna(MIT)；多目标帕累托→pymoo(Apache)；
   更多无梯度→Nevergrad(MIT)；成熟组合→Xopt(Apache)。每个 wrapper ≈ 几十行。
 - 客户自定义算法 = 实现同一基类，entry_points 注册为插件。
 
@@ -131,8 +138,9 @@ flowchart TB
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| **P0 · MVP** | VOCS + 坐标梯度 + 拟合定峰(R²门/限幅/回退) + if/loop/until 编排 + keep 约束 + Streamlit + YAML IR，仿真台跑通"先优 y1 → 拟合优 y2 保持 y1>k" | ✅ 已完成并跑通（47 次评估收敛） |
-| **P1 · 算法+硬件** | skopt/Optuna 贝叶斯 wrapper、pymoo 多目标、异步/批量 Evaluator、PyVISA 硬件适配器 + 安全限位、SQLite 归档/续跑/回滚 | 下一步 |
+| **P0 · MVP** | VOCS + 坐标梯度 + 拟合定峰(R²门/限幅/回退) + if/loop/until 编排 + keep 约束 + Streamlit + YAML IR | ✅ 已完成并跑通 |
+| **P1a · 算法库** | 找光扫描(grid/line)、Nelder-Mead、公式法(三点解析)；两阶段"找光→优化"流程；回归测试 | ✅ 已完成（6 种算法，两阶段 62 次评估收敛，5 tests 通过） |
+| **P1b · 硬件+持久化** | skopt/Optuna 贝叶斯 wrapper、pymoo 多目标、异步/批量 Evaluator、PyVISA 硬件适配器 + 安全限位、SQLite 归档/续跑/回滚 | 下一步 |
 | **P2 · 易用性** | JSON Schema 正式化 + rjsf 表单、场景模板库、GLM5.1 Copilot（意图→IR / IR→人话 / 跑后诊断） | |
 | **P3 · 平台化** | React Flow 画布（节点↔IR 双向）、FastAPI 服务化 + 多用户/任务队列、scan 模式与建模类任务闭环 | |
 

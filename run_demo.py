@@ -1,13 +1,20 @@
-"""Headless run of the demo: the exact '先优 y1 → 再优 y2 保持 y1>k' example."""
+"""Headless runs of the demo pipelines.
+
+  python run_demo.py            # two-phase: find-light -> optimise (default)
+  python run_demo.py loop       # alternating loop with keep-constraint + fallback
+"""
+import sys
+
 from optplat import Evaluator, Orchestrator
-from optplat.demo import DEMO_PIPELINE, demo_vocs, optical_bench
+from optplat.demo import DEMO_PIPELINE, TWO_PHASE_PIPELINE, demo_vocs, optical_bench
 
 
 def main() -> None:
-    vocs = demo_vocs()
+    which = sys.argv[1] if len(sys.argv) > 1 else "two_phase"
+    pipeline = DEMO_PIPELINE if which == "loop" else TWO_PHASE_PIPELINE
+
     evaluator = Evaluator(optical_bench)
-    orch = Orchestrator(vocs, evaluator, DEMO_PIPELINE)
-    result = orch.run()
+    result = Orchestrator(demo_vocs(), evaluator, pipeline).run()
 
     print("\n".join(result["events"]))
     print("\n=== RESULT ===")

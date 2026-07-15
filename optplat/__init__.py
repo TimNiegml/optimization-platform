@@ -7,12 +7,19 @@ Layers (all permissive-licensed deps only: pydantic/scipy/numpy/lmfit/asteval):
   orchestrator — control-flow pipeline (sequence / if / loop-until / keep / fallback)
 """
 from .evaluator import Evaluator
-from .generators import CoordinateDescent, Generator, SurrogateFit
+from .generators import (
+    CoordinateDescent,
+    FormulaMethod,
+    Generator,
+    GridScan,
+    NelderMead,
+    SurrogateFit,
+)
 from .orchestrator import Orchestrator
 from .vocs import VOCS, Objective, ObjectiveMode, Variable
 
 __all__ = [
     "VOCS", "Variable", "Objective", "ObjectiveMode",
-    "Evaluator", "Generator", "CoordinateDescent", "SurrogateFit",
-    "Orchestrator",
+    "Evaluator", "Orchestrator", "Generator",
+    "GridScan", "CoordinateDescent", "NelderMead", "SurrogateFit", "FormulaMethod",
 ]

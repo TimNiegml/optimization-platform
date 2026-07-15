@@ -6,9 +6,16 @@
 
 ```bash
 pip install -r requirements.txt
-python run_demo.py        # 命令行跑通完整示例
-streamlit run app.py      # 网页 UI（表单 + 实时收敛曲线）
+python run_demo.py            # 两阶段：找光(grid) → Nelder-Mead 精调 → 公式法均衡
+python run_demo.py loop       # 交替循环 + keep 约束 + 拟合失败回退
+streamlit run app.py          # 网页 UI（选工作流 + 实时收敛曲线）
+python -m pytest -q           # 回归测试（6 种算法 + 2 条流水线）
 ```
+
+## 典型流程（两阶段，已支持）
+
+1. **Phase 1 · 找光**：`grid_scan`/`line_scan` 扫描到耦合功率阈值（stage 的 `stop.target`），一到首光即停。
+2. **Phase 2 · 优化**：`nelder_mead` / `coordinate_descent` 精调；`quadratic_fit` / `gaussian_fit` / `formula`(公式法) 定峰；带 `keep` 约束与失败 `fallback`。
 
 ## 用户使用架构
 
@@ -53,7 +60,7 @@ flowchart TB
 |----|------|------|
 | 问题声明 VOCS | `optplat/vocs.py` | 变量(范围)、目标(max/min/target)、约束 |
 | 评估接入 | `optplat/evaluator.py` | Python 函数适配 + 全量历史归档 |
-| 算法 Generator | `optplat/generators.py` | 坐标梯度(compass search)、拟合定峰(二次/高斯，**R² 守门 + 外推限幅**) |
+| 算法 Generator | `optplat/generators.py` | **6 种算法**：找光扫描(grid/line)、坐标下降、Nelder-Mead、拟合定峰(二次/高斯，**R² 守门+外推限幅**)、公式法(三点解析峰) |
 | 编排 Orchestrator | `optplat/orchestrator.py` | 顺序 / `if` / `loop{until, max_rounds}` / stage 停机 / **keep 约束(罚分回退)** / **拟合失败 fallback** / **全局早停** / 评估预算熔断 |
 | UI | `app.py` | 表单调范围、运行、实时收敛曲线、编排轨迹 |
 | 配置 | `pipeline_example.yaml` | 声明式流水线（= 那个"先优 y1 再优 y2 保持 y1>k"的例子） |

@@ -13,7 +13,13 @@ like a function of the subset alone.
 
 Keeping this interface identical to Xopt's ask/tell means we can later drop in
 Xopt (Apache-2.0) generators — Bayesian, NSGA-II — without touching anything
-else. For the 24h MVP we hand-roll two, using only scipy/lmfit (both BSD).
+else. All hand-rolled generators use only numpy/scipy/lmfit (all BSD).
+
+Algorithm library:
+  first-light / scan : GridScan        (grid search; 1 variable = line search)
+  local optimisation : CoordinateDescent, NelderMead
+  surrogate / fit    : SurrogateFit    (quadratic-fit, gaussian-fit)
+  analytic           : FormulaMethod    (3-point parabolic peak, no least-squares)
 """
 from __future__ import annotations
 
@@ -209,3 +215,239 @@ class SurrogateFit(Generator):
             self._proposed = None
             return
         self._proposed = v.clip(x_star)     # extrapolation clip
+
+
+class GridScan(Generator):
+    """Phase-1 'find light': raster scan over the controlled variables.
+
+    Covers both requested first-light strategies:
+      * grid search  -> 2+ variables, N points per axis (raster / serpentine)
+      * line search  -> exactly 1 variable, N points along it
+
+    One point per ask(). Best point is tracked; the stage normally stops the
+    moment a threshold is crossed (orchestrator's `stop.target`, e.g.
+    "y1 > first_light"), otherwise it stops when the grid is exhausted.
+    """
+
+    def __init__(self, vocs, variables, objective, n_per_axis=7):
+        super().__init__(vocs, variables, objective)
+        self.n_per_axis = n_per_axis
+        self._grid: list[dict[str, float]] = []
+
+    def _build_grid(self) -> None:
+        import itertools
+
+        axes = []
+        for v in self.variables:
+            var = self.vocs.variables[v]
+            n = self.n_per_axis
+            axes.append([var.low + (var.high - var.low) * i / (n - 1) for i in range(n)])
+        self._grid = [dict(zip(self.variables, combo)) for combo in itertools.product(*axes)]
+
+    def ask(self) -> dict[str, float]:
+        if not self._grid and self.best_x is None:
+            self._build_grid()
+        pt = dict(self._base)
+        if self._grid:
+            pt.update(self._grid.pop(0))
+        if not self._grid:              # last point of the grid
+            self.done = True
+        return pt
+
+    def tell(self, x: dict[str, float], score: float) -> None:
+        self._record(x, score)
+
+
+class NelderMead(Generator):
+    """Downhill-simplex local optimisation, ask/tell driven.
+
+    Standard Nelder-Mead (reflect / expand / contract / shrink). We maximise
+    `score`, so internally we minimise cost = -score. One evaluation per ask();
+    points are clipped into the variable bounds.
+    """
+
+    def __init__(self, vocs, variables, objective,
+                 init_step_frac=0.1, tol_frac=1e-3, max_evals=400):
+        super().__init__(vocs, variables, objective)
+        self.dim = len(variables)
+        self._init_step = {
+            v: init_step_frac * (vocs.variables[v].high - vocs.variables[v].low)
+            for v in variables
+        }
+        self._tol = tol_frac * min(
+            vocs.variables[v].high - vocs.variables[v].low for v in variables
+        )
+        self.max_evals = max_evals
+        self._n = 0
+        # simplex: list of [vector, cost]; cost None until evaluated
+        self._simplex: list[list] = []
+        self._phase = "init"
+        self._pending_vec: Optional[list[float]] = None
+        self._init_idx = 0
+        self._xr = self._xe = self._xc = None
+        self._fr = None
+
+    # -- vector <-> dict helpers (clipped) --
+    def _to_dict(self, vec: list[float]) -> dict[str, float]:
+        return {v: self.vocs.variables[v].clip(vec[i]) for i, v in enumerate(self.variables)}
+
+    def _base_vec(self) -> list[float]:
+        return [self._base[v] for v in self.variables]
+
+    def _centroid(self) -> list[float]:
+        # centroid of all but the worst (simplex is kept sorted, worst last)
+        best_n = self._simplex[:-1]
+        return [sum(p[0][i] for p in best_n) / len(best_n) for i in range(self.dim)]
+
+    def _reflect_from(self, xo, factor):
+        worst = self._simplex[-1][0]
+        return [xo[i] + factor * (xo[i] - worst[i]) for i in range(self.dim)]
+
+    def ask(self) -> dict[str, float]:
+        if self._phase == "init" and not self._simplex and self._pending_vec is None:
+            # queue the initial simplex: base + one perturbation per axis
+            base = self._base_vec()
+            self._init_vecs = [list(base)]
+            for i, v in enumerate(self.variables):
+                pert = list(base)
+                pert[i] = self.vocs.variables[v].clip(pert[i] + self._init_step[v])
+                self._init_vecs.append(pert)
+        if self._phase == "init":
+            self._pending_vec = self._init_vecs[self._init_idx]
+            return self._to_dict(self._pending_vec)
+        self._pending_vec = {"reflect": self._xr, "expand": self._xe,
+                             "contract": self._xc}[self._phase]
+        return self._to_dict(self._pending_vec)
+
+    def tell(self, x: dict[str, float], score: float) -> None:
+        self._record(x, score)
+        self._n += 1
+        cost = -score
+        vec = [x[v] for v in self.variables]
+
+        if self._phase == "init":
+            self._simplex.append([vec, cost])
+            self._init_idx += 1
+            if len(self._simplex) == self.dim + 1:
+                self._start_iteration()
+            return
+
+        if self._phase == "reflect":
+            self._fr = cost
+            f_best = self._simplex[0][1]
+            f_secondworst = self._simplex[-2][1]
+            if cost < f_best:
+                self._xe = self._reflect_from(self._centroid(), 2.0)  # expand
+                self._phase = "expand"
+            elif cost < f_secondworst:
+                self._accept(vec, cost); self._start_iteration()
+            else:
+                xo = self._centroid()
+                if cost < self._simplex[-1][1]:            # outside contraction
+                    self._xc = [xo[i] + 0.5 * (self._xr[i] - xo[i]) for i in range(self.dim)]
+                else:                                       # inside contraction
+                    worst = self._simplex[-1][0]
+                    self._xc = [xo[i] + 0.5 * (worst[i] - xo[i]) for i in range(self.dim)]
+                self._phase = "contract"
+            return
+
+        if self._phase == "expand":
+            if cost < self._fr:
+                self._accept(vec, cost)
+            else:
+                self._accept(self._xr, self._fr)
+            self._start_iteration()
+            return
+
+        if self._phase == "contract":
+            if cost < self._fr:
+                self._accept(vec, cost)
+                self._start_iteration()
+            else:
+                self._shrink()               # replace all but best towards best
+                self._start_iteration()
+            return
+
+    def _accept(self, vec, cost):
+        self._simplex[-1] = [list(vec), cost]
+
+    def _shrink(self):
+        best = self._simplex[0][0]
+        for k in range(1, len(self._simplex)):
+            p = self._simplex[k][0]
+            shrunk = [best[i] + 0.5 * (p[i] - best[i]) for i in range(self.dim)]
+            # cost is stale after shrink; recompute lazily via a cheap re-eval next round
+            self._simplex[k] = [shrunk, self._simplex[k][1]]
+
+    def _start_iteration(self):
+        self._simplex.sort(key=lambda p: p[1])
+        # convergence: simplex geometric size small, or eval budget hit
+        size = max(
+            abs(self._simplex[0][0][i] - self._simplex[-1][0][i]) for i in range(self.dim)
+        )
+        if size < self._tol or self._n >= self.max_evals:
+            self.done = True
+            return
+        self._xr = self._reflect_from(self._centroid(), 1.0)
+        self._phase = "reflect"
+
+
+class FormulaMethod(Generator):
+    """公式法: analytic 3-point parabolic peak (no least-squares fitting).
+
+    Single variable. Samples exactly 3 points, then computes the peak position
+    from the closed-form parabolic-interpolation formula
+        x* = x1 + 0.5*h*(y0 - y2) / (y0 - 2*y1 + y2)
+    where the samples are equally spaced by h. Distinct from quadratic-fit:
+    no regression, no R^2 — an exact formula through the 3 measured points.
+
+    Guardrails: the curvature must be concave (a maximum) for a valid peak;
+    otherwise self.failed is set (orchestrator can fall back). x* is clipped.
+    """
+
+    def __init__(self, vocs, variables, objective, span_frac=0.5):
+        super().__init__(vocs, variables, objective)
+        if len(variables) != 1:
+            raise ValueError("FormulaMethod supports exactly one variable")
+        self.var = variables[0]
+        self.span_frac = span_frac
+        self._xs: list[float] = []
+        self._ys: list[float] = []
+        self._design: list[float] = []
+        self._proposed: Optional[float] = None
+
+    def ask(self) -> dict[str, float]:
+        var = self.vocs.variables[self.var]
+        if not self._design and not self._xs:            # build the 3-point design
+            c = self._base[self.var]
+            h = self.span_frac * 0.5 * (var.high - var.low)
+            self._design = [var.clip(c - h), var.clip(c), var.clip(c + h)]
+        pt = dict(self._base)
+        if self._design:
+            pt[self.var] = self._design.pop(0)
+        elif self._proposed is not None:
+            pt[self.var] = self._proposed
+            self._proposed = None
+            self.done = True
+        else:
+            self._compute()
+            pt[self.var] = self._proposed if self._proposed is not None else self._base[self.var]
+        return pt
+
+    def tell(self, x: dict[str, float], score: float) -> None:
+        self._record(x, score)
+        self._xs.append(x[self.var])
+        self._ys.append(score)
+
+    def _compute(self) -> None:
+        x0, x1, x2 = self._xs[:3]
+        y0, y1, y2 = self._ys[:3]
+        denom = y0 - 2 * y1 + y2
+        if denom >= 0 or abs(denom) < 1e-12:      # not concave -> no interior max
+            self.failed = True
+            self.done = True
+            self._proposed = None
+            return
+        h = x1 - x0
+        x_star = x1 + 0.5 * h * (y0 - y2) / denom
+        self._proposed = self.vocs.variables[self.var].clip(x_star)

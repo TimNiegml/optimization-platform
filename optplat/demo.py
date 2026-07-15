@@ -38,6 +38,40 @@ def demo_vocs() -> VOCS:
     )
 
 
+# The canonical two-phase workflow:
+#   Phase 1  找光: grid-scan x1,x2 until coupling power crosses a threshold.
+#   Phase 2  优化: Nelder-Mead peaks y1, then 公式法 (analytic) tunes x3 for y2
+#            while keeping y1 > k. Global early-stop ends it once both are good.
+TWO_PHASE_PIPELINE = {
+    "until": "y1 >= 0.98 and y2 >= 0.95",
+    "flow": [
+        {                                   # --- Phase 1: find light ---
+            "stage": "find_light",
+            "algorithm": "grid_scan",
+            "variables": ["x1", "x2"],
+            "objective": "y1",
+            "n_per_axis": 7,
+            "stop": {"target": "y1 > 0.2"},         # stop scanning at first light
+        },
+        {                                   # --- Phase 2a: peak the coupling ---
+            "stage": "peak_y1",
+            "algorithm": "nelder_mead",
+            "variables": ["x1", "x2"],
+            "objective": "y1",
+            "stop": {"max_iter": 200},
+        },
+        {                                   # --- Phase 2b: balance y2 (公式法) ---
+            "stage": "balance_y2",
+            "algorithm": "formula",
+            "variables": ["x3"],
+            "objective": "y2",
+            "keep": "y1 > 0.8",
+            "fallback": "coordinate_descent",
+        },
+    ],
+}
+
+
 # The exact example the user described:
 #   先用 x1,x2 坐标梯度优化 y1，再用 x3 拟合优化 y2 并保持 y1>k，
 #   两步交替直到都收敛（受限循环，最多 6 轮）。

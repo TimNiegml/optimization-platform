@@ -27,7 +27,14 @@ from typing import Any, Optional
 from asteval import Interpreter
 
 from .evaluator import Evaluator
-from .generators import CoordinateDescent, Generator, SurrogateFit
+from .generators import (
+    CoordinateDescent,
+    FormulaMethod,
+    Generator,
+    GridScan,
+    NelderMead,
+    SurrogateFit,
+)
 from .vocs import VOCS
 
 
@@ -66,13 +73,21 @@ class Orchestrator:
         algo = step["algorithm"]
         variables = step["variables"]
         objective = step["objective"]
+        if algo in ("grid_scan", "line_scan"):        # phase-1 find-light
+            return GridScan(self.vocs, variables, objective,
+                            n_per_axis=step.get("n_per_axis", 7))
         if algo == "coordinate_descent":
             return CoordinateDescent(self.vocs, variables, objective)
+        if algo == "nelder_mead":
+            return NelderMead(self.vocs, variables, objective)
         if algo in ("quadratic_fit", "gaussian_fit"):
             model = "gaussian" if algo == "gaussian_fit" else "quadratic"
             return SurrogateFit(self.vocs, variables, objective, model=model,
                                 n_samples=step.get("n_samples", 5),
                                 r2_gate=step.get("r2_gate", 0.9))
+        if algo in ("formula", "formula_method"):      # 公式法, analytic peak
+            return FormulaMethod(self.vocs, variables, objective,
+                                 span_frac=step.get("span_frac", 0.5))
         raise ValueError(f"unknown algorithm: {algo}")
 
     # ---- run one measurement ----

@@ -1,0 +1,29 @@
+# The canonical two-phase workflow, as declarative config.
+#   import yaml; pipeline = yaml.safe_load(open("find_light_example.yaml"))
+#   Orchestrator(vocs, evaluator, pipeline).run()
+
+until: "y1 >= 0.98 and y2 >= 0.95"          # global early-stop
+
+flow:
+  # ---- Phase 1 · 找光 (grid search to first-light threshold) ----
+  - stage: find_light
+    algorithm: grid_scan          # 1 variable here would be line_scan
+    variables: [x1, x2]
+    objective: y1
+    n_per_axis: 7
+    stop: {target: "y1 > 0.2"}    # stop the moment coupling crosses threshold
+
+  # ---- Phase 2a · 精调耦合 (Nelder-Mead peak) ----
+  - stage: peak_y1
+    algorithm: nelder_mead
+    variables: [x1, x2]
+    objective: y1
+    stop: {max_iter: 200}
+
+  # ---- Phase 2b · 均衡 y2, 保持 y1>k (公式法, analytic) ----
+  - stage: balance_y2
+    algorithm: formula            # 3-point parabolic; or quadratic_fit / gaussian_fit
+    variables: [x3]
+    objective: y2
+    keep: "y1 > 0.8"
+    fallback: coordinate_descent  # if the analytic method reports non-concave
