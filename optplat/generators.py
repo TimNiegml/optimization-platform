@@ -451,3 +451,117 @@ class FormulaMethod(Generator):
         h = x1 - x0
         x_star = x1 + 0.5 * h * (y0 - y2) / denom
         self._proposed = self.vocs.variables[self.var].clip(x_star)
+
+
+class ParametricFit(Generator):
+    """公式法 / 非标拟合: fit a chosen model with user-KNOWN parameters pinned.
+
+    The distinction from SurrogateFit (a plain free fit) is that the user brings
+    domain knowledge and *pins* some parameters:
+      * a known vertex / peak location
+      * a known optical spot width sigma (a device characteristic)
+      * a known curvature
+    Only the remaining parameters are fitted — fewer points, more robust, and
+    with enough pinned it collapses to an exact "formula". Customers can also
+    pass an arbitrary custom model expression, so scenario-specific formulas
+    plug in without changing the platform.
+
+    Pipeline usage (single variable):
+        algorithm: parametric_fit
+        model: gaussian                       # or quadratic, or a custom expr:
+        #   model: "amp*exp(-((x-center)**2)/(2*sigma**2)) + offset"
+        fixed: {sigma: 0.25}                  # 已知参数钉死 (lmfit vary=False)
+        hints: {center: {value: 0.5, min: 0, max: 1.5}}   # 可选初值/边界
+
+    The optimum is read off by evaluating the *fitted* model on a dense grid
+    inside the variable range and taking the argmax — works for any model form
+    and is inherently range-clipped. R^2 gate + fallback as usual.
+    """
+
+    def __init__(self, vocs, variables, objective, model="quadratic",
+                 fixed=None, hints=None, n_samples=5, r2_gate=0.9):
+        super().__init__(vocs, variables, objective)
+        if len(variables) != 1:
+            raise ValueError("ParametricFit (MVP) supports exactly one variable")
+        self.var = variables[0]
+        self.model = model
+        self.fixed = dict(fixed or {})
+        self.hints = dict(hints or {})
+        self.n_samples = n_samples
+        self.r2_gate = r2_gate
+        self._xs: list[float] = []
+        self._ys: list[float] = []
+        self._design: list[float] = []
+        self._proposed: Optional[float] = None
+
+    def _build_design(self) -> None:
+        v = self.vocs.variables[self.var]
+        self._design = [v.low + (v.high - v.low) * i / (self.n_samples - 1)
+                        for i in range(self.n_samples)]
+
+    def ask(self) -> dict[str, float]:
+        if not self._design and not self._xs:
+            self._build_design()
+        if self._design:
+            val = self._design.pop(0)
+        elif self._proposed is not None:
+            val = self._proposed
+            self._proposed = None
+            self.done = True
+        else:
+            self._fit_and_propose()
+            val = self._proposed if self._proposed is not None \
+                else self.vocs.variables[self.var].clip(self._base[self.var])
+        pt = dict(self._base)
+        pt[self.var] = val
+        return pt
+
+    def tell(self, x: dict[str, float], score: float) -> None:
+        self._record(x, score)
+        self._xs.append(x[self.var])
+        self._ys.append(score)
+
+    def _build_model(self):
+        from lmfit.models import ExpressionModel, GaussianModel, QuadraticModel
+
+        if self.model == "quadratic":
+            return QuadraticModel()
+        if self.model == "gaussian":
+            return GaussianModel()
+        return ExpressionModel(self.model)     # custom, non-standard formula
+
+    def _fit_and_propose(self) -> None:
+        import numpy as np
+
+        xs = np.asarray(self._xs, float)
+        ys = np.asarray(self._ys, float)       # score space (higher = better)
+        v = self.vocs.variables[self.var]
+        try:
+            mod = self._build_model()
+            try:
+                params = mod.guess(ys, x=xs)   # builtin models can guess
+            except (NotImplementedError, AttributeError, Exception):
+                params = mod.make_params()     # custom expression: start from hints
+            for name, spec in self.hints.items():      # user initial values / bounds
+                if name in params:
+                    params[name].set(**spec)
+            for name, val in self.fixed.items():       # pin KNOWN parameters
+                if name in params:
+                    params[name].set(value=val, vary=False)
+            res = mod.fit(ys, params, x=xs)
+            r2 = getattr(res, "rsquared", 1.0)
+            # read the optimum off the fitted curve (range-clipped by construction)
+            xg = np.linspace(v.low, v.high, 501)
+            yg = np.asarray(res.eval(x=xg), float)
+            x_star = float(xg[int(np.argmax(yg))])
+        except Exception:
+            self.failed = True
+            self.done = True
+            self._proposed = None
+            return
+        if r2 < self.r2_gate:
+            self.failed = True
+            self.done = True
+            self._proposed = None
+            return
+        self._proposed = v.clip(x_star)

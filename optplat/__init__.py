@@ -13,6 +13,7 @@ from .generators import (
     Generator,
     GridScan,
     NelderMead,
+    ParametricFit,
     SurrogateFit,
 )
 from .orchestrator import Orchestrator
@@ -21,5 +22,6 @@ from .vocs import VOCS, Objective, ObjectiveMode, Variable
 __all__ = [
     "VOCS", "Variable", "Objective", "ObjectiveMode",
     "Evaluator", "Orchestrator", "Generator",
-    "GridScan", "CoordinateDescent", "NelderMead", "SurrogateFit", "FormulaMethod",
+    "GridScan", "CoordinateDescent", "NelderMead",
+    "SurrogateFit", "FormulaMethod", "ParametricFit",
 ]

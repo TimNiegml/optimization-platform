@@ -50,8 +50,9 @@ with right:
         ["grid_scan / line_scan", "找光 (Phase 1)", "网格/线扫描到阈值"],
         ["coordinate_descent", "局部优化", "坐标下降 (compass search)"],
         ["nelder_mead", "局部优化", "单纯形下降"],
-        ["quadratic_fit / gaussian_fit", "拟合定峰", "最小二乘 + R² 守门"],
-        ["formula", "公式法", "三点抛物线解析峰 (无回归)"],
+        ["quadratic_fit / gaussian_fit", "标准拟合", "最小二乘 + R² 守门"],
+        ["parametric_fit", "非标拟合/公式法", "钉死已知参数 + 自定义模型"],
+        ["formula", "解析特例", "三点抛物线峰 (无回归)"],
     ], columns=["algorithm", "类别", "说明"]))
 
     st.subheader("⑤ 编排流水线")

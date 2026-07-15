@@ -33,6 +33,7 @@ from .generators import (
     Generator,
     GridScan,
     NelderMead,
+    ParametricFit,
     SurrogateFit,
 )
 from .vocs import VOCS
@@ -85,9 +86,16 @@ class Orchestrator:
             return SurrogateFit(self.vocs, variables, objective, model=model,
                                 n_samples=step.get("n_samples", 5),
                                 r2_gate=step.get("r2_gate", 0.9))
-        if algo in ("formula", "formula_method"):      # 公式法, analytic peak
+        if algo in ("formula", "formula_method"):      # analytic 3-point peak
             return FormulaMethod(self.vocs, variables, objective,
                                  span_frac=step.get("span_frac", 0.5))
+        if algo in ("parametric_fit", "custom_fit"):   # 公式法 / 非标拟合
+            return ParametricFit(self.vocs, variables, objective,
+                                 model=step.get("model", "quadratic"),
+                                 fixed=step.get("fixed"),
+                                 hints=step.get("hints"),
+                                 n_samples=step.get("n_samples", 5),
+                                 r2_gate=step.get("r2_gate", 0.9))
         raise ValueError(f"unknown algorithm: {algo}")
 
     # ---- run one measurement ----

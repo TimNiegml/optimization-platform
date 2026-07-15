@@ -15,7 +15,24 @@ python -m pytest -q           # 回归测试（6 种算法 + 2 条流水线）
 ## 典型流程（两阶段，已支持）
 
 1. **Phase 1 · 找光**：`grid_scan`/`line_scan` 扫描到耦合功率阈值（stage 的 `stop.target`），一到首光即停。
-2. **Phase 2 · 优化**：`nelder_mead` / `coordinate_descent` 精调；`quadratic_fit` / `gaussian_fit` / `formula`(公式法) 定峰；带 `keep` 约束与失败 `fallback`。
+2. **Phase 2 · 优化**：`nelder_mead` / `coordinate_descent` 精调；`quadratic_fit` / `gaussian_fit` 定峰；带 `keep` 约束与失败 `fallback`。
+
+### 非标拟合 / 公式法（`parametric_fit`）
+
+拟合时把**已知参数钉死**，只解自由参数（点更少、更稳）；还能吃**自定义模型表达式**，客户的场景专属公式直接插进来：
+
+```yaml
+- stage: balance_y2
+  algorithm: parametric_fit
+  variables: [x3]
+  objective: y2
+  model: "amp*exp(-((x-center)**2)/(2*sigma**2)) + offset"  # 自定义模型，也可填 gaussian/quadratic
+  fixed: {sigma: 0.25}                    # 已知光斑宽度(器件特性)→钉死，只解 center/amp/offset
+  hints: {center: {value: 0.5, min: 0, max: 1.5}}
+  n_samples: 4
+```
+
+钉住 `sigma` 后 4 个点即解出峰位（实测 x3=0.600 精确命中）。参数钉够时就退化为闭式"公式"。
 
 ## 用户使用架构
 
@@ -60,7 +77,7 @@ flowchart TB
 |----|------|------|
 | 问题声明 VOCS | `optplat/vocs.py` | 变量(范围)、目标(max/min/target)、约束 |
 | 评估接入 | `optplat/evaluator.py` | Python 函数适配 + 全量历史归档 |
-| 算法 Generator | `optplat/generators.py` | **6 种算法**：找光扫描(grid/line)、坐标下降、Nelder-Mead、拟合定峰(二次/高斯，**R² 守门+外推限幅**)、公式法(三点解析峰) |
+| 算法 Generator | `optplat/generators.py` | **7 种算法**：找光扫描(grid/line)、坐标下降、Nelder-Mead、标准拟合(二次/高斯，**R²守门+外推限幅**)、**非标拟合 `parametric_fit`**(钉死已知参数+自定义模型)、公式法(三点解析) |
 | 编排 Orchestrator | `optplat/orchestrator.py` | 顺序 / `if` / `loop{until, max_rounds}` / stage 停机 / **keep 约束(罚分回退)** / **拟合失败 fallback** / **全局早停** / 评估预算熔断 |
 | UI | `app.py` | 表单调范围、运行、实时收敛曲线、编排轨迹 |
 | 配置 | `pipeline_example.yaml` | 声明式流水线（= 那个"先优 y1 再优 y2 保持 y1>k"的例子） |

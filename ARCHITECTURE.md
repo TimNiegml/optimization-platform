@@ -86,8 +86,9 @@ flowchart TB
   | `grid_scan` / `line_scan` | 找光 (Phase 1) | 栅格/线扫描，配 stage `stop.target` 到阈值即停 |
   | `coordinate_descent` | 局部优化 | compass search + 步长收缩 |
   | `nelder_mead` | 局部优化 | 单纯形下降（reflect/expand/contract/shrink，ask/tell 驱动） |
-  | `quadratic_fit` / `gaussian_fit` | 拟合定峰 | 最小二乘（lmfit），**R² 守门 + 外推限幅**，score 空间统一覆盖 max/min/target |
-  | `formula` (公式法) | 解析 | 三点抛物线闭式解峰，**无回归**；曲率非凹则 failed→fallback |
+  | `quadratic_fit` / `gaussian_fit` | 标准拟合定峰 | 最小二乘（lmfit）全自由拟合，**R² 守门 + 外推限幅**，score 空间统一覆盖 max/min/target |
+  | `parametric_fit` (公式法/非标拟合) | 带先验的拟合 | 把**已知参数钉死**（顶点/σ/曲率），只解自由参数；支持**自定义模型表达式**（客户非标公式）；参数钉够即退化成"公式"。lmfit `vary=False` + `ExpressionModel` |
+  | `formula` | 解析特例 | 三点抛物线闭式解峰，**无回归**（= 参数全被点数定死的 parametric_fit 特例） |
 
 - **其余 wrapper 接开源**：贝叶斯→scikit-optimize(BSD)/Optuna(MIT)；多目标帕累托→pymoo(Apache)；
   更多无梯度→Nevergrad(MIT)；成熟组合→Xopt(Apache)。每个 wrapper ≈ 几十行。

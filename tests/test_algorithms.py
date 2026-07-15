@@ -44,6 +44,28 @@ def test_single_var_methods_optimize_y2():
         assert r["objectives"]["y2"] > 0.95, algo
 
 
+def test_parametric_fit_with_pinned_params():
+    # 公式法 / 非标拟合: pin known parameters, fit only the rest.
+    pre = {"stage": "pre", "algorithm": "nelder_mead", "variables": ["x1", "x2"],
+           "objective": "y1", "stop": {"max_iter": 100}}
+    # (a) custom expression with a known optical spot width sigma pinned
+    custom = "amp * exp(-((x - center)**2) / (2 * sigma**2)) + offset"
+    r = _run({"flow": [pre, {
+        "stage": "nonstd", "algorithm": "parametric_fit", "variables": ["x3"],
+        "objective": "y2", "model": custom, "fixed": {"sigma": 0.25},
+        "hints": {"center": {"value": 0.5, "min": 0, "max": 1.5},
+                  "amp": {"value": 1.0}, "offset": {"value": 0.0}},
+        "n_samples": 4, "r2_gate": 0.0}]})
+    assert r["objectives"]["y2"] > 0.98
+    assert abs(r["state"]["x3"] - 0.6) < 0.05
+    # (b) builtin gaussian with the vertex/center pinned
+    r = _run({"flow": [pre, {
+        "stage": "pin", "algorithm": "parametric_fit", "variables": ["x3"],
+        "objective": "y2", "model": "gaussian", "fixed": {"center": 0.6},
+        "n_samples": 4, "r2_gate": 0.0}]})
+    assert r["objectives"]["y2"] > 0.98
+
+
 def test_two_phase_pipeline_converges():
     r = _run(TWO_PHASE_PIPELINE)
     assert r["objectives"]["y1"] > 0.98
