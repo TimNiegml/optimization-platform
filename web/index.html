@@ -159,8 +159,8 @@ const API = location.origin;
 let catalog = [], vocs = {variables:{}, objectives:{}};
 let nodes = [], edges = [], seq = 0, sel = null, selEdge = null, connectFrom = null;
 let fontScale = 13;
-let lastHistory = [], objKeys = [];
-let chartMode = 'all', chartInterval = 5;
+let lastHistory = [], objKeys = [], varKeys = [];
+let chartMode = 'all', chartInterval = 5, chartSeries = 'obj';
 const COLORS = ['#4f8cff','#39d98a','#f5a623','#c678dd','#e06c75','#56b6c2'];
 
 async function boot() {
@@ -168,6 +168,7 @@ async function boot() {
     catalog = (await (await fetch(API + '/catalog')).json()).algorithms;
     vocs = await (await fetch(API + '/vocs')).json();
     objKeys = Object.keys(vocs.objectives);
+    varKeys = Object.keys(vocs.variables);
     document.getElementById('conn').textContent = '已连接 · ' + catalog.length + ' 种算法';
     const pal = document.getElementById('palList');
     pal.innerHTML = '';
@@ -399,17 +400,22 @@ async function run(){
 
 // ---- objective trajectory chart ----
 function renderChart(){
-  const box = document.getElementById('chartBox'); if(!box) return;
-  const keys = objKeys.filter(k => lastHistory.some(r => k in r && r[k]!=null));
-  if(!keys.length){ box.innerHTML=''; return; }
+  const box = document.getElementById('chartBox'); if(!box || !lastHistory.length){ if(box) box.innerHTML=''; return; }
+  const group = chartSeries==='vars' ? varKeys : objKeys;
+  const keys = group.filter(k => lastHistory.some(r => k in r && r[k]!=null));
   const total = lastHistory.length;
   const ctl = `<div class="chart-ctl">
-      <span>轨迹 <span class="info" data-tip="目标函数随评估次数的变化。评估点很多时选『间隔 N 点』只画每第 N 个点，看整体收敛更清楚。">i</span></span>
+      <span>轨迹 <span class="info" data-tip="目标 y / 变量 x 随评估次数的变化，看是否收敛。评估点很多时选『间隔 N 点』只画每第 N 个点，看整体趋势更清楚。『下载轨迹』导出每次评估的全部 x 和 y。">i</span></span>
+      <select id="chartSeries" onchange="chartSeries=this.value; renderChart()">
+        <option value="obj" ${chartSeries==='obj'?'selected':''}>目标 y</option>
+        <option value="vars" ${chartSeries==='vars'?'selected':''}>变量 x</option>
+      </select>
       <select id="chartMode" onchange="chartMode=this.value; renderChart()">
         <option value="all" ${chartMode==='all'?'selected':''}>全部 (${total})</option>
         <option value="interval" ${chartMode==='interval'?'selected':''}>间隔取点</option>
       </select>
       <span ${chartMode==='interval'?'':'style="display:none"'} id="ivBox">每 <input type="number" min="1" value="${chartInterval}" onchange="chartInterval=Math.max(1,+this.value||1); renderChart()"> 点</span>
+      <button class="ghost" style="padding:3px 9px;font-size:11px" onclick="downloadTrajectory()" data-tip="把完整轨迹导出成 CSV：每次评估的 stage、所有自变量 x 和因变量 y，可用 Excel 打开。">⭳ 下载轨迹</button>
     </div>`;
   // build sampled index list (always keep the last point so the final value shows)
   let idx = [...lastHistory.keys()];
@@ -417,7 +423,30 @@ function renderChart(){
     idx = idx.filter(i => i % chartInterval === 0);
     if(idx[idx.length-1] !== total-1) idx.push(total-1);
   }
-  box.innerHTML = ctl + svgChart(keys, idx) + legend(keys);
+  const chart = keys.length ? svgChart(keys, idx) + legend(keys)
+    : '<p class="hint">该分组无可绘制的数据。</p>';
+  box.innerHTML = ctl + chart;
+}
+
+// export the full trajectory (every evaluation's x and y) as CSV
+function downloadTrajectory(){
+  if(!lastHistory.length) return;
+  const extra = [...new Set(lastHistory.flatMap(r => Object.keys(r)))]
+    .filter(k => k!=='stage' && !varKeys.includes(k) && !objKeys.includes(k));
+  const cols = ['#', 'stage', ...varKeys, ...objKeys, ...extra];
+  const cell = v => {
+    if(v==null) return '';
+    const s = String(v);
+    return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  };
+  const lines = [cols.join(',')];
+  lastHistory.forEach((r,i) => lines.push([i, ...cols.slice(1).map(c => cell(r[c]))].join(',')));
+  const blob = new Blob(['﻿'+lines.join('\n')], {type:'text/csv;charset=utf-8'});  // BOM → Excel 中文不乱码
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'trajectory_' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'-') + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 function svgChart(keys, idx){
