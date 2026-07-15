@@ -103,6 +103,46 @@ flowchart TB
 - `keep` 约束：违反罚分（后续升级为贝叶斯的可行性感知采集函数）；`fallback`：拟合守门失败自动降级坐标梯度。
 - YAML 嵌套块 ↔ 画布控制节点是同一状态机的两种同构视图。
 
+### 2.3.1 两种 IR、一个执行核（块 / 图，Dify 风格）
+
+编排引擎是 **JSON 驱动**的，同一份 `StageEngine`（`optplat/engine.py`）被两种前端复用：
+
+| IR 形态 | driver | 适合 |
+|---|---|---|
+| **嵌套块** `flow: [stage, if{then/else}, loop{body,until,max_rounds}]` | `Orchestrator` | 表单 / YAML / 手写 |
+| **节点+连线图** `{nodes, edges}` | `GraphRunner`（`optplat/graph.py`） | **托拉拽画布（React Flow）直接产出的 JSON** |
+
+图直接当状态机跑，**无编译步骤，JSON 即可运行**：
+- **分支**：节点的出边按序判断，第一个 `condition` 为真的边胜出，否则走无条件默认边（= if/switch）。
+- **循环**：一条边指回先前节点即回环，`condition` 为真时继续循环；受 **节点 `max_visits` + 全局 `max_steps`** 双重限幅（无死循环）。
+- `to_mermaid(graph)` 可把图渲染出来（画布落地前的替身视图）。
+
+这就是你要的"生成 JSON → 类 Dify → 运行"：画布只负责产 `{nodes,edges}` JSON，`GraphRunner` 直接执行。
+
+### 2.3.2 算法即插件（registry，"定好接口就能接上"）
+
+`optplat/registry.py` 是算法节点的插件契约。每个算法声明 **参数 schema + builder**，引擎从不 hard-code 算法名——只调 `build_generator()`。
+
+- **画布读取** `algorithm_catalog()` 自动生成节点面板 + 每个节点的配置表单。
+- **接自己的算法**：实现 `Generator`（`ask/tell/done/best_x` 四件套），`register_algorithm(AlgorithmSpec(...))` 注册，立刻成为可拖拽节点并能在任意图/流水线里运行——**引擎零改动**（已测：自定义 random_search 插件直接跑通）。
+
+```python
+class MyGen(Generator): ...            # ask()->下一组x, tell(x,score), done, best_x
+register_algorithm(AlgorithmSpec(
+    name="my_algo", category="custom", single_var=False,
+    params={"gain": {"type": "float", "default": 1.0}},
+    builder=lambda vocs, step: MyGen(vocs, step["variables"], step["objective"],
+                                     gain=step.get("gain", 1.0))))
+```
+
+### 2.3.3 托拉拽画布（前端，React Flow·MIT）——落地方式
+
+后端已就绪，前端是一层薄壳：
+1. 画布调后端 `algorithm_catalog()` 拿到算法清单+参数 schema → 渲染左侧节点面板与配置表单。
+2. 用户拖拽连线 → 前端序列化成 `{nodes, edges}` JSON（就是 `workflow_graph_example.json` 那种）。
+3. JSON POST 给后端 → `GraphRunner(...).run()` 执行 → 回传 events/收敛曲线/最优点。
+4. 保存/版本化/分享的就是这份 JSON。React Flow(MIT)、rjsf(Apache) 均 permissive。
+
 ### 2.4 评估接入层 Evaluator（函数版 + 硬件版均已实现）
 - 契约：`evaluate(dict[x]) -> dict[y]`，自变量/因变量数目任意；全量历史自动归档。
 - ✅ `HardwareEvaluator`（`optplat/hardware.py`）：duck-typed `stage.move()` + `meter.read()`；
@@ -148,7 +188,9 @@ flowchart TB
 | **P0 · MVP** | VOCS + 坐标梯度 + 拟合定峰(R²门/限幅/回退) + if/loop/until 编排 + keep 约束 + Streamlit + YAML IR | ✅ 已完成并跑通 |
 | **P1a · 算法库** | 找光扫描(grid/line)、Nelder-Mead、公式法(三点解析)；两阶段"找光→优化"流程；回归测试 | ✅ 已完成（6 种算法，两阶段 62 次评估收敛，5 tests 通过） |
 | **P1b · 硬件+持久化** | Optuna 贝叶斯 wrapper(TPE/GP)、PyVISA/仿真硬件适配器 + 稳定时间/平均/独立安全限位、SQLite 归档/续跑/回滚 | ✅ 已完成（11 tests 通过；含 global-until 状态一致性修复） |
-| **P1c · 多目标** | pymoo NSGA-II wrapper、异步/批量 Evaluator | 下一步 |
+| **P1c · 图运行时+插件** | node+edge 图 IR + `GraphRunner`（分支/受限循环，Dify 风格，JSON 直接执行）；算法插件 registry（自定义算法零改动接入）；graph→mermaid | ✅ 已完成（16 tests；含自定义算法插件、受限循环、分支测试） |
+| **P1d · 多目标** | pymoo NSGA-II wrapper、异步/批量 Evaluator | 下一步 |
+| **P3 · 画布前端** | React Flow(MIT) 画布：读 `algorithm_catalog()` 建面板，产 `{nodes,edges}` JSON，POST 给 `GraphRunner` | 后端已就绪 |
 | **P2 · 易用性** | JSON Schema 正式化 + rjsf 表单、场景模板库、GLM5.1 Copilot（意图→IR / IR→人话 / 跑后诊断） | |
 | **P3 · 平台化** | React Flow 画布（节点↔IR 双向）、FastAPI 服务化 + 多用户/任务队列、scan 模式与建模类任务闭环 | |
 

@@ -57,6 +57,17 @@ python demo_hardware.py
 
 ---
 
+## C2. 图 JSON（Dify 风格）直接运行
+
+```bash
+python run_graph.py                       # 跑 workflow_graph_example.json
+python run_graph.py my_workflow.json      # 跑你自己的图
+```
+
+`workflow_graph_example.json` 是 `{nodes, edges}` 的节点+连线图（**未来托拉拽画布产出的就是这种 JSON**），
+含一个 `balance_y2 ⇄ refine_y1` 的循环回边。脚本会先打印 mermaid 图（可粘到任意 mermaid 查看器预览），
+再直接执行——**没有编译步骤，JSON 即运行**。自定义算法只需实现 `ask/tell` 并 `register_algorithm(...)` 即成为可用节点。
+
 ## D. 跑测试（确认一切正常）
 
 ```bash

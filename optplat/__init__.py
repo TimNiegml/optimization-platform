@@ -23,7 +23,9 @@ from .hardware import (
     SimulatedMeter,
     SimulatedStage,
 )
+from .graph import GraphRunner, to_mermaid
 from .orchestrator import Orchestrator
+from .registry import AlgorithmSpec, algorithm_catalog, build_generator, register_algorithm
 from .store import SQLiteStore, rollback_to_best
 from .vocs import VOCS, Objective, ObjectiveMode, Variable
 
@@ -36,6 +38,9 @@ __all__ = [
     "HardwareEvaluator", "SafetyLimits", "SafetyViolation",
     "SimulatedStage", "SimulatedMeter",
     "SQLiteStore", "rollback_to_best",
+    # graph runtime + plug-in registry
+    "GraphRunner", "to_mermaid",
+    "register_algorithm", "AlgorithmSpec", "algorithm_catalog", "build_generator",
 ]
 
 # BayesianGenerator is imported lazily (see orchestrator) to keep optuna optional.

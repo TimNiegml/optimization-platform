@@ -72,6 +72,40 @@ TWO_PHASE_PIPELINE = {
 }
 
 
+# The SAME two-phase workflow, authored as a node+edge graph (Dify-style).
+# A drag-drop canvas would emit exactly this JSON; GraphRunner runs it directly.
+# Includes a loop: balance_y2 <-> refine_y1 alternate until both converge.
+TWO_PHASE_GRAPH = {
+    "until": "y1 >= 0.98 and y2 >= 0.95",
+    "nodes": [
+        {"id": "start", "type": "start"},
+        {"id": "find_light", "type": "algorithm", "data": {
+            "algorithm": "grid_scan", "variables": ["x1", "x2"], "objective": "y1",
+            "n_per_axis": 7, "stop": {"target": "y1 > 0.2"}}},
+        {"id": "peak_y1", "type": "algorithm", "data": {
+            "algorithm": "nelder_mead", "variables": ["x1", "x2"], "objective": "y1",
+            "stop": {"max_iter": 200}}},
+        {"id": "balance_y2", "type": "algorithm", "max_visits": 6, "data": {
+            "algorithm": "formula", "variables": ["x3"], "objective": "y2",
+            "keep": "y1 > 0.8", "fallback": "coordinate_descent"}},
+        {"id": "refine_y1", "type": "algorithm", "max_visits": 6, "data": {
+            "algorithm": "coordinate_descent", "variables": ["x1", "x2"],
+            "objective": "y1", "stop": {"max_iter": 100}}},
+        {"id": "end", "type": "end"},
+    ],
+    "edges": [
+        {"source": "start", "target": "find_light"},
+        {"source": "find_light", "target": "peak_y1"},
+        {"source": "peak_y1", "target": "balance_y2"},
+        {"source": "balance_y2", "target": "refine_y1"},
+        # loop back while not yet converged, else fall through to end
+        {"source": "refine_y1", "target": "balance_y2",
+         "condition": "not (y1 >= 0.95 and y2 >= 0.9)"},
+        {"source": "refine_y1", "target": "end"},
+    ],
+}
+
+
 # The exact example the user described:
 #   先用 x1,x2 坐标梯度优化 y1，再用 x3 拟合优化 y2 并保持 y1>k，
 #   两步交替直到都收敛（受限循环，最多 6 轮）。
