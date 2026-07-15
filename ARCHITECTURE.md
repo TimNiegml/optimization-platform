@@ -189,8 +189,9 @@ register_algorithm(AlgorithmSpec(
 | **P1a · 算法库** | 找光扫描(grid/line)、Nelder-Mead、公式法(三点解析)；两阶段"找光→优化"流程；回归测试 | ✅ 已完成（6 种算法，两阶段 62 次评估收敛，5 tests 通过） |
 | **P1b · 硬件+持久化** | Optuna 贝叶斯 wrapper(TPE/GP)、PyVISA/仿真硬件适配器 + 稳定时间/平均/独立安全限位、SQLite 归档/续跑/回滚 | ✅ 已完成（11 tests 通过；含 global-until 状态一致性修复） |
 | **P1c · 图运行时+插件** | node+edge 图 IR + `GraphRunner`（分支/受限循环，Dify 风格，JSON 直接执行）；算法插件 registry（自定义算法零改动接入）；graph→mermaid | ✅ 已完成（16 tests；含自定义算法插件、受限循环、分支测试） |
+| **P2 · 服务化** | FastAPI(MIT) 后端：`/catalog` `/vocs` `/run/graph` `/run/pipeline`（`optplat/api.py`） | ✅ 已完成（7 API 测试） |
+| **P2 · 画布前端** | 托拉拽画布（`web/index.html`，纯 vanilla JS+SVG，无 CDN，离线可用）：读 `/catalog` 建节点面板，拖拽连线产 `{nodes,edges}` JSON，POST `/run/graph`，出收敛曲线/轨迹 | ✅ 已完成（服务于 `/`；node --check 通过） |
 | **P1d · 多目标** | pymoo NSGA-II wrapper、异步/批量 Evaluator | 下一步 |
-| **P3 · 画布前端** | React Flow(MIT) 画布：读 `algorithm_catalog()` 建面板，产 `{nodes,edges}` JSON，POST 给 `GraphRunner` | 后端已就绪 |
 | **P2 · 易用性** | JSON Schema 正式化 + rjsf 表单、场景模板库、GLM5.1 Copilot（意图→IR / IR→人话 / 跑后诊断） | |
 | **P3 · 平台化** | React Flow 画布（节点↔IR 双向）、FastAPI 服务化 + 多用户/任务队列、scan 模式与建模类任务闭环 | |
 

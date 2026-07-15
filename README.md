@@ -8,11 +8,12 @@
 
 ```bash
 pip install -r requirements.txt
-streamlit run app.py          # A. 交互控制台（选工作流/算法/噪声/安全/归档 + 实时曲线）
-python run_demo.py            # B. 两阶段：找光 → Nelder-Mead 精调 → 公式法均衡
-python run_graph.py           # C. 节点+连线图 JSON（Dify 风格）直接执行 + mermaid 预览
-python demo_hardware.py       # D. 硬件接入 + 噪声/平均/安全 + 断点续跑 + 一键回滚
-python -m pytest -q           # E. 回归测试（算法 + 块/图流水线 + 硬件/归档，16 项）
+python -m optplat.api         # ★ 后端 + 托拉拽画布 → 打开 http://127.0.0.1:8000/
+streamlit run app.py          # 表单式交互控制台（选工作流/算法/噪声/安全 + 实时曲线）
+python run_demo.py            # 两阶段：找光 → Nelder-Mead 精调 → 公式法均衡
+python run_graph.py           # 节点+连线图 JSON（Dify 风格）直接执行 + mermaid 预览
+python demo_hardware.py       # 硬件接入 + 噪声/平均/安全 + 断点续跑 + 一键回滚
+python -m pytest -q           # 回归测试（算法 + 块/图/API + 硬件/归档，23 项）
 ```
 
 ## 典型流程（两阶段，已支持）

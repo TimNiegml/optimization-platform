@@ -68,6 +68,26 @@ python run_graph.py my_workflow.json      # 跑你自己的图
 含一个 `balance_y2 ⇄ refine_y1` 的循环回边。脚本会先打印 mermaid 图（可粘到任意 mermaid 查看器预览），
 再直接执行——**没有编译步骤，JSON 即运行**。自定义算法只需实现 `ask/tell` 并 `register_algorithm(...)` 即成为可用节点。
 
+## C3. 托拉拽画布 + 后端 API（Dify 式）
+
+```bash
+python -m optplat.api          # 起后端服务（默认 http://127.0.0.1:8000）
+```
+
+浏览器打开 **http://127.0.0.1:8000/** 就是画布：
+
+- 左侧「算法节点」点一下加节点（列表由后端 `/catalog` 动态生成，含你注册的自定义算法）
+- 拖节点标题移动；点节点右侧圆点，再点另一个节点 → **连线**
+- 点节点 → 右侧编辑变量/目标/参数/keep/stop.target；点连线可给**条件**（做分支或循环回边）
+- 顶部填全局 `until` 早停；左下选评估方式（纯函数/模拟硬件+噪声/平均/安全）
+- 点 **▶ 运行** → 右侧出指标 + 收敛曲线 + 编排轨迹
+- **载入示例** 一键放好"找光→精调→均衡"三节点
+
+画布**产出的就是 `{nodes, edges}` JSON**，POST 给 `/run/graph` 执行——和 `run_graph.py` 跑的是同一套。
+画布是纯 vanilla JS，无 CDN、可离线。
+
+后端接口：`GET /catalog`、`GET /vocs`、`POST /run/graph`、`POST /run/pipeline`（`/docs` 有自动 API 文档）。
+
 ## D. 跑测试（确认一切正常）
 
 ```bash

@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>光器件优化平台 · 画布</title>
+<style>
+  :root { --bg:#0f1420; --panel:#1a2233; --line:#2b3448; --accent:#4f8cff; --text:#e6ebf5; --muted:#8a95ab; --ok:#39d98a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Segoe UI", "PingFang SC", sans-serif; background:var(--bg); color:var(--text); height:100vh; overflow:hidden; }
+  #app { display:grid; grid-template-columns: 200px 1fr 300px; grid-template-rows: 46px 1fr; height:100vh; }
+  header { grid-column:1/4; display:flex; align-items:center; gap:12px; padding:0 14px; background:var(--panel); border-bottom:1px solid var(--line); }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  header .sp { flex:1; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:7px 12px; cursor:pointer; font-size:13px; }
+  button.ghost { background:var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  input, select { background:#0d1220; color:var(--text); border:1px solid var(--line); border-radius:5px; padding:5px 7px; font-size:12px; width:100%; }
+  label { font-size:11px; color:var(--muted); display:block; margin:8px 0 3px; }
+  aside { background:var(--panel); border-right:1px solid var(--line); padding:10px; overflow:auto; }
+  #palette h2, #inspector h2 { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin:4px 0 8px; }
+  .palItem { background:var(--line); border-radius:6px; padding:7px 9px; margin-bottom:6px; cursor:pointer; font-size:12px; display:flex; justify-content:space-between; }
+  .palItem span { color:var(--muted); font-size:10px; }
+  #canvasWrap { position:relative; overflow:hidden; background:
+     radial-gradient(circle, #223 1px, transparent 1px) 0 0/22px 22px, var(--bg); }
+  svg#edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+  .node { position:absolute; width:150px; background:var(--panel); border:1px solid var(--line); border-radius:8px; font-size:12px; user-select:none; box-shadow:0 3px 10px #0006; }
+  .node.sel { border-color:var(--accent); }
+  .node .hd { padding:6px 8px; border-bottom:1px solid var(--line); cursor:move; font-weight:600; display:flex; justify-content:space-between; }
+  .node .bd { padding:6px 8px; color:var(--muted); font-size:11px; }
+  .node .port { width:12px; height:12px; border-radius:50%; background:var(--accent); position:absolute; right:-7px; top:50%; cursor:crosshair; border:2px solid var(--panel); }
+  #inspector { border-left:1px solid var(--line); border-right:0; }
+  #results { margin-top:10px; }
+  #events { white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:11px; background:#0d1220; border-radius:6px; padding:8px; max-height:230px; overflow:auto; }
+  .metric { display:inline-block; background:var(--line); border-radius:6px; padding:6px 10px; margin:0 6px 6px 0; font-size:12px; }
+  .metric b { color:var(--ok); }
+  .hint { color:var(--muted); font-size:11px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>光器件优化平台 · 画布</h1>
+    <span class="hint" id="conn">连接后端中…</span>
+    <span class="sp"></span>
+    <input id="until" placeholder="全局早停 until, 如 y1>=0.98 and y2>=0.95" style="width:340px">
+    <button class="ghost" onclick="loadExample()">载入示例</button>
+    <button id="runBtn" onclick="run()">▶ 运行</button>
+  </header>
+
+  <aside id="palette">
+    <h2>算法节点</h2>
+    <div id="palList"></div>
+    <h2 style="margin-top:14px">评估</h2>
+    <label>方式</label>
+    <select id="evMode"><option value="function">纯函数</option><option value="hardware_sim">模拟硬件</option></select>
+    <label>噪声 σ</label><input id="evNoise" type="number" value="0" step="0.005">
+    <label>平均次数</label><input id="evAvg" type="number" value="1" min="1">
+    <label><input type="checkbox" id="evSafety" style="width:auto"> 安全限位</label>
+  </aside>
+
+  <div id="canvasWrap">
+    <svg id="edges"><defs>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#4f8cff"/></marker></defs>
+    </svg>
+  </div>
+
+  <aside id="inspector">
+    <h2>属性</h2>
+    <div id="inspBody"><p class="hint">点选一个节点编辑；点节点右侧圆点再点另一个节点可连线（连线可设条件做分支/循环）。</p></div>
+    <div id="results"></div>
+  </aside>
+</div>
+
+<script>
+const API = location.origin;
+let catalog = [], vocs = {variables:{}, objectives:{}};
+let nodes = [], edges = [], seq = 0, sel = null, connectFrom = null;
+
+async function boot() {
+  try {
+    catalog = (await (await fetch(API + '/catalog')).json()).algorithms;
+    vocs = await (await fetch(API + '/vocs')).json();
+    document.getElementById('conn').textContent = '已连接 · ' + catalog.length + ' 种算法';
+    const pal = document.getElementById('palList');
+    pal.innerHTML = '';
+    catalog.forEach(a => {
+      const d = document.createElement('div');
+      d.className = 'palItem';
+      d.innerHTML = `<span style="color:#e6ebf5">${a.name}</span><span>${a.category}</span>`;
+      d.onclick = () => addNode(a.name);
+      pal.appendChild(d);
+    });
+  } catch (e) { document.getElementById('conn').textContent = '后端未连接'; }
+}
+
+function spec(name){ return catalog.find(a => a.name === name) || {params:{}, single_var:false}; }
+
+function addNode(algo, at) {
+  const s = spec(algo);
+  const vars = Object.keys(vocs.variables);
+  const n = {
+    id: 'n' + (++seq), algorithm: algo,
+    variables: s.single_var ? [vars[vars.length-1]] : vars.slice(0, 2),
+    objective: Object.keys(vocs.objectives)[0] || 'y1',
+    params: Object.fromEntries(Object.entries(s.params||{}).map(([k,v])=>[k, v.default])),
+    keep: '', stopTarget: '',
+    x: at ? at.x : 60 + (nodes.length%4)*30, y: at ? at.y : 60 + nodes.length*70,
+  };
+  nodes.push(n); render(); select(n.id);
+}
+
+function render() {
+  const wrap = document.getElementById('canvasWrap');
+  [...wrap.querySelectorAll('.node')].forEach(e => e.remove());
+  nodes.forEach(n => {
+    const el = document.createElement('div');
+    el.className = 'node' + (sel===n.id ? ' sel':'');
+    el.style.left = n.x+'px'; el.style.top = n.y+'px';
+    el.innerHTML = `<div class="hd">${n.algorithm}<span style="color:#8a95ab">✕</span></div>
+      <div class="bd">${n.variables.join(',')} → ${n.objective}</div><div class="port"></div>`;
+    el.querySelector('.hd').onmousedown = e => startDrag(e, n);
+    el.querySelector('.hd span').onclick = e => { e.stopPropagation(); delNode(n.id); };
+    el.onclick = e => { if (connectFrom && connectFrom!==n.id) { addEdge(connectFrom, n.id); connectFrom=null; } else select(n.id); };
+    el.querySelector('.port').onclick = e => { e.stopPropagation(); connectFrom = n.id; document.getElementById('conn').textContent='连线中：点目标节点'; };
+    wrap.appendChild(el);
+  });
+  drawEdges();
+}
+
+function drawEdges() {
+  const svg = document.getElementById('edges');
+  [...svg.querySelectorAll('.edge')].forEach(e => e.remove());
+  const W = n => document.querySelector(`.node`); // noop
+  edges.forEach(ed => {
+    const a = nodes.find(n=>n.id===ed.source), b = nodes.find(n=>n.id===ed.target);
+    if (!a||!b) return;
+    const x1=a.x+150, y1=a.y+26, x2=b.x, y2=b.y+26;
+    const p = document.createElementNS('http://www.w3.org/2000/svg','path');
+    const mx=(x1+x2)/2;
+    p.setAttribute('d', `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+    p.setAttribute('class','edge'); p.setAttribute('fill','none');
+    p.setAttribute('stroke', ed.condition?'#f5a623':'#4f8cff');
+    p.setAttribute('stroke-width','2'); p.setAttribute('marker-end','url(#arrow)');
+    p.style.pointerEvents='stroke'; p.style.cursor='pointer';
+    p.onclick = () => selectEdge(ed);
+    svg.appendChild(p);
+    if (ed.condition) {
+      const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+      t.setAttribute('x',mx); t.setAttribute('y',(y1+y2)/2-4); t.setAttribute('fill','#f5a623');
+      t.setAttribute('font-size','10'); t.setAttribute('text-anchor','middle');
+      t.textContent = ed.condition.slice(0,26); svg.appendChild(t);
+    }
+  });
+}
+
+function addEdge(s,t){ edges.push({id:'e'+(++seq), source:s, target:t, condition:''}); document.getElementById('conn').textContent='已连接'; render(); }
+function delNode(id){ nodes=nodes.filter(n=>n.id!==id); edges=edges.filter(e=>e.source!==id&&e.target!==id); if(sel===id)sel=null; render(); inspectEmpty(); }
+
+let drag=null;
+function startDrag(e,n){ drag={n, dx:e.clientX-n.x, dy:e.clientY-n.y}; e.preventDefault(); }
+window.onmousemove = e => { if(drag){ drag.n.x=e.clientX-drag.dx; drag.n.y=e.clientY-drag.dy; render(); } };
+window.onmouseup = () => drag=null;
+window.onkeydown = e => { if(e.key==='Escape'){connectFrom=null; document.getElementById('conn').textContent='已连接';} };
+
+function select(id){ sel=id; render(); inspectNode(nodes.find(n=>n.id===id)); }
+
+function inspectEmpty(){ document.getElementById('inspBody').innerHTML='<p class="hint">点选节点编辑；点右侧圆点再点另一个节点可连线。</p>'; }
+
+function inspectNode(n){
+  if(!n) return;
+  const s = spec(n.algorithm);
+  const vars = Object.keys(vocs.variables);
+  let h = `<label>算法</label><input value="${n.algorithm}" disabled>`;
+  h += `<label>变量${s.single_var?'（单变量）':''}</label><div>`;
+  vars.forEach(v => { const on=n.variables.includes(v);
+    h += `<label style="display:inline-block;margin-right:8px;color:#e6ebf5"><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleVar('${n.id}','${v}',this.checked)"> ${v}</label>`; });
+  h += `</div><label>目标</label><select onchange="setF('${n.id}','objective',this.value)">`;
+  Object.keys(vocs.objectives).forEach(o => h += `<option ${o===n.objective?'selected':''}>${o}</option>`);
+  h += `</select>`;
+  Object.entries(s.params||{}).forEach(([k,meta]) => {
+    h += `<label>${k}</label><input value="${n.params[k]??meta.default??''}" onchange="setParam('${n.id}','${k}',this.value)">`;
+  });
+  h += `<label>keep 约束（可空，如 y1>0.8）</label><input value="${n.keep}" onchange="setF('${n.id}','keep',this.value)">`;
+  h += `<label>stop.target（可空，如 y1>0.2）</label><input value="${n.stopTarget}" onchange="setF('${n.id}','stopTarget',this.value)">`;
+  document.getElementById('inspBody').innerHTML = h;
+}
+
+function selectEdge(ed){
+  const c = prompt('这条边的条件（留空=默认边；填表达式则为分支/循环回边，如: not (y1>=0.95 and y2>=0.9)）', ed.condition||'');
+  if(c!==null){ ed.condition=c.trim(); render(); }
+}
+
+window.toggleVar=(id,v,on)=>{const n=nodes.find(x=>x.id===id);const s=spec(n.algorithm);
+  if(s.single_var){n.variables=on?[v]:[];} else {n.variables=on?[...new Set([...n.variables,v])]:n.variables.filter(x=>x!==v);} render();};
+window.setF=(id,f,v)=>{nodes.find(x=>x.id===id)[f]=v; render();};
+window.setParam=(id,k,v)=>{const n=nodes.find(x=>x.id===id); const num=Number(v); n.params[k]=(v!==''&&!isNaN(num))?num:v;};
+
+function toGraph(){
+  const gnodes = nodes.map(n => {
+    const data = {algorithm:n.algorithm, variables:n.variables, objective:n.objective, ...n.params};
+    if(n.keep) data.keep=n.keep;
+    if(n.stopTarget) data.stop={target:n.stopTarget};
+    return {id:n.id, type:'algorithm', data, position:{x:n.x,y:n.y}};
+  });
+  const gedges = edges.map(e => e.condition ? {source:e.source,target:e.target,condition:e.condition} : {source:e.source,target:e.target});
+  const g = {nodes:gnodes, edges:gedges};
+  const u = document.getElementById('until').value.trim(); if(u) g.until=u;
+  return g;
+}
+
+async function run(){
+  const btn=document.getElementById('runBtn'); btn.disabled=true; btn.textContent='运行中…';
+  const body = {graph:toGraph(), evaluator:{mode:document.getElementById('evMode').value,
+    noise:+document.getElementById('evNoise').value, averages:+document.getElementById('evAvg').value,
+    safety:document.getElementById('evSafety').checked}};
+  try {
+    const r = await fetch(API+'/run/graph',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d = await r.json();
+    if(!r.ok){ showResults(`<p style="color:#f66">${d.detail||'运行出错'}</p>`); return; }
+    const o=d.objectives;
+    let h=`<h2>结果</h2>`;
+    Object.entries(o).forEach(([k,v])=>h+=`<span class="metric">${k} <b>${(+v).toFixed(4)}</b></span>`);
+    h+=`<span class="metric">评估 <b>${d.n_evals}</b></span>`;
+    h+=sparkline(d.history);
+    h+=`<div id="events">${d.events.join('\n')}</div>`;
+    showResults(h);
+  } catch(e){ showResults(`<p style="color:#f66">${e}</p>`); }
+  finally { btn.disabled=false; btn.textContent='▶ 运行'; }
+}
+
+function sparkline(hist){
+  const keys=['y1','y2'].filter(k=>hist.some(r=>k in r));
+  if(!keys.length) return '';
+  const W=270,H=70; let svg=`<svg width="${W}" height="${H}" style="background:#0d1220;border-radius:6px;margin:6px 0">`;
+  const cols={y1:'#4f8cff',y2:'#39d98a'};
+  keys.forEach(k=>{ const ys=hist.map(r=>r[k]).filter(v=>v!=null); if(ys.length<2)return;
+    const mn=Math.min(...ys),mx=Math.max(...ys),rg=(mx-mn)||1;
+    const pts=ys.map((v,i)=>`${(i/(ys.length-1))*W},${H-6-((v-mn)/rg)*(H-12)}`).join(' ');
+    svg+=`<polyline points="${pts}" fill="none" stroke="${cols[k]}" stroke-width="1.5"/>`; });
+  return svg+'</svg>';
+}
+
+function showResults(h){ document.getElementById('results').innerHTML=h; }
+
+function loadExample(){
+  nodes=[]; edges=[]; seq=0;
+  document.getElementById('until').value='y1>=0.98 and y2>=0.95';
+  addNode('grid_scan',{x:40,y:70});   nodes[0].stopTarget='y1>0.2';
+  addNode('nelder_mead',{x:250,y:70});
+  addNode('formula',{x:460,y:70});     nodes[2].keep='y1>0.8'; nodes[2].variables=['x3']; nodes[2].objective='y2';
+  addEdge(nodes[0].id,nodes[1].id); addEdge(nodes[1].id,nodes[2].id);
+  select(nodes[0].id);
+}
+
+boot();
+</script>
+</body>
+</html>

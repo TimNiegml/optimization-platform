@@ -15,7 +15,13 @@ redistributed to customers without license contamination.
 | streamlit | Apache-2.0 | permissive |
 | pandas | BSD-3-Clause | permissive |
 | optuna | MIT | permissive |
+| fastapi | MIT | permissive |
+| uvicorn | BSD-3-Clause | permissive |
+| httpx | BSD-3-Clause | permissive |
 | sqlite3 | Python stdlib (PSF) | permissive |
+
+The drag-drop canvas (`web/index.html`) is dependency-free vanilla JS + SVG —
+no CDN, no bundler, works offline (suits closed-source / air-gapped use).
 
 ## Deliberately NOT used
 
