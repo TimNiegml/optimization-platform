@@ -4,12 +4,14 @@
 让用户接入任意 `y = f(x)` 优化函数、选择不同算法、加约束、并把多步策略
 （如"先优 y1，再优 y2 并保持 y1>k"）编排成带 `if / loop / 早停` 的流水线。
 
+**上手请看 [`DEMO.md`](DEMO.md)**（交互界面 + 命令行演示的完整走法）。
+
 ```bash
 pip install -r requirements.txt
-python run_demo.py            # 两阶段：找光(grid) → Nelder-Mead 精调 → 公式法均衡
-python run_demo.py loop       # 交替循环 + keep 约束 + 拟合失败回退
-streamlit run app.py          # 网页 UI（选工作流 + 实时收敛曲线）
-python -m pytest -q           # 回归测试（6 种算法 + 2 条流水线）
+streamlit run app.py          # A. 交互控制台（选工作流/算法/噪声/安全/归档 + 实时曲线）
+python run_demo.py            # B. 两阶段：找光 → Nelder-Mead 精调 → 公式法均衡
+python demo_hardware.py       # C. 硬件接入 + 噪声/平均/安全 + 断点续跑 + 一键回滚
+python -m pytest -q           # D. 回归测试（8 种算法 + 流水线 + 硬件/归档，11 项）
 ```
 
 ## 典型流程（两阶段，已支持）
