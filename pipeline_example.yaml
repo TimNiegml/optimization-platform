@@ -1,0 +1,31 @@
+# The exact example, as declarative config. Loads straight into Orchestrator:
+#   import yaml; pipeline = yaml.safe_load(open("pipeline_example.yaml"))
+#   Orchestrator(vocs, evaluator, pipeline).run()
+#
+# This is the "IR" every UI (form / drag-drop canvas / GLM5.1 copilot) edits.
+
+until: "y1 >= 0.98 and y2 >= 0.9"        # global early-stop, checked every eval
+
+flow:
+  - stage: align_y1                       # 先用 x1,x2 坐标梯度把耦合功率调到最大
+    algorithm: coordinate_descent
+    variables: [x1, x2]
+    objective: y1
+    stop: {max_iter: 200}
+
+  - loop:                                 # 两步交替，受限循环（必须有 max_rounds）
+      max_rounds: 6
+      until: "y1 >= 0.95 and y2 >= 0.9"
+      body:
+        - stage: balance_y2               # 用 x3 拟合定峰优化 y2
+          algorithm: quadratic_fit
+          variables: [x3]
+          objective: y2
+          keep: "y1 > 0.8"                # 保持 y1>k，违反则罚分回退
+          fallback: coordinate_descent    # 拟合 R² 不达标 → 自动降级
+
+        - stage: refine_y1
+          algorithm: coordinate_descent
+          variables: [x1, x2]
+          objective: y1
+          stop: {max_iter: 100}

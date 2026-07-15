@@ -1,0 +1,9 @@
+# All permissive (MIT / BSD / Apache-2.0) — safe for closed-source / redistribution.
+pydantic>=2.0      # MIT     — VOCS / config schema + validation
+numpy              # BSD-3   — numerics
+scipy              # BSD-3   — line search / optimization primitives
+lmfit              # BSD-3   — quadratic / gaussian curve fitting (R², bounds)
+asteval            # MIT     — whitelisted safe evaluation of if/loop conditions
+pyyaml             # MIT     — declarative pipeline config
+streamlit          # Apache-2.0 — MVP web UI
+pandas             # BSD-3   — history / plotting
