@@ -1,0 +1,109 @@
+# CLAUDE.md — 项目上下文与继续指南
+
+> 这份文件是给 Claude Code 新会话的"接手说明"。读完它 + `ARCHITECTURE.md` 就能无缝继续。
+> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 23 项全过）。
+
+---
+
+## 1. 项目意图（用户的原始目标）
+
+做一个**优化算法平台**，让客户快速搭建自己的优化流程，主要用于**光器件耦合、光器件标定、WDL 打架均衡**等场景。核心诉求：
+
+1. **接入不同自变量/因变量数目的优化函数** `y1,y2,... = f(x1,x2,...)`；目标可以是
+   最大/最小化、到某个**目标值**（可能需建模反解）、或**按范围扫描**（产特性曲线）。
+2. **可换算法**（坐标下降、贝叶斯、拟合定峰等）。
+3. **可加约束**（如优化 y2 时保持 y1>k）。
+4. **可接入非标优化函数/逻辑**（特殊场景的专属逻辑与拟合）。
+5. 让**不懂代码的用户**也能用 → 最终要**托拉拽画布**（Dify 风格：拖节点连线生成 JSON，JSON 驱动运行）。
+
+典型流程：**第一阶段找光**（grid/line 扫描到阈值）→ **第二阶段优化**（精调/拟合/贝叶斯，带约束）。
+
+## 2. 硬约束（不可违背）
+
+- **闭源自用/交付给客户** → **依赖必须全部 permissive（MIT/BSD/Apache）**。
+- **绝不引入 GPL/LGPL/AGPL 或 fair-code**：已明确排除 **Badger(GPL-3.0)** 和 **n8n(Sustainable Use License)**。
+- 新增依赖前**先核实 license**，permissive 才用，并登记进 `THIRD_PARTY_LICENSES.md`。
+- 不放开源 LICENSE 文件（闭源，无 license = 保留所有权利）。
+- 公司内部有 **GLM5.1** 资源，未来做自然语言→IR 的 Copilot（用它，不用外部 LLM）。
+
+## 3. 架构一句话
+
+**声明式 IR 是唯一真相**（VOCS + pipeline/graph JSON）；所有 UI（表单/画布/未来 Copilot）都只是它的编辑器；
+执行引擎只认 IR。**算法用开源 wrapper，编排自研，安全护栏独立且不可关闭。** 详见 `ARCHITECTURE.md`。
+
+分层与文件对应：
+
+| 层 | 文件 | 说明 |
+|---|---|---|
+| 问题声明 VOCS | `optplat/vocs.py` | 变量/目标(max·min·target·scan)/约束，Pydantic |
+| 算法 Generator（ask/tell） | `optplat/generators.py` | 自研：grid/line 扫描、坐标下降、Nelder-Mead、二次/高斯拟合、公式法(非标拟合)、三点解析 |
+| 贝叶斯（OSS wrapper） | `optplat/bayes.py` | Optuna(MIT) TPE/GP，惰性导入 |
+| 算法插件 registry | `optplat/registry.py` | 参数 schema + builder；**自定义算法零改动接入**；画布读它建面板 |
+| 执行核（共享） | `optplat/engine.py` | `StageEngine`：跑一个 stage、条件求值、全局早停、预算熔断 |
+| 编排（块式） | `optplat/orchestrator.py` | flow / if / loop{until,max_rounds} |
+| 编排（图式，Dify） | `optplat/graph.py` | `GraphRunner` 直接跑 {nodes,edges}；分支=条件边，循环=回边(max_visits/max_steps 限幅)；`to_mermaid` |
+| 评估接入 | `optplat/evaluator.py` `optplat/hardware.py` | 函数版 + 硬件版(稳定时间/平均/**独立安全限位** clamp)；含仿真 stage/meter |
+| 持久化 | `optplat/store.py` | SQLite 归档 / 断点续跑(start_point) / 一键回滚(rollback_to_best) |
+| 后端 API | `optplat/api.py` | FastAPI：`/catalog` `/vocs` `/run/graph` `/run/pipeline` `/`(画布) |
+| 托拉拽画布 | `web/index.html` | **纯 vanilla JS+SVG，无 CDN，离线可用**；产 {nodes,edges} JSON |
+| 表单 UI | `app.py` | Streamlit 交互控制台（早期 MVP 面） |
+| 仿真台/示例 | `optplat/demo.py` | `optical_bench` 模拟光耦合；`TWO_PHASE_*` 示例流程 |
+
+## 4. 当前状态（已完成，全部有测试）
+
+- **P0 MVP**：VOCS + 坐标下降 + 拟合(R²守门/外推限幅/回退) + if/loop/until 编排 + keep 约束 + Streamlit + YAML。
+- **P1a 算法库**：grid/line 扫描、Nelder-Mead、公式法；两阶段"找光→优化"。
+- **P1b**：Optuna 贝叶斯 wrapper；硬件适配器(噪声/平均/**安全限位**) + 仿真；SQLite 归档/续跑/回滚。
+  （含修复：全局 `until` 中途触发时同步操作点，保证 state 与 objectives 一致。）
+- **P1c 图运行时 + 插件**：node+edge 图 IR + `GraphRunner`（分支/受限循环）；算法插件 registry；graph→mermaid。
+- **P2 服务化 + 画布**：FastAPI 后端；vanilla JS 托拉拽画布（served at `/`）。
+- **测试**：`python -m pytest -q` → **23 项全过**（algorithms / graph / p1b / api）。
+
+算法库（8 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
+`nelder_mead` `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula` `bayesian`。
+
+## 5. 路线图（下一步候选，未做）
+
+- **P1d 多目标**：pymoo(Apache) NSGA-II wrapper（真帕累托前沿）；异步/批量 Evaluator（贝叶斯 batch、多通道并行）。
+- **真实硬件**：把 `SimulatedStage/SimulatedMeter` 换成 **PyVISA/PyMeasure(MIT)** 封装的真实电机台/功率计
+  `move(axis,value)`/`read()->dict`（按客户仪器型号写），其余不动。
+- **GLM5.1 Copilot**：自然语言→IR（用 Instructor/Guardrails 做 schema 护栏），IR→人话解释/跑后诊断。
+- **画布增强**：撤销/重排、保存/加载图 JSON、多目标帕累托可视化、`scan` mode 执行器（schema 已占位）。
+- **服务化增强**：多用户/任务队列、把 VOCS 与 Evaluator 也做成可注册插件（目前 API 默认用 demo 光耦合台）。
+
+## 6. 待办 / 待用户反馈的点（重要）
+
+- **画布交互未经浏览器可视化验证**：仅确认 JS 通过 `node --check`、`GET /` 返回 200、示例 JSON 能跑通。
+  拖拽手感/连线视觉/编辑面板是否好用，**等用户打开 `http://127.0.0.1:8000/` 后反馈**再修。
+- 用户会继续提需求（真实目标函数形态、WDL 均衡具体判据、仪器型号、界面细节）——按需迭代。
+
+## 7. 关键决策与理由（别推翻，除非用户要求）
+
+- **不用 Xopt/Badger 起步**：Xopt(Apache) 可接但学习成本高；Badger 是 GPL，**只可参考不可用**。保留 ask/tell 接口与其兼容。
+- **不用 n8n**：fair-code，明文禁止嵌入产品给客户。要现成流程引擎的话 Node-RED(Apache) 才干净，但执行模型不匹配迭代优化+硬件在环，故**编排自研**。
+- **公式法 = 非标拟合**：把已知参数钉死(lmfit vary=False)只解自由参数 + 支持自定义模型表达式(ExpressionModel)，不是固定的三点公式（`formula` 是其解析特例）。
+- **画布用 vanilla JS 而非 React Flow**：闭源/内网/离线友好，无打包无 CDN；React Flow(MIT) 也可选，但当前无必要。
+- **安全护栏独立**：loop 强制 `max_rounds`/`max_visits`、全局 `max_steps`/eval 预算、条件用 asteval 白名单、硬件安全限位在 Evaluator 层 clamp——任何算法/编排 bug 都不能命令越界运动。
+
+## 8. 工作方式与约定
+
+- **分支**：`claude/optimization-algorithm-platform-2z285n`（在此开发、提交、推送；勿推别的分支）。
+- **每次改动**：跑 `python -m pytest -q` 确认不回归；新功能补测试；改依赖同步 `THIRD_PARTY_LICENSES.md` 并核实 license。
+- **提交信息**：清晰描述改了什么、为什么、验证结果。
+- **文档**：架构变化更新 `ARCHITECTURE.md`；使用方式更新 `DEMO.md`/`README.md`；重大意图/决策更新本文件。
+- **不要**在推到仓库的产物里写入模型标识符。
+
+## 9. 快速跑起来
+
+```bash
+pip install -r requirements.txt
+python -m optplat.api      # 后端 + 画布 → http://127.0.0.1:8000/   （/docs 有 API 文档）
+python run_graph.py        # 命令行跑图 JSON（Dify 风格）
+python run_demo.py         # 命令行跑两阶段流程
+python demo_hardware.py    # 硬件+噪声/平均/安全+续跑+回滚
+streamlit run app.py       # 表单式控制台
+python -m pytest -q        # 23 项测试
+```
+
+接自己的优化函数：改 `optplat/demo.py` 的 `optical_bench(x)` 与 `demo_vocs()`。
+接自己的算法：实现 `Generator`(ask/tell) 后 `register_algorithm(AlgorithmSpec(...))`，即成为可拖拽节点。
