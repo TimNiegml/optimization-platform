@@ -7,3 +7,6 @@ asteval            # MIT     — whitelisted safe evaluation of if/loop conditio
 pyyaml             # MIT     — declarative pipeline config
 streamlit          # Apache-2.0 — MVP web UI
 pandas             # BSD-3   — history / plotting
+optuna             # MIT     — Bayesian / TPE generator (lazy-imported wrapper)
+# sqlite3 is stdlib (archive/resume/rollback); PyVISA/PyMeasure (MIT) optional,
+# only needed for real instruments — the simulated stage/meter need nothing.

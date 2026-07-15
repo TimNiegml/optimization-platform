@@ -45,13 +45,16 @@ class _StopAll(Exception):
 
 class Orchestrator:
     def __init__(self, vocs: VOCS, evaluator: Evaluator, pipeline: dict,
-                 eval_budget: int = 5000):
+                 eval_budget: int = 5000,
+                 start_point: Optional[dict[str, float]] = None):
         self.vocs = vocs
         self.evaluator = evaluator
         self.pipeline = pipeline
         self.eval_budget = eval_budget
-        self.state: dict[str, float] = vocs.initial_point()
+        # start_point lets a run RESUME from an archived best point
+        self.state: dict[str, float] = dict(start_point) if start_point else vocs.initial_point()
         self.last_y: dict[str, float] = {}
+        self._last_x: dict[str, float] = dict(self.state)   # most recent full point
         self.n_evals = 0
         self.events: list[str] = []          # human-readable trace for the UI
 
@@ -60,12 +63,16 @@ class Orchestrator:
         if not expr:
             return False
         aeval = Interpreter(minimal=True)
-        aeval.symtable.update(self.state)
+        aeval.symtable.update(self._last_x)   # most recent measured point
         aeval.symtable.update(self.last_y)
         return bool(aeval(expr))
 
     def _global_stop(self) -> None:
         if self._cond(self.pipeline.get("until")):
+            # sync the operating point to the measurement that satisfied `until`,
+            # so reported state and objectives are consistent (not stale from the
+            # previous stage). `until` means "good enough here", so this point wins.
+            self.state.update(self._last_x)
             self.events.append("✅ global `until` satisfied → stop")
             raise _StopAll
 
@@ -96,6 +103,12 @@ class Orchestrator:
                                  hints=step.get("hints"),
                                  n_samples=step.get("n_samples", 5),
                                  r2_gate=step.get("r2_gate", 0.9))
+        if algo in ("bayesian", "bayes"):              # OSS wrapper (Optuna, MIT)
+            from .bayes import BayesianGenerator
+            return BayesianGenerator(self.vocs, variables, objective,
+                                     sampler=step.get("sampler", "tpe"),
+                                     n_calls=step.get("n_calls", 40),
+                                     seed=step.get("seed"))
         raise ValueError(f"unknown algorithm: {algo}")
 
     # ---- run one measurement ----
@@ -106,6 +119,7 @@ class Orchestrator:
             raise _StopAll
         y = self.evaluator.evaluate(x, stage=stage)
         self.last_y.update(y)
+        self._last_x = dict(x)
         return y
 
     # ---- run a single stage ----

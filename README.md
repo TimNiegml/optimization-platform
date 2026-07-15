@@ -92,4 +92,38 @@ flowchart TB
 4. **托拉拽画布**：React Flow(MIT)，节点↔IR 双向绑定。
 5. **光器件模板库**：首光搜索 / WDL 均衡 / 器件标定的预置流程。
 
-依赖许可证清单见 [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)。
+### 贝叶斯优化（`bayesian`，Optuna 封装）
+
+```yaml
+- stage: bo
+  algorithm: bayesian      # Optuna(MIT) TPE，或 sampler: gp / random
+  variables: [x1, x2]
+  objective: y1
+  n_calls: 40
+```
+
+### 硬件接入 + 安全 + 持久化（P1b）
+
+```python
+from optplat import (Orchestrator, HardwareEvaluator, SafetyLimits,
+                     SimulatedStage, SimulatedMeter, SQLiteStore, rollback_to_best)
+
+stage = SimulatedStage(vocs.initial_point())          # 换成 PyVISA 电机台即接真硬件
+meter = SimulatedMeter(stage, optical_bench, noise=0.01)   # 换成 PyVISA 功率计
+store = SQLiteStore("run.db", run_id="joblot-42")     # 全量归档
+ev = HardwareEvaluator(stage, meter, settle_time=0.05, averages=5,
+                       safety=SafetyLimits({"x1": (-3, 7)}),  # 独立安全限位(默认clamp)
+                       store=store)
+Orchestrator(vocs, ev, pipeline).run()
+
+# 断点续跑：从归档最优点继续
+pt, _ = store.best("y1", "max")
+Orchestrator(vocs, ev, pipeline, start_point=pt).run()
+# 一键回滚：把电机开回历史最优点
+rollback_to_best(ev, store, "y1", "max")
+```
+
+- **安全限位独立于算法**：任何算法/编排 bug 都无法命令越界运动（默认 clamp，`strict=True` 抛错）。
+- **平均 + 稳定时间**在硬件层处理噪声，算法不用管。
+
+依赖许可证清单见 [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)（全 permissive，含 Optuna·MIT）。

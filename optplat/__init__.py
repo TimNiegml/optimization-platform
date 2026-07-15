@@ -16,7 +16,15 @@ from .generators import (
     ParametricFit,
     SurrogateFit,
 )
+from .hardware import (
+    HardwareEvaluator,
+    SafetyLimits,
+    SafetyViolation,
+    SimulatedMeter,
+    SimulatedStage,
+)
 from .orchestrator import Orchestrator
+from .store import SQLiteStore, rollback_to_best
 from .vocs import VOCS, Objective, ObjectiveMode, Variable
 
 __all__ = [
@@ -24,4 +32,10 @@ __all__ = [
     "Evaluator", "Orchestrator", "Generator",
     "GridScan", "CoordinateDescent", "NelderMead",
     "SurrogateFit", "FormulaMethod", "ParametricFit",
+    # P1b
+    "HardwareEvaluator", "SafetyLimits", "SafetyViolation",
+    "SimulatedStage", "SimulatedMeter",
+    "SQLiteStore", "rollback_to_best",
 ]
+
+# BayesianGenerator is imported lazily (see orchestrator) to keep optuna optional.

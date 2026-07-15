@@ -14,6 +14,8 @@ redistributed to customers without license contamination.
 | pyyaml | MIT | permissive |
 | streamlit | Apache-2.0 | permissive |
 | pandas | BSD-3-Clause | permissive |
+| optuna | MIT | permissive |
+| sqlite3 | Python stdlib (PSF) | permissive |
 
 ## Deliberately NOT used
 

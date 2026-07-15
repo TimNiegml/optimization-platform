@@ -89,9 +89,11 @@ flowchart TB
   | `quadratic_fit` / `gaussian_fit` | 标准拟合定峰 | 最小二乘（lmfit）全自由拟合，**R² 守门 + 外推限幅**，score 空间统一覆盖 max/min/target |
   | `parametric_fit` (公式法/非标拟合) | 带先验的拟合 | 把**已知参数钉死**（顶点/σ/曲率），只解自由参数；支持**自定义模型表达式**（客户非标公式）；参数钉够即退化成"公式"。lmfit `vary=False` + `ExpressionModel` |
   | `formula` | 解析特例 | 三点抛物线闭式解峰，**无回归**（= 参数全被点数定死的 parametric_fit 特例） |
+  | `bayesian` | 贝叶斯(OSS) | Optuna(MIT) TPE/GP，`n_calls` 内探索-利用，全局优化 |
 
-- **其余 wrapper 接开源**：贝叶斯→scikit-optimize(BSD)/Optuna(MIT)；多目标帕累托→pymoo(Apache)；
-  更多无梯度→Nevergrad(MIT)；成熟组合→Xopt(Apache)。每个 wrapper ≈ 几十行。
+- **开源 wrapper（已接入 + 待接入）**：
+  - ✅ `bayesian` → **Optuna(MIT)** TPE/GP，`optplat/bayes.py`，惰性导入保持核心纯净；native ask/tell 1:1 映射。
+  - 待接：多目标帕累托→pymoo(Apache)；更多无梯度→Nevergrad(MIT)；成熟组合→Xopt(Apache)。每个 ≈ 几十行。
 - 客户自定义算法 = 实现同一基类，entry_points 注册为插件。
 
 ### 2.3 编排层 Orchestrator（已实现 `optplat/orchestrator.py`，自研核心）
@@ -101,11 +103,13 @@ flowchart TB
 - `keep` 约束：违反罚分（后续升级为贝叶斯的可行性感知采集函数）；`fallback`：拟合守门失败自动降级坐标梯度。
 - YAML 嵌套块 ↔ 画布控制节点是同一状态机的两种同构视图。
 
-### 2.4 评估接入层 Evaluator（函数版已实现，硬件版 P1）
+### 2.4 评估接入层 Evaluator（函数版 + 硬件版均已实现）
 - 契约：`evaluate(dict[x]) -> dict[y]`，自变量/因变量数目任意；全量历史自动归档。
-- 硬件适配器：PyVISA/PyMeasure 通信 + 你的电机台/功率计驱动 + 稳定时间/平均/迟滞补偿；
-  **安全限位在这一层独立实现**。非标场景逻辑通过 Hook 切点注入，不改平台代码。
-- P1 加异步/批量接口（贝叶斯 batch 采样与多通道并行需要）。
+- ✅ `HardwareEvaluator`（`optplat/hardware.py`）：duck-typed `stage.move()` + `meter.read()`；
+  内置**稳定时间**、**多次平均**（抗噪）、**独立安全限位**（默认 clamp 到安全区，`strict=True` 则拒绝并抛错——
+  任何算法/编排 bug 都无法命令越界运动）。附带 `SimulatedStage/SimulatedMeter`（可注入噪声）无硬件即可跑测。
+- 真实后端：PyVISA/PyMeasure(MIT) 写个 move/read 薄类即可；非标逻辑通过 Hook 注入，不改平台代码。
+- P1c 加异步/批量接口（贝叶斯 batch 采样与多通道并行需要）。
 
 ### 2.5 用户面（三个编辑器）+ GLM5.1 定位
 - **模板库优先**：「首光→定峰」「WDL 多通道均衡」「标定扫描」预置流程，客户选模板填 3~5 个旋钮
@@ -113,9 +117,11 @@ flowchart TB
 - 表单由 JSON Schema 自动生成（rjsf）；画布用 React Flow(MIT)，节点↔IR 双向绑定；
 - GLM5.1 三个用法：**意图→IR**（Instructor 结构化输出，schema 不合规自动重试）、**IR→人话解释+体检**、**跑后诊断**（读归档数据给建议）。边界：LLM 永远只产候选配置，经"渲染→校验→用户确认"才执行。
 
-### 2.6 运行时与数据层（MVP 内存版 → P1 持久化）
-- SQLite/parquet 归档每次评估（x, y, 时间戳, stage）；断点续跑；异常/中止时**一键回滚电机到历史最优点**；
-  实时收敛曲线、多目标时帕累托前沿；归档数据可直接喂代理模型（target/建模类任务复用）。
+### 2.6 运行时与数据层（✅ SQLite 持久化已实现）
+- ✅ `SQLiteStore`（`optplat/store.py`，纯 stdlib）：归档每次评估（run_id, seq, stage, point, objectives, ts）；
+  **断点续跑**（`Orchestrator(start_point=store.best(...))` 从归档最优点继续）；
+  **一键回滚**（`rollback_to_best()` 驱动电机回到历史最优点，异常/中止后用）。
+- 待做：实时收敛曲线已在 Streamlit；多目标帕累托前沿随 pymoo 接入；归档数据喂代理模型（target/建模类任务）。
 
 ## 3. License 红黑榜（已核实）
 
@@ -141,15 +147,16 @@ flowchart TB
 |---|---|---|
 | **P0 · MVP** | VOCS + 坐标梯度 + 拟合定峰(R²门/限幅/回退) + if/loop/until 编排 + keep 约束 + Streamlit + YAML IR | ✅ 已完成并跑通 |
 | **P1a · 算法库** | 找光扫描(grid/line)、Nelder-Mead、公式法(三点解析)；两阶段"找光→优化"流程；回归测试 | ✅ 已完成（6 种算法，两阶段 62 次评估收敛，5 tests 通过） |
-| **P1b · 硬件+持久化** | skopt/Optuna 贝叶斯 wrapper、pymoo 多目标、异步/批量 Evaluator、PyVISA 硬件适配器 + 安全限位、SQLite 归档/续跑/回滚 | 下一步 |
+| **P1b · 硬件+持久化** | Optuna 贝叶斯 wrapper(TPE/GP)、PyVISA/仿真硬件适配器 + 稳定时间/平均/独立安全限位、SQLite 归档/续跑/回滚 | ✅ 已完成（11 tests 通过；含 global-until 状态一致性修复） |
+| **P1c · 多目标** | pymoo NSGA-II wrapper、异步/批量 Evaluator | 下一步 |
 | **P2 · 易用性** | JSON Schema 正式化 + rjsf 表单、场景模板库、GLM5.1 Copilot（意图→IR / IR→人话 / 跑后诊断） | |
 | **P3 · 平台化** | React Flow 画布（节点↔IR 双向）、FastAPI 服务化 + 多用户/任务队列、scan 模式与建模类任务闭环 | |
 
 ## 6. 已知简化与升级路径（诚实清单）
 
-- keep 约束目前是 `-1e9` 罚分 → P1 升级为可行性感知（贝叶斯 constrained acquisition / 回退到最近可行点）。
+- keep 约束目前是 `-1e9` 罚分 → 升级为可行性感知（贝叶斯 constrained acquisition / 回退到最近可行点）。
 - 编排是树遍历执行器（够用）→ 需要 `goto/on_fail` 跨节点跳转时升级为显式状态机表（`transitions`·MIT）。
-- Evaluator 同步单点 → P1 加 async/batch。
-- 历史在内存 → P1 落 SQLite/parquet。
-- 多目标目前靠"分阶段+keep"标量化 → 真帕累托需求出现时接 pymoo。
+- Evaluator 同步单点 → P1c 加 async/batch（贝叶斯 batch / 多通道并行）。
+- ✅ 历史已落 SQLite（含续跑/回滚）；parquet 导出可选。
+- 多目标目前靠"分阶段+keep"标量化 → 真帕累托需求出现时接 pymoo（P1c）。
 - `scan` mode 已在 schema 中占位，执行器 P3 实现。
