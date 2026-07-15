@@ -57,7 +57,12 @@
   （含修复：全局 `until` 中途触发时同步操作点，保证 state 与 objectives 一致。）
 - **P1c 图运行时 + 插件**：node+edge 图 IR + `GraphRunner`（分支/受限循环）；算法插件 registry；graph→mermaid。
 - **P2 服务化 + 画布**：FastAPI 后端；vanilla JS 托拉拽画布（served at `/`）。
-- **测试**：`python -m pytest -q` → **23 项全过**（algorithms / graph / p1b / api）。
+- **P2a 画布易用性**（已浏览器可视化验证，Chromium 无控制台报错）：
+  - 目标函数**轨迹图**（全部 / 间隔 N 点看收敛）；
+  - 节点**目标模式**可配（最大/最小/逼近目标值/扫描，引擎按 `objective_mode`/`objective_target` 覆盖 VOCS 默认）；
+  - **字号**滑块（缩放画布字体）；**连线**改进（DOM 精准锚点 + 橡皮筋预览 + 加宽点击区）与**删除**（选中删/`Delete`/右键）；
+  - **帮助**说明文档弹窗 + 关键处 ⓘ 悬浮提示；算法节点显示**中文名**（registry 加 `label`/`desc`，参数带中文 `label`，`name` 仍为英文 ID）。
+- **测试**：`python -m pytest -q` → **26 项全过**（algorithms / graph / p1b / api）。
 
 算法库（8 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
 `nelder_mead` `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula` `bayesian`。
@@ -73,8 +78,8 @@
 
 ## 6. 待办 / 待用户反馈的点（重要）
 
-- **画布交互未经浏览器可视化验证**：仅确认 JS 通过 `node --check`、`GET /` 返回 200、示例 JSON 能跑通。
-  拖拽手感/连线视觉/编辑面板是否好用，**等用户打开 `http://127.0.0.1:8000/` 后反馈**再修。
+- **画布交互已用 Chromium 驱动验证**（拖拽/连线/删除/字号/目标模式/轨迹图/帮助/tooltip 均通过，无控制台报错）。
+  但真机手感、连线视觉细节仍以**用户打开 `http://127.0.0.1:8000/` 的反馈**为准，按需微调。
 - 用户会继续提需求（真实目标函数形态、WDL 均衡具体判据、仪器型号、界面细节）——按需迭代。
 
 ## 7. 关键决策与理由（别推翻，除非用户要求）

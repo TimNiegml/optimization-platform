@@ -28,7 +28,7 @@ from .generators import (
     SurrogateFit,
 )
 from .registry import build_generator
-from .vocs import VOCS
+from .vocs import VOCS, Objective, ObjectiveMode
 
 
 class StopAll(Exception):
@@ -67,6 +67,22 @@ class StageEngine:
     def make_generator(self, step: dict) -> Generator:
         return build_generator(self.vocs, step)
 
+    # ---- per-stage objective (node may override the VOCS default) ----
+    def _objective(self, step: dict, obj_name: str) -> Objective:
+        """Objective for this stage.
+
+        Defaults to the VOCS-declared objective, but a node may override the
+        optimisation goal locally — `objective_mode` (maximize / minimize /
+        target / scan) and `objective_target` — so the same measured output can
+        be driven differently in different stages of one workflow.
+        """
+        base = self.vocs.objectives[obj_name]
+        mode = step.get("objective_mode")
+        if not mode:
+            return base
+        target = step.get("objective_target", base.target)
+        return Objective(mode=ObjectiveMode(mode), target=target)
+
     # ---- one measurement ----
     def evaluate(self, x: dict[str, float], stage: str) -> dict[str, float]:
         self.n_evals += 1
@@ -92,7 +108,7 @@ class StageEngine:
     def run_stage(self, step: dict) -> None:
         name = step.get("stage", step["algorithm"])
         obj_name = step["objective"]
-        obj = self.vocs.objectives[obj_name]
+        obj = self._objective(step, obj_name)
         keep = step.get("keep")
         max_iter = step.get("stop", {}).get("max_iter", 300)
 
