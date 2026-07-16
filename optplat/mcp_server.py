@@ -25,6 +25,7 @@ from .autotune import TuneSpec, run_autotune
 from .demo import BENCHES, demo_vocs
 from .registry import REGISTRY, algorithm_catalog
 from .runner import run_workflow as _run_workflow
+from .workspace import WORKSPACE
 
 mcp = FastMCP(
     "optplat",
@@ -32,8 +33,10 @@ mcp = FastMCP(
         "光器件耦合/标定优化平台。用这些工具：先 list_algorithms / list_benches / list_solutions "
         "了解可用能力；用 new_workflow + add_algorithm_node 搭一条『找光→精调→拟合』流程，或用 "
         "load_solution 加载以前的方案；用 run_workflow 在仿真台上跑；用 compare_strategies 对比多种"
-        "策略；用 autotune 让平台自动搜索最优算法方案。所有运行都经过统一引擎与安全限位，"
-        "不会命令执行器越界。变量默认 x1,x2,x3；目标默认 y1(耦合功率,最大化)、y2(WDL均衡)。"
+        "策略；用 autotune 让平台自动搜索最优算法方案。搭好或改好流程后用 push_to_canvas(带用户给的 "
+        "session) 把它推给正在看的画布——画布会自动刷新；用 get_canvas 读回用户手改后的流程。"
+        "run_workflow / autotune 也可带 session，结果会自动显示在画布。所有运行都经过统一引擎与安全"
+        "限位，不会命令执行器越界。变量默认 x1,x2,x3；目标默认 y1(耦合功率,最大化)、y2(WDL均衡)。"
     ),
 )
 
@@ -186,8 +189,8 @@ def delete_solution(name: str) -> dict:
 @mcp.tool()
 def run_workflow(graph: dict, bench: str = "single_peak", noise: float = 0.0,
                  averages: int = 1, safety: bool = False,
-                 eval_budget: int = 5000,
-                 start_point: Optional[dict] = None) -> dict:
+                 eval_budget: int = 5000, start_point: Optional[dict] = None,
+                 session: Optional[str] = None) -> dict:
     """在仿真台上运行一条流程（graph），返回结果摘要。
 
     这是 agent『进行仿真』的入口。
@@ -196,11 +199,15 @@ def run_workflow(graph: dict, bench: str = "single_peak", noise: float = 0.0,
       noise        测量噪声 σ（>0 走带噪声/安全的硬件模拟）
       averages     多次平均以抑噪
       safety       是否启用逐变量安全限位（夹回越界运动）
+      session      给了就把结果 + 流程回写到该实时会话，画布自动刷新显示（见 push_to_canvas）
     返回 objectives(最终 y)、state(最终 x)、n_evals、sim_seconds(测量耗时)、
     fits(拟合公式)、events(逐步日志)。
     """
-    return _run_workflow(graph, bench=bench, noise=noise, averages=averages,
-                         safety=safety, eval_budget=eval_budget, start_point=start_point)
+    res = _run_workflow(graph, bench=bench, noise=noise, averages=averages,
+                        safety=safety, eval_budget=eval_budget, start_point=start_point)
+    if session:
+        WORKSPACE.update(session, graph=graph, bench=bench, result=res)
+    return res
 
 
 @mcp.tool()
@@ -247,19 +254,52 @@ def compare_strategies(strategies: list[dict], bench: str = "single_peak",
             "recommended": best["name"] if best else None}
 
 
+# ============================ live canvas sync ============================
+@mcp.tool()
+def push_to_canvas(graph: dict, session: str = "default",
+                   bench: Optional[str] = None, note: str = "") -> dict:
+    """把一条流程（graph）推到实时会话，正在看该会话的画布会**自动刷新**显示。
+
+    这是 agent『改了内部、让界面自动刷新』的入口。起草/修改好流程后显式推一次即可。
+      graph     要显示的流程（new_workflow/add_algorithm_node 搭出或 load_solution 取回）
+      session   会话 ID（用户在画布『连接实时会话』里填的同一个），默认 "default"
+      bench     可选，同时切换画布的仿真场景
+      note      可选，一句给用户看的说明（如"已把 x3 拟合换成高斯"）
+    返回该会话的最新 revision（画布据此判断是否需要重绘）。
+    """
+    snap = WORKSPACE.update(session, graph=graph, bench=bench, note=note or None)
+    return {"session": session, "revision": snap["revision"],
+            "updated_at": snap["updated_at"], "pushed": True}
+
+
+@mcp.tool()
+def get_canvas(session: str = "default") -> dict:
+    """读回某个实时会话的当前状态（含用户在画布上手改后的最新 graph / 场景 / 上次结果）。
+
+    用于 agent ↔ 人双向协作：用户在画布上拖改后，agent 用这个拿到最新流程再继续。
+    """
+    snap = WORKSPACE.snapshot(session)
+    return {"session": session, "graph": snap.get("graph"), "bench": snap.get("bench"),
+            "result": snap.get("result"), "autotune": snap.get("autotune"),
+            "note": snap.get("note", ""), "revision": snap.get("revision", 0),
+            "updated_at": snap.get("updated_at")}
+
+
 # ============================ auto-tune ============================
 @mcp.tool()
 def autotune(bench: str = "single_peak", target: Optional[str] = "y1>=0.95 and y2>=0.9",
              quality_weight: float = 1.0, time_weight: float = 0.5,
              stability_weight: float = 1.0, noise_levels: Optional[list[float]] = None,
-             n_trials: int = 2, max_candidates: int = 12, top_k: int = 5) -> dict:
+             n_trials: int = 2, max_candidates: int = 12, top_k: int = 5,
+             session: Optional[str] = None) -> dict:
     """让平台自动搜索最优算法方案（外层优化），按 质量/时长/稳定性 打分排名。
 
     在『粗调→精调→拟合』三相空间里枚举候选流程，多噪声/多seed评估，标量效用排序 +
     帕累托前沿。返回 top_k 候选（含指标、utility、是否帕累托最优、可直接运行的 graph）。
       target            达标定义（决定稳定性=达标率；None 时用变异系数）
       *_weight          质量/时长/稳定 的权重（要快→调高 time_weight，要稳→调高 stability_weight）
-    采用某候选：把它的 graph 交给 run_workflow，或用 save_solution 存起来。
+      session           给了就把排名结果回写到该实时会话，画布『自动调优』面板自动刷新
+    采用某候选：把它的 graph 交给 run_workflow / push_to_canvas，或用 save_solution 存起来。
     """
     spec = TuneSpec(
         bench=bench, target=target,
@@ -274,9 +314,12 @@ def autotune(bench: str = "single_peak", target: Optional[str] = "y1>=0.95 and y
              "stability": round(r["stability"], 3), "evals": round(r.get("evals", 0.0), 1),
              "utility": round(r["utility"], 4), "pareto": r.get("pareto", False),
              "graph": r["graph"]} for r in ranked]
-    return {"bench": bench, "n_candidates": out["n_candidates"],
-            "weights": spec.weights, "ranked": slim,
-            "best": slim[0]["label"] if slim else None}
+    result = {"bench": bench, "n_candidates": out["n_candidates"],
+              "weights": spec.weights, "ranked": slim,
+              "best": slim[0]["label"] if slim else None}
+    if session:
+        WORKSPACE.update(session, bench=bench, autotune=result)
+    return result
 
 
 # ============================ explain ============================

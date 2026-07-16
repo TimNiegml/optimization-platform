@@ -19,6 +19,7 @@ redistributed to customers without license contamination.
 | uvicorn | BSD-3-Clause | permissive |
 | httpx | BSD-3-Clause | permissive |
 | mcp (Model Context Protocol Python SDK) | MIT | permissive |
+| sse-starlette | BSD-3-Clause | permissive |
 | sqlite3 | Python stdlib (PSF) | permissive |
 
 The drag-drop canvas (`web/index.html`) is dependency-free vanilla JS + SVG —

@@ -1,7 +1,7 @@
 # CLAUDE.md — 项目上下文与继续指南
 
 > 这份文件是给 Claude Code 新会话的"接手说明"。读完它 + `ARCHITECTURE.md` 就能无缝继续。
-> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 62 项全过）。
+> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 66 项全过）。
 
 ---
 
@@ -47,7 +47,9 @@
 | 自动调优 | `optplat/autotune.py` | AutoTuner(L1)：候选生成(粗调×精调×拟合+参数/噪声变异)、多试验评估、质量/时长/稳定打分、帕累托 |
 | 持久化 | `optplat/store.py` | SQLite 归档 / 断点续跑(start_point) / 一键回滚(rollback_to_best) |
 | 后端 API | `optplat/api.py` | FastAPI：`/catalog` `/vocs` `/run/graph` `/run/pipeline` `/`(画布) |
-| L2 MCP 服务器 | `optplat/mcp_server.py` | 把平台暴露成 13 个 MCP 工具供 Agent 驱动；配套 `optplat/solutions.py`(方案库) + `optplat/runner.py`(跑流程)；见 `MCP_AGENT.md` |
+| L2 MCP 服务器 | `optplat/mcp_server.py` | 把平台暴露成 15 个 MCP 工具供 Agent 驱动；配套 `optplat/solutions.py`(方案库) + `optplat/runner.py`(跑流程)；见 `MCP_AGENT.md` |
+| 实时工作区 | `optplat/workspace.py` | Agent↔画布共享状态(按 session)；MCP 挂进 FastAPI(`/mcp`) + `/workspace` SSE → Agent 改动画布自动刷新 |
+| Hermes skill | `skills/optplat/` | `SKILL.md`+`connect.json`+`reference/`：上传 Hermes 即自动连 MCP、学会用法(NL→IR 起草/推画布/跑对比调优) |
 | 托拉拽画布 | `web/index.html` | **纯 vanilla JS+SVG，无 CDN，离线可用**；产 {nodes,edges} JSON |
 | 表单 UI | `app.py` | Streamlit 交互控制台（早期 MVP 面） |
 | 仿真台/示例 | `optplat/demo.py` | `optical_bench` 模拟光耦合；`TWO_PHASE_*` 示例流程 |
@@ -77,7 +79,7 @@
   - **梯度上升(PI闪电式)** `gradient_ascent`：有限差分测局部梯度、沿上升方向步进+步长自适应。
   - **拟合公式回显**：`SurrogateFit`/`FormulaMethod`/`ParametricFit` 暴露 `fit_info`（峰位/参数/R²），引擎收进 `result.fits`（用 finally 保证全局早停也记录），画布对应**节点卡片显示拟合公式**。
   - **按场景示例 + 方案库**：`载入示例` 按当前仿真场景放量身流程（多峰/多模用贝叶斯全局、相关谷用单纯形、偏斜/尖峰用梯度上升等）；`📁 方案库` 内置各场景示例，并可选**整个文件夹批量加载**保存过的方案（webkitdirectory / 多选文件）。
-- **测试**：`python -m pytest -q` → **62 项全过**（algorithms / graph / p1b / api / autotune / mcp）。
+- **测试**：`python -m pytest -q` → **66 项全过**（algorithms / graph / p1b / api / autotune / mcp）。
 
 算法库（10 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
 `nelder_mead` `gradient_ascent`(PI闪电式) `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula` `bayesian`。
@@ -96,8 +98,15 @@
     **`compare_strategies`(对比不同策略)**/`autotune`/`explain_result`。stdio + streamable-HTTP 双传输；
     运行仍走统一引擎 + 安全限位，Agent 绕不过。方案存储 `optplat/solutions.py`（内置示例 + `solutions/` 文件库，
     与画布『保存/方案库』互通）；运行入口 `optplat/runner.py`。配置与对接见 **`MCP_AGENT.md`**、入口 `run_mcp.py`。
-  - **L3 GLM5.1 副驾**：设计已定，待做（工具面已备好被驱动）。
-- **pytest 62 项全过**（algorithms/graph/p1b/api/autotune/mcp）。
+  - **L3 Agent 联动 + 界面自动刷新（已做）**：MCP 挂进 FastAPI，`python -m optplat.api` 一个进程同时提供
+    画布(`/`) + REST + MCP(`/mcp`) + 实时工作区(`/workspace`)。`optplat/workspace.py` 按 session 存共享状态；
+    新增工具 `push_to_canvas`/`get_canvas`，`run_workflow`/`autotune` 可带 `session`——Agent 一改，画布经 SSE
+    **自动刷新**（画布左栏『实时会话 · Agent 联动』连接/断开/同步）。`OPTPLAT_TOKEN` 给 `/mcp`+`/workspace` 上
+    Bearer 鉴权（内网对接 Hermes 用）。**NL→IR 走 Hermes 原生**：`skills/optplat/`（SKILL.md+connect.json+
+    reference）上传 Hermes 即自动连 MCP 并会用；平台只做 schema 校验，不内置 LLM。
+  - **L3 画布 Copilot（待做，可选）**：网页端自然语言输入框 → 平台内部 GLM5.1 出校验过的 IR(`draft_workflow`)，
+    给不经 Hermes 的用户。工具面已备好。
+- **pytest 66 项全过**（algorithms/graph/p1b/api/autotune/mcp）。
 
 ## 5. 路线图（下一步候选，未做）
 
@@ -140,7 +149,7 @@ python run_demo.py         # 命令行跑两阶段流程
 python demo_hardware.py    # 硬件+噪声/平均/安全+续跑+回滚
 python run_mcp.py          # L2 MCP 服务器（stdio；--http 走 HTTP）→ 供 Agent 驱动，配置见 MCP_AGENT.md
 streamlit run app.py       # 表单式控制台
-python -m pytest -q        # 62 项测试
+python -m pytest -q        # 66 项测试
 ```
 
 接自己的优化函数：改 `optplat/demo.py` 的 `optical_bench(x)` 与 `demo_vocs()`。

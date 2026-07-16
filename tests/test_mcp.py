@@ -11,6 +11,7 @@ import pytest
 
 from optplat import mcp_server as m
 from optplat import solutions as sol
+from optplat.workspace import WorkspaceStore
 
 
 # ---------------- solution store ----------------
@@ -121,12 +122,48 @@ def test_explain_result_is_chinese_summary():
     assert "最终目标" in text and "评估" in text
 
 
+# ---------------- live workspace ----------------
+def test_workspace_store_revision_bumps_and_merges():
+    ws = WorkspaceStore()
+    assert ws.revision("s") == 0
+    snap = ws.update("s", graph={"nodes": []}, bench="multi_peak")
+    assert snap["revision"] == 1 and snap["bench"] == "multi_peak"
+    snap = ws.update("s", note="hi")            # partial update keeps prior fields
+    assert snap["revision"] == 2 and snap["bench"] == "multi_peak" and snap["note"] == "hi"
+    assert ws.snapshot("s")["graph"] == {"nodes": []}
+
+
+def test_push_and_get_canvas_roundtrip():
+    sid = "test_sess_" + str(id(object()))
+    g = m.new_workflow("y1>=0.9")
+    g = m.add_algorithm_node(g, "grid_scan", ["x1", "x2"], "y1", stop_target="y1>0.2")
+    out = m.push_to_canvas(g, session=sid, bench="multi_peak", note="草稿")
+    assert out["pushed"] and out["revision"] >= 1
+    back = m.get_canvas(sid)
+    assert back["bench"] == "multi_peak" and back["note"] == "草稿"
+    algos = [n["data"]["algorithm"] for n in back["graph"]["nodes"] if n.get("type") == "algorithm"]
+    assert algos == ["grid_scan"]
+
+
+def test_run_and_autotune_write_to_session():
+    sid = "test_run_" + str(id(object()))
+    g = sol.get_solution("single_peak_default")["graph"]
+    m.run_workflow(g, bench="single_peak", session=sid)
+    snap = m.get_canvas(sid)
+    assert snap["result"] is not None and "y1" in snap["result"]["objectives"]
+    m.autotune(bench="single_peak", max_candidates=4, n_trials=1,
+               noise_levels=[0.0], top_k=2, session=sid)
+    snap = m.get_canvas(sid)
+    assert snap["autotune"] is not None and snap["autotune"]["ranked"]
+
+
 # ---------------- tool registry ----------------
 def test_all_tools_registered():
     tools = asyncio.run(m.mcp.list_tools())
     names = {t.name for t in tools}
     assert {"list_algorithms", "add_algorithm_node", "load_solution",
-            "run_workflow", "compare_strategies", "autotune"} <= names
+            "run_workflow", "compare_strategies", "autotune",
+            "push_to_canvas", "get_canvas"} <= names
 
 
 # ---------------- real stdio wire round-trip ----------------

@@ -20,22 +20,27 @@ python -m pytest -q                       # 应 62 项全过（含 MCP 测试）
 
 ---
 
-## 1. 启动 MCP 服务器
+## 1. 启动服务器
 
-两种传输方式，按 Agent 所在位置二选一：
+三选一，按场景：
 
 ```bash
-# A) stdio —— Agent 和平台在同一台机器（Claude Desktop / Cursor / 本地脚本 agent）
-python run_mcp.py
-#   等价于 python -m optplat.mcp_server
+# ★ A) 统一服务（推荐，尤其要「Agent 改动→画布自动刷新」时）
+python -m optplat.api
+#   一个进程同时提供：画布(/)  +  REST  +  MCP(/mcp, streamable-HTTP)  +  实时工作区(/workspace)
+#   → http://127.0.0.1:8000/mcp 给 Agent，http://127.0.0.1:8000/ 给用户看画布
 
-# B) HTTP —— Agent 在别处 / 内网服务（比如公司内部 GLM5.1 服务）
-python run_mcp.py --http
-#   监听 http://127.0.0.1:8765/mcp  （streamable-HTTP）
+# B) 纯 stdio —— Agent 和平台同机、无需画布联动（Claude Desktop / Cursor）
+python run_mcp.py                 # 等价 python -m optplat.mcp_server
+
+# C) 纯 MCP over HTTP（不带画布/REST）
+python run_mcp.py --http          # http://127.0.0.1:8765/mcp
 ```
 
-- **stdio**：Agent 客户端负责把这个进程拉起来（配置里写命令），最常用、最省事。
-- **HTTP**：平台作为一个长期在跑的服务，多个 Agent/多次会话连同一个地址。
+- **A 统一服务**：Hermes 连 `/mcp`，用户浏览器开 `/`，两者共享同一份**实时工作区**——Agent
+  推流程/结果，画布自动刷新（见 §8）。**Hermes 场景用这个。**
+- **B stdio**：客户端负责拉起进程，最省事，但没有画布联动。
+- **C**：只要 MCP、多 Agent 连同一地址、不需要画布时用。
 
 ---
 
@@ -55,7 +60,12 @@ python run_mcp.py --http
 | **`run_workflow`** | **在仿真台上运行流程，返回结果** | **「进行仿真」** |
 | **`compare_strategies`** | **同场景跑多种策略并对比、给推荐** | **「对比不同策略的结果」** |
 | `autotune` | 平台自动搜索最优算法方案（质量/时长/稳定打分排名） | 让 Agent 一键找最优方案 |
+| **`push_to_canvas`** | **把流程推到实时会话，画布自动刷新显示** | **「Agent 改了内部，界面自动更新」** |
+| `get_canvas` | 读回会话当前状态（含用户在画布手改后的流程） | Agent ↔ 人双向协作 |
 | `explain_result` | 把结果翻成中文小结 | 便于 Agent 转述 |
+
+> 共 15 个工具。`run_workflow` / `autotune` 也接受 `session` 参数——带上就把结果一并写进实时会话，
+> 画布对应面板自动刷新。
 
 **典型一轮对话（Agent 内部调用顺序）：**
 
@@ -195,6 +205,62 @@ Agent ←  ranking + recommended，用自然语言汇报给用户
 
 ---
 
+## 5b. 实时会话：Agent 改动 → 画布自动刷新
+
+用统一服务（`python -m optplat.api`）时，Agent 和画布共享一份**实时工作区**，按**会话 ID**隔离。
+
+**用户侧**：浏览器开 `http://<平台>/`，在左栏『实时会话 · Agent 联动』填**会话 ID**（如 `default`）
+和 token（若平台设了），点『🔗 连接』。此后画布通过 SSE 监听该会话。
+
+**Agent 侧**：搭好/改好流程后，带同一个会话调用即可让画布自动刷新：
+```
+push_to_canvas(graph, session="default", bench="multi_peak", note="已把 x3 拟合换成高斯")
+run_workflow(graph, bench="multi_peak", session="default")     # 结果也回写、显示
+autotune(bench="multi_peak", target="...", session="default")  # 排名结果显示在『自动调优』面板
+```
+**双向**：用户在画布拖改后点『↥ 同步给 Agent』，Agent 用 `get_canvas("default")` 读回最新流程再继续。
+
+底层：`GET /workspace/{sid}`（拉快照）、`GET /workspace/{sid}/stream`（SSE，变化即推）、
+`POST /workspace/{sid}`（画布回写）。每次写 `revision` 自增，画布据此判断重绘。
+
+---
+
+## 5c. 部署 + 鉴权（对接 Hermes 等托管 Agent）
+
+托管 Agent（如 Hermes）连不到 `localhost`——把平台部署到 Agent 能访问的**内网地址**，并开 token：
+
+```bash
+OPTPLAT_TOKEN=<强随机串> python -m optplat.api      # 建议前置反代做 TLS，对外暴露 https://<host>/mcp
+```
+- `OPTPLAT_TOKEN` 一设，`/mcp` 与 `/workspace/*` 就要求 **Bearer token**（`get /health`、画布静态页不拦）。
+- MCP 客户端在 `Authorization: Bearer <token>` 头里带；画布的 SSE 用 `?token=` 查询参数（浏览器
+  EventSource 不能设头，已支持）。
+- 不设 `OPTPLAT_TOKEN` = 开放，仅建议本机开发用。
+
+---
+
+## 5d. Hermes Agent：用 skill 一键接入（skill 捆绑连接）
+
+仓库自带一个 skill 包 `skills/optplat/`，上传到 Hermes 对话即可让它自动连平台并会用：
+
+```
+skills/optplat/
+  SKILL.md               # 教 Hermes 平台概念 + 主循环 + NL→IR 起草 + 结果呈现 + 纪律
+  connect.json           # MCP 连接descriptor：把 url 换成你的内网地址、token 换成 OPTPLAT_TOKEN
+  reference/ir_schema.md # graph IR 结构 + 15 个工具速查 + 算法一览
+  reference/recipes.md   # 按场景的起草配方（单峰/多峰/相关谷/多峰…）
+```
+
+**步骤**：① 平台按 §5c 起服务并拿到 `https://<host>/mcp` + token；② 编辑 `connect.json` 填上
+url 和 token；③ 把 `skills/optplat/` 打包上传到 Hermes 对话。Hermes 读 `connect.json` 连上
+`optplat` MCP 服务器，读 `SKILL.md` 学会用法，之后你直接用自然语言下指令，Hermes 就会搭流程、
+`push_to_canvas` 让你在平台界面实时看到、跑仿真/对比/自动调优，并把结果解析给你。
+
+> 若你的 Hermes 版本要求在**宿主/管理端**配 MCP 连接（而非 skill 捆绑），就把 `connect.json` 的
+> url/token 配到 Hermes 的 MCP 设置里，`SKILL.md` + `reference/` 仍作纯用法说明上传即可。
+
+---
+
 ## 6. 安全与合规
 
 - **护栏不可绕过**：Agent 只能提交 IR（流程 JSON）；运行时循环强制上限、评估预算熔断、
@@ -206,6 +272,9 @@ Agent ←  ranking + recommended，用自然语言汇报给用户
 
 ## 7. 下一步（可选增强）
 
-- L3 Copilot：GLM5.1 做「自然语言 → 流程 IR」草拟 + 从措辞推权重 + 结果人话解释（本服务器已备好被驱动的工具面）。
-- 真实硬件：把仿真 bench 换成 PyVISA/PyMeasure 封装的真机后，这些 MCP 工具**一行不用改**即可驱动真实台子。
-- HTTP 鉴权：对外开放时在 `--http` 前置一层 token / 反向代理。
+- **NL→IR 已可用（Hermes 原生）**：Hermes 读 skill 后自己把自然语言拆成工具调用起草流程，平台做
+  schema 校验。无需平台内再塞 LLM。
+- **画布 Copilot（待做，可选）**：给网页端加一个自然语言输入框，平台内部用 GLM5.1 出一份校验过的 IR
+  （`draft_workflow`），供不经 Hermes 的用户直接在界面里打字生成流程。
+- **真实硬件**：把仿真 bench 换成 PyVISA/PyMeasure 封装的真机后，这些 MCP 工具**一行不用改**即可驱动真实台子。
+- **多用户/持久化**：实时工作区目前是进程内内存版（按 session 隔离）；要多租户/断电续存再上持久化 + 队列。

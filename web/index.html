@@ -141,6 +141,15 @@
       <input type="file" id="loadFile" accept=".json,application/json" style="display:none" onchange="loadSolutionFile(this.files[0])">
     </div>
 
+    <h2>实时会话 · Agent 联动 <span class="info" data-tip="连接一个会话后，Agent（如 Hermes）通过 MCP 的 push_to_canvas 推来的流程/自动调优结果会自动出现在画布上（无需手动刷新）。会话 ID 与 Agent 用的同一个；平台设了 token 就填上。">i</span></h2>
+    <div class="toolbar" style="flex-wrap:wrap;gap:4px">
+      <input id="wsSession" placeholder="会话 ID（如 default）" value="default" style="flex:1;min-width:96px" data-tip="Agent 与画布约定同一个会话 ID。">
+      <input id="wsToken" placeholder="token（可选）" style="flex:1;min-width:96px" data-tip="平台设置了 OPTPLAT_TOKEN 时填这里，否则留空。">
+      <button class="ghost sm" id="wsBtn" onclick="toggleLiveSession()" data-tip="连接后监听该会话，Agent 一推流程画布自动刷新。">🔗 连接</button>
+      <button class="ghost sm" onclick="pushCanvasToSession()" data-tip="把当前画布同步回会话，让 Agent 用 get_canvas 读到你的手改。">↥ 同步给 Agent</button>
+      <span id="wsStat" class="hint" style="width:100%">未连接</span>
+    </div>
+
     <h2>算法节点 <span class="info" data-tip="点一下把算法加到画布作为一个节点。第一阶段先用『网格/线扫描』找光，第二阶段再精调/拟合/贝叶斯。每个节点有自己的颜色，和轨迹图对应。">i</span></h2>
     <div id="palList"></div>
 
@@ -1036,16 +1045,57 @@ function adoptCandidate(i){ const r=tuneResult.ranked[i]; if(!r) return; adoptGr
   document.getElementById('conn').textContent='已采用方案 #'+(i+1); }
 function adoptGraph(graph){
   const known=new Set(['algorithm','variables','objective','stage','objective_mode','objective_target','keep','stop']);
-  nodes=(graph.nodes||[]).map((gn,i)=>{ const d=gn.data||{}; const params={};
+  // skip start/end control nodes (agent-built graphs carry them; autotune ones don't)
+  const algoNodes=(graph.nodes||[]).filter(gn=>{const t=gn.type||(gn.data&&gn.data.algorithm?'algorithm':''); return t!=='start'&&t!=='end';});
+  const keptIds=new Set(algoNodes.map((gn,i)=>gn.id||('n'+(i+1))));
+  nodes=algoNodes.map((gn,i)=>{ const d=gn.data||{}; const params={};
     Object.keys(d).forEach(k=>{ if(!known.has(k)) params[k]=d[k]; });
     return {id:gn.id||('n'+(i+1)), algorithm:d.algorithm, color:NODE_COLORS[i%NODE_COLORS.length],
       variables:d.variables||[], objective:d.objective||objKeys[0],
       objectiveMode:d.objective_mode||'', objectiveTarget:(d.objective_target!=null?d.objective_target:''),
       objectiveWeights:d.objective_weights||null,
       params, keep:d.keep||'', stopTarget:(d.stop&&d.stop.target)||'', fitInfo:'', x:40+i*240, y:100}; });
-  edges=(graph.edges||[]).map((e,i)=>({id:'e'+(i+1), source:e.source, target:e.target, condition:e.condition||''}));
+  edges=(graph.edges||[]).filter(e=>keptIds.has(e.source)&&keptIds.has(e.target))
+    .map((e,i)=>({id:'e'+(i+1), source:e.source, target:e.target, condition:e.condition||''}));
   untilExpr=graph.until||''; untilRawEdited=false; untilRows=[]; seq=nodes.length+edges.length+1;
   sel=null; selEdge=null; render(); inspectEmpty(); renderUntilRows();
+}
+
+// ---------- live session (agent ↔ canvas via /workspace SSE) ----------
+let liveES=null, liveRev=-1;
+function liveStatus(txt,ok){ const el=document.getElementById('wsStat'); if(el){ el.textContent=txt; el.style.color=ok?'var(--ok)':'var(--muted)'; } }
+function toggleLiveSession(){
+  if(liveES){ liveES.close(); liveES=null; document.getElementById('wsBtn').textContent='🔗 连接'; liveStatus('已断开',false); return; }
+  const sid=(document.getElementById('wsSession').value||'default').trim();
+  const tok=(document.getElementById('wsToken').value||'').trim();
+  const url=API+'/workspace/'+encodeURIComponent(sid)+'/stream'+(tok?('?token='+encodeURIComponent(tok)):'');
+  try{ liveES=new EventSource(url); }catch(e){ liveStatus('连接失败：'+e,false); return; }
+  document.getElementById('wsBtn').textContent='⏹ 断开';
+  liveStatus('连接中…',true);
+  const onmsg=ev=>{ try{ applyLiveSnapshot(JSON.parse(ev.data)); }catch(e){} };
+  liveES.addEventListener('snapshot',onmsg);
+  liveES.addEventListener('update',onmsg);
+  liveES.onerror=()=>liveStatus('连接中断（会自动重试）',false);
+}
+function applyLiveSnapshot(s){
+  if(!s) return;
+  liveStatus('已连接会话「'+(s.session||'')+'」· rev '+(s.revision||0)+(s.updated_at?(' · '+s.updated_at):''),true);
+  if(s.bench){ const bs=document.getElementById('evBench'); if(bs&&[...bs.options].some(o=>o.value===s.bench)&&bs.value!==s.bench){ bs.value=s.bench; renderEvalExtras(); } }
+  if(s.graph&&s.graph.nodes){ adoptGraph(s.graph); }
+  if(s.autotune&&s.autotune.ranked){ tuneResult={ranked:s.autotune.ranked}; if(document.getElementById('tuneBody')) renderTuneResults(); }
+  const note=s.note?('　'+s.note):'';
+  document.getElementById('conn').textContent='Agent 已更新画布（rev '+(s.revision||0)+'）'+note;
+}
+function pushCanvasToSession(){
+  const sid=(document.getElementById('wsSession').value||'default').trim();
+  const tok=(document.getElementById('wsToken').value||'').trim();
+  const body={graph:toGraph(), bench:document.getElementById('evBench').value, note:'用户在画布手改'};
+  fetch(API+'/workspace/'+encodeURIComponent(sid),{method:'POST',
+    headers:Object.assign({'Content-Type':'application/json'}, tok?{'Authorization':'Bearer '+tok}:{}),
+    body:JSON.stringify(body)})
+    .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(d=>liveStatus('已同步给 Agent · rev '+d.revision,true))
+    .catch(e=>liveStatus('同步失败：'+e,false));
 }
 
 function loadExample(){
