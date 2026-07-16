@@ -1,7 +1,7 @@
 # CLAUDE.md — 项目上下文与继续指南
 
 > 这份文件是给 Claude Code 新会话的"接手说明"。读完它 + `ARCHITECTURE.md` 就能无缝继续。
-> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 23 项全过）。
+> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 62 项全过）。
 
 ---
 
@@ -47,6 +47,7 @@
 | 自动调优 | `optplat/autotune.py` | AutoTuner(L1)：候选生成(粗调×精调×拟合+参数/噪声变异)、多试验评估、质量/时长/稳定打分、帕累托 |
 | 持久化 | `optplat/store.py` | SQLite 归档 / 断点续跑(start_point) / 一键回滚(rollback_to_best) |
 | 后端 API | `optplat/api.py` | FastAPI：`/catalog` `/vocs` `/run/graph` `/run/pipeline` `/`(画布) |
+| L2 MCP 服务器 | `optplat/mcp_server.py` | 把平台暴露成 13 个 MCP 工具供 Agent 驱动；配套 `optplat/solutions.py`(方案库) + `optplat/runner.py`(跑流程)；见 `MCP_AGENT.md` |
 | 托拉拽画布 | `web/index.html` | **纯 vanilla JS+SVG，无 CDN，离线可用**；产 {nodes,edges} JSON |
 | 表单 UI | `app.py` | Streamlit 交互控制台（早期 MVP 面） |
 | 仿真台/示例 | `optplat/demo.py` | `optical_bench` 模拟光耦合；`TWO_PHASE_*` 示例流程 |
@@ -76,7 +77,7 @@
   - **梯度上升(PI闪电式)** `gradient_ascent`：有限差分测局部梯度、沿上升方向步进+步长自适应。
   - **拟合公式回显**：`SurrogateFit`/`FormulaMethod`/`ParametricFit` 暴露 `fit_info`（峰位/参数/R²），引擎收进 `result.fits`（用 finally 保证全局早停也记录），画布对应**节点卡片显示拟合公式**。
   - **按场景示例 + 方案库**：`载入示例` 按当前仿真场景放量身流程（多峰/多模用贝叶斯全局、相关谷用单纯形、偏斜/尖峰用梯度上升等）；`📁 方案库` 内置各场景示例，并可选**整个文件夹批量加载**保存过的方案（webkitdirectory / 多选文件）。
-- **测试**：`python -m pytest -q` → **37 项全过**（algorithms / graph / p1b / api）。
+- **测试**：`python -m pytest -q` → **62 项全过**（algorithms / graph / p1b / api / autotune / mcp）。
 
 算法库（10 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
 `nelder_mead` `gradient_ascent`(PI闪电式) `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula` `bayesian`。
@@ -88,8 +89,15 @@
     - **帕累托 2D 可选轴**（质量/时长/稳定/评估次数任选两轴，画非支配前沿）。
   - **加权组合单目标**（`StageEngine._scorer` + 节点 `objective_weights`）：单目标算子可优化 `Σ w·目标`(各目标按自身 mode 计分)。
   - **模型接口**（`optplat/models.py`）：ModelProvider 可插拔，`analytic`/`dataset_idw`，为客户采集数据建模留口。
-  - **L2 MCP / L3 GLM5.1 副驾**：设计已定，待做（MCP SDK=MIT）。
-- **pytest 48 项全过**（algorithms/graph/p1b/api/autotune）。
+  - **L2 MCP 服务器（已做）**：`optplat/mcp_server.py` 用官方 MCP Python SDK(MIT) 把平台暴露成 13 个工具，
+    任何 MCP Agent（内部 GLM5.1 / Claude Desktop / Cursor）可驱动：`list_algorithms`/`list_benches`/
+    `get_default_vocs`/`new_workflow`/**`add_algorithm_node`(新增算法节点)**/`list_solutions`/
+    **`load_solution`(加载以前方案)**/`save_solution`/`delete_solution`/**`run_workflow`(跑仿真)**/
+    **`compare_strategies`(对比不同策略)**/`autotune`/`explain_result`。stdio + streamable-HTTP 双传输；
+    运行仍走统一引擎 + 安全限位，Agent 绕不过。方案存储 `optplat/solutions.py`（内置示例 + `solutions/` 文件库，
+    与画布『保存/方案库』互通）；运行入口 `optplat/runner.py`。配置与对接见 **`MCP_AGENT.md`**、入口 `run_mcp.py`。
+  - **L3 GLM5.1 副驾**：设计已定，待做（工具面已备好被驱动）。
+- **pytest 62 项全过**（algorithms/graph/p1b/api/autotune/mcp）。
 
 ## 5. 路线图（下一步候选，未做）
 
@@ -130,8 +138,9 @@ python -m optplat.api      # 后端 + 画布 → http://127.0.0.1:8000/   （/do
 python run_graph.py        # 命令行跑图 JSON（Dify 风格）
 python run_demo.py         # 命令行跑两阶段流程
 python demo_hardware.py    # 硬件+噪声/平均/安全+续跑+回滚
+python run_mcp.py          # L2 MCP 服务器（stdio；--http 走 HTTP）→ 供 Agent 驱动，配置见 MCP_AGENT.md
 streamlit run app.py       # 表单式控制台
-python -m pytest -q        # 23 项测试
+python -m pytest -q        # 62 项测试
 ```
 
 接自己的优化函数：改 `optplat/demo.py` 的 `optical_bench(x)` 与 `demo_vocs()`。

@@ -136,7 +136,10 @@ class CandidateResult(BaseModel):
 
 ## 4. 交付节奏
 - **Phase A（本次）**：`models.py`(ModelProvider) + `autotune.py`(候选生成/变异/评估/打分/帕累托) + `POST /autotune` + 画布面板 + 测试。
-- **Phase B**：MCP server 包装工具。
+- **Phase B（已做）**：MCP server 包装工具 —— `optplat/mcp_server.py`，13 个工具（含
+  `add_algorithm_node` / `load_solution` / `run_workflow` / `compare_strategies` / `autotune`），
+  stdio + streamable-HTTP 双传输；配套 `optplat/solutions.py`（方案库）+ `optplat/runner.py`（跑流程）。
+  配置与对接见 `MCP_AGENT.md`。
 - **Phase C**：GLM5.1 副驾（NL→IR + 权重推断 + 解释）。
 
 ## 5. 待定/迭代点
