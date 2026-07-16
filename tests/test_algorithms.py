@@ -30,6 +30,26 @@ def test_local_optimizers_find_y1_peak():
         assert abs(r["state"]["x2"] + 1.0) < 0.2, algo
 
 
+def test_gradient_ascent_finds_peak():
+    # PI 'lightning'-style measured-gradient ascent climbs the y1 lobe
+    r = _run(_stage("gradient_ascent", ["x1", "x2"], "y1"))
+    assert r["objectives"]["y1"] > 0.95
+    assert abs(r["state"]["x1"] - 2.0) < 0.4
+    assert abs(r["state"]["x2"] + 1.0) < 0.4
+
+
+def test_surrogate_fit_exposes_formula():
+    from optplat.generators import SurrogateFit
+    g = SurrogateFit(demo_vocs(), ["x3"], "y2", model="quadratic", n_samples=5)
+    g.set_base({"x3": 0.6})
+    for _ in range(12):
+        x = g.ask()
+        g.tell(x, -((x["x3"] - 0.6) ** 2))     # concave parabola, peak at 0.6
+        if g.done:
+            break
+    assert g.fit_info and "峰@" in g.fit_info    # fitted-formula summary returned
+
+
 def test_single_var_methods_optimize_y2():
     # pre-position x1,x2, then optimise y2 over x3 (peaks near x3=0.6)
     for algo, extra in (("quadratic_fit", {"r2_gate": 0.0}),

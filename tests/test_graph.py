@@ -87,6 +87,78 @@ def test_custom_algorithm_plugs_in():
     assert r["objectives"]["y1"] > 0.5        # found the lobe without any engine change
 
 
+def test_node_objective_mode_override():
+    # y1 peaks at (x1,x2)=(2,-1). A node that *minimises* y1 must drive it low,
+    # the opposite of the VOCS default (maximize) — proving the per-node override.
+    graph = {"nodes": [{"id": "n", "type": "algorithm", "data": {
+        "algorithm": "coordinate_descent", "variables": ["x1", "x2"],
+        "objective": "y1", "objective_mode": "minimize",
+        "stop": {"max_iter": 200}}}], "edges": []}
+    r = _run(graph)
+    assert r["objectives"]["y1"] < 0.05          # pushed away from the peak
+
+
+def test_node_objective_target_mode():
+    # drive y1 to a target value (标定): |y1 - 0.5| -> 0
+    graph = {"nodes": [{"id": "n", "type": "algorithm", "data": {
+        "algorithm": "coordinate_descent", "variables": ["x1", "x2"],
+        "objective": "y1", "objective_mode": "target", "objective_target": 0.5,
+        "stop": {"max_iter": 200}}}], "edges": []}
+    r = _run(graph)
+    assert abs(r["objectives"]["y1"] - 0.5) < 0.05
+
+
+def test_composite_weighted_objective():
+    # one operator optimises a weighted blend of y1 and y2 over all three vars
+    graph = {"nodes": [{"id": "n", "type": "algorithm", "data": {
+        "algorithm": "nelder_mead", "variables": ["x1", "x2", "x3"],
+        "objective": "y1", "objective_weights": {"y1": 0.5, "y2": 0.5},
+        "stop": {"max_iter": 400}}}], "edges": []}
+    r = _run(graph)
+    assert r["objectives"]["y1"] > 0.95 and r["objectives"]["y2"] > 0.9   # joint optimum
+    assert any("加权组合" in e for e in r["events"])
+
+
+def test_selective_channel_reads_and_cost():
+    # a y1-only stage (no keep, no until) must NOT read y2 during the stage;
+    # y2 is only measured once, by the initial prime(). Costs accumulate per read.
+    ev = Evaluator(optical_bench, costs={"y1": 1.0, "y2": 2.0})
+    graph = {"nodes": [{"id": "n", "type": "algorithm", "data": {
+        "algorithm": "coordinate_descent", "variables": ["x1", "x2"],
+        "objective": "y1", "stop": {"max_iter": 100}}}], "edges": []}
+    r = GraphRunner(demo_vocs(), ev, graph).run()
+    assert r["reads"]["y2"] == 1                       # only the prime() read
+    assert r["reads"]["y1"] == r["n_evals"]            # y1 read every evaluation
+    assert r["sim_seconds"] == r["reads"]["y1"] * 1.0 + r["reads"]["y2"] * 2.0
+
+
+def test_until_forces_extra_channel_reads():
+    # a global until referencing y2 forces y2 to be measured every step, even
+    # though the stage optimises y1 — you must read what you check.
+    ev = Evaluator(optical_bench, costs={"y1": 1.0, "y2": 2.0})
+    graph = {"until": "y1>=0.99 and y2>=0.99",
+             "nodes": [{"id": "n", "type": "algorithm", "data": {
+                 "algorithm": "coordinate_descent", "variables": ["x1", "x2"],
+                 "objective": "y1", "stop": {"max_iter": 60}}}], "edges": []}
+    r = GraphRunner(demo_vocs(), ev, graph).run()
+    assert r["reads"]["y2"] > 1                        # until makes y2 be read too
+
+
+def test_fit_formula_reported():
+    # from the initial point (x1,x2)=(2,-1) y1=1, so y2 is a clean gaussian in x3
+    graph = {"nodes": [{"id": "n", "type": "algorithm", "data": {
+        "algorithm": "gaussian_fit", "variables": ["x3"], "objective": "y2",
+        "n_samples": 7}}], "edges": []}
+    r = _run(graph)
+    assert r["fits"] and any("峰@" in v for v in r["fits"].values())
+
+
+def test_catalog_has_chinese_labels():
+    cat = {a["name"]: a for a in algorithm_catalog()}
+    assert cat["grid_scan"]["label"] == "网格扫描"
+    assert cat["bayesian"]["label"] and cat["bayesian"]["desc"]
+
+
 def test_to_mermaid_renders():
     m = to_mermaid(TWO_PHASE_GRAPH)
     assert "flowchart" in m and "find_light" in m and "-->" in m

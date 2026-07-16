@@ -13,7 +13,8 @@ already-tested stage logic.
 """
 from __future__ import annotations
 
-from typing import Optional
+import re
+from typing import Iterable, Optional
 
 from asteval import Interpreter
 
@@ -28,7 +29,7 @@ from .generators import (
     SurrogateFit,
 )
 from .registry import build_generator
-from .vocs import VOCS
+from .vocs import VOCS, Objective, ObjectiveMode
 
 
 class StopAll(Exception):
@@ -46,6 +47,7 @@ class StageEngine:
         self._last_x: dict[str, float] = dict(self.state)
         self.n_evals = 0
         self.events: list[str] = []
+        self.fits: dict[str, str] = {}            # stage name -> fitted-formula summary
         self.global_until: Optional[str] = None   # driver sets this; checked per-eval
 
     # ---- whitelisted condition evaluation ----
@@ -67,13 +69,66 @@ class StageEngine:
     def make_generator(self, step: dict) -> Generator:
         return build_generator(self.vocs, step)
 
+    # ---- per-stage objective (node may override the VOCS default) ----
+    def _objective(self, step: dict, obj_name: str) -> Objective:
+        """Objective for this stage.
+
+        Defaults to the VOCS-declared objective, but a node may override the
+        optimisation goal locally — `objective_mode` (maximize / minimize /
+        target / scan) and `objective_target` — so the same measured output can
+        be driven differently in different stages of one workflow.
+        """
+        base = self.vocs.objectives[obj_name]
+        mode = step.get("objective_mode")
+        if not mode:
+            return base
+        target = step.get("objective_target", base.target)
+        return Objective(mode=ObjectiveMode(mode), target=target)
+
+    # ---- which objective channels a stage actually needs to read ----
+    def _objs_in(self, expr: Optional[str]) -> set:
+        if not expr:
+            return set()
+        toks = set(re.findall(r"[A-Za-z_]\w*", str(expr)))
+        return toks & set(self.vocs.objectives)
+
+    def _needed_channels(self, step: dict) -> set:
+        """Union of the stage objective + every objective referenced by its
+        keep / stop.target / the global until — so we read exactly what the
+        stage needs to optimise AND to evaluate its stopping conditions, and
+        skip the rest (and their cost)."""
+        need = {step["objective"]}
+        need |= set(step.get("objective_weights") or {})       # composite objective refs
+        need |= self._objs_in(step.get("keep"))
+        need |= self._objs_in(step.get("stop", {}).get("target"))
+        need |= self._objs_in(self.global_until)
+        return need & set(self.vocs.objectives)
+
+    # ---- scalar score for a stage (single objective OR weighted composite) ----
+    def _scorer(self, step: dict, obj_name: str):
+        """Return a callable y_dict -> scalar score (higher = better).
+
+        A node may optimise a single objective (default), or a **weighted
+        composite** of several objectives via `objective_weights`
+        (e.g. {"y1":0.7,"y2":0.3}) — each objective is scored mode-aware
+        (max/min/target) then combined, so a single-objective operator can drive
+        a multi-objective trade-off.
+        """
+        weights = step.get("objective_weights")
+        if weights:
+            objs = {k: self.vocs.objectives[k] for k in weights if k in self.vocs.objectives}
+            return lambda y: sum(w * objs[k].score(y[k]) for k, w in weights.items() if k in objs)
+        obj = self._objective(step, obj_name)
+        return lambda y: obj.score(y[obj_name])
+
     # ---- one measurement ----
-    def evaluate(self, x: dict[str, float], stage: str) -> dict[str, float]:
+    def evaluate(self, x: dict[str, float], stage: str,
+                 channels: Optional[Iterable[str]] = None) -> dict[str, float]:
         self.n_evals += 1
         if self.n_evals > self.eval_budget:
             self.events.append("⛔ evaluation budget exhausted → stop")
             raise StopAll
-        y = self.evaluator.evaluate(x, stage=stage)
+        y = self.evaluator.evaluate(x, stage=stage, channels=channels)
         self.last_y.update(y)
         self._last_x = dict(x)
         return y
@@ -92,34 +147,44 @@ class StageEngine:
     def run_stage(self, step: dict) -> None:
         name = step.get("stage", step["algorithm"])
         obj_name = step["objective"]
-        obj = self.vocs.objectives[obj_name]
+        scorer = self._scorer(step, obj_name)
         keep = step.get("keep")
         max_iter = step.get("stop", {}).get("max_iter", 300)
 
         gen = self.make_generator(step)
         gen.set_base(self.state)
+        channels = self._needed_channels(step)
+        goal = (f"加权组合{step['objective_weights']}" if step.get("objective_weights") else obj_name)
         self.events.append(
-            f"▶ stage '{name}': {step['algorithm']} on {step['variables']} → {obj_name}")
+            f"▶ stage '{name}': {step['algorithm']} on {step['variables']} → {goal}"
+            f"  [读取通道 {sorted(channels)}]")
 
-        for _ in range(max_iter):
-            sub_x = gen.ask()
-            x = {**self.state, **sub_x}
-            y = self.evaluate(x, name)
-            score = obj.score(y[obj_name])
-            feasible = self._cond_local(keep, x, y) if keep else True
-            eff_score = score if feasible else score - 1e9    # penalty method
-            gen.tell(sub_x, eff_score)
-            self.check_global()
-            stage_target = step.get("stop", {}).get("target")
-            if stage_target and self.cond(stage_target):
-                self.events.append("   stage `stop.target` met")
-                break
-            if gen.done:
-                break
+        try:
+            for _ in range(max_iter):
+                sub_x = gen.ask()
+                x = {**self.state, **sub_x}
+                y = self.evaluate(x, name, channels)
+                score = scorer(y)
+                feasible = self._cond_local(keep, x, y) if keep else True
+                eff_score = score if feasible else score - 1e9    # penalty method
+                gen.tell(sub_x, eff_score)
+                self.check_global()
+                stage_target = step.get("stop", {}).get("target")
+                if stage_target and self.cond(stage_target):
+                    self.events.append("   stage `stop.target` met")
+                    break
+                if gen.done:
+                    break
 
-        if gen.best_x is not None and gen.best_score > float("-inf"):
-            self.state.update(gen.best_x)
-            self.evaluate(dict(self.state), f"{name}:settle")
+            if gen.best_x is not None and gen.best_score > float("-inf"):
+                self.state.update(gen.best_x)
+                self.evaluate(dict(self.state), f"{name}:settle", channels)
+        finally:
+            # record the fitted formula even if a global early-stop unwound us
+            info = getattr(gen, "fit_info", None)
+            if info:
+                self.fits[name] = info
+                self.events.append(f"   拟合公式：{info}")
         self.events.append(
             f"   best {obj_name}={self.last_y.get(obj_name):.4g} at "
             + ", ".join(f"{v}={self.state[v]:.3g}" for v in step["variables"]))
@@ -136,4 +201,7 @@ class StageEngine:
             "n_evals": self.n_evals,
             "events": self.events,
             "history": self.evaluator.history,
+            "fits": self.fits,
+            "reads": getattr(self.evaluator, "reads", {}),
+            "sim_seconds": getattr(self.evaluator, "sim_seconds", 0.0),
         }

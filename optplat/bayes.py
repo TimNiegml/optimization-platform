@@ -31,11 +31,12 @@ class BayesianGenerator(Generator):
         import optuna
 
         optuna.logging.set_verbosity(optuna.logging.WARNING)
-        if sampler == "gp":
+        import importlib.util
+        if sampler == "gp" and importlib.util.find_spec("torch") is not None:
             smp = optuna.samplers.GPSampler(seed=seed)
         elif sampler == "random":
             smp = optuna.samplers.RandomSampler(seed=seed)
-        else:
+        else:                                        # tpe, or gp without torch → TPE
             smp = optuna.samplers.TPESampler(seed=seed)
         self._study = optuna.create_study(direction="maximize", sampler=smp)
         self.n_calls = n_calls

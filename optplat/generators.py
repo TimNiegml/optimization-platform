@@ -23,6 +23,7 @@ Algorithm library:
 """
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from .vocs import VOCS
@@ -37,6 +38,7 @@ class Generator:
         self.objective = objective
         self.done = False
         self.failed = False          # set True if the algorithm gives up (e.g. bad fit)
+        self.fit_info: Optional[str] = None   # fitters set a human-readable formula
         self.best_x: Optional[dict[str, float]] = None
         self.best_score: float = float("-inf")
 
@@ -194,14 +196,20 @@ class SurrogateFit(Generator):
                 mod = GaussianModel()
                 res = mod.fit(ys, mod.guess(ys, x=xs), x=xs)
                 x_star = res.params["center"].value
+                sigma = res.params["sigma"].value
+                info = (f"高斯拟合 {self.objective}({self.var}) ≈ 峰@{self.var}={x_star:.4g}, "
+                        f"σ={sigma:.4g}  (R²={getattr(res,'rsquared',1.0):.3f})")
             else:  # quadratic
                 mod = QuadraticModel()
                 res = mod.fit(ys, mod.guess(ys, x=xs), x=xs)
                 a = res.params["a"].value
                 b = res.params["b"].value
+                c = res.params["c"].value
                 if abs(a) < 1e-12:
                     raise ValueError("degenerate quadratic")
                 x_star = -b / (2 * a)
+                info = (f"二次拟合 {self.objective} ≈ {a:.4g}·{self.var}² + {b:.4g}·{self.var} "
+                        f"+ {c:.4g}  → 峰@{self.var}={x_star:.4g}  (R²={getattr(res,'rsquared',1.0):.3f})")
             r2 = getattr(res, "rsquared", 1.0)
         except Exception:
             self.failed = True
@@ -214,6 +222,7 @@ class SurrogateFit(Generator):
             self.done = True
             self._proposed = None
             return
+        self.fit_info = info
         self._proposed = v.clip(x_star)     # extrapolation clip
 
 
@@ -450,6 +459,8 @@ class FormulaMethod(Generator):
             return
         h = x1 - x0
         x_star = x1 + 0.5 * h * (y0 - y2) / denom
+        self.fit_info = (f"三点解析(抛物线插值) {self.objective}({self.var})：峰@{self.var}="
+                         f"{self.vocs.variables[self.var].clip(x_star):.4g}")
         self._proposed = self.vocs.variables[self.var].clip(x_star)
 
 
@@ -554,6 +565,12 @@ class ParametricFit(Generator):
             xg = np.linspace(v.low, v.high, 501)
             yg = np.asarray(res.eval(x=xg), float)
             x_star = float(xg[int(np.argmax(yg))])
+            free = ", ".join(f"{n}={p.value:.4g}" for n, p in res.params.items() if p.vary)
+            pinned = ", ".join(f"{n}={v2}" for n, v2 in self.fixed.items())
+            info = f"参数拟合[{self.model}] {self.objective}({self.var})：{free or '—'}"
+            if pinned:
+                info += f"；钉死 {pinned}"
+            info += f"  → 峰@{self.var}={x_star:.4g}  (R²={r2:.3f})"
         except Exception:
             self.failed = True
             self.done = True
@@ -564,4 +581,85 @@ class ParametricFit(Generator):
             self.done = True
             self._proposed = None
             return
+        self.fit_info = info
         self._proposed = v.clip(x_star)
+
+
+class GradientAscent(Generator):
+    """梯度上升 (PI 'lightning' 式局部对准).
+
+    Emulates a fast gradient alignment: at the current point it probes a tiny
+    step on each axis to estimate the local gradient by finite differences,
+    then takes a step along the (normalised) ascent direction. A trial that
+    improves is accepted and the step grows; a trial that fails shrinks the
+    step and retries. Converges when the step falls below tolerance.
+
+    Multi-variable, one evaluation per ask(), all points clipped into bounds.
+    Derivative-free at the interface — the 'gradient' is measured, exactly like
+    a real gradient-alignment routine on hardware.
+    """
+
+    def __init__(self, vocs, variables, objective,
+                 probe_frac=0.02, step_frac=0.15, tol_frac=1e-3, max_line=6):
+        super().__init__(vocs, variables, objective)
+        self.range = {v: vocs.variables[v].high - vocs.variables[v].low for v in variables}
+        self.h = {v: probe_frac * self.range[v] for v in variables}
+        self.lr = step_frac
+        self.tol = tol_frac
+        self.max_line = max_line
+        self._phase = "base"
+        self._base_val: Optional[float] = None
+        self._dir: dict[str, float] = {}
+        self._probe_i = 0
+        self._slope: dict[str, float] = {}
+        self._line_tries = 0
+
+    def _clip(self, v, val):
+        return self.vocs.variables[v].clip(val)
+
+    def ask(self) -> dict[str, float]:
+        if self._phase == "base":
+            return dict(self._base)
+        if self._phase == "probe":
+            v = self.variables[self._probe_i]
+            val = self._clip(v, self._base[v] + self.h[v])
+            if val == self._base[v]:                      # at the upper wall → probe back
+                val = self._clip(v, self._base[v] - self.h[v])
+            cand = dict(self._base); cand[v] = val
+            return cand
+        # line: step along the ascent direction
+        return {v: self._clip(v, self._base[v] + self.lr * self._dir.get(v, 0.0) * self.range[v])
+                for v in self.variables}
+
+    def tell(self, x: dict[str, float], score: float) -> None:
+        self._record(x, score)
+        if self._phase == "base":
+            self._base = {v: x[v] for v in self.variables}
+            self._base_val = score
+            self._probe_i = 0; self._slope = {}; self._phase = "probe"
+            return
+        if self._phase == "probe":
+            v = self.variables[self._probe_i]
+            dx = x[v] - self._base[v]
+            self._slope[v] = (score - self._base_val) / dx if abs(dx) > 1e-12 else 0.0
+            self._probe_i += 1
+            if self._probe_i >= len(self.variables):
+                # gradient in normalised coords; normalise to a unit direction
+                gn = {v: self._slope[v] * self.range[v] for v in self.variables}
+                mag = math.sqrt(sum(g * g for g in gn.values()))
+                if mag < 1e-9:
+                    self.done = True
+                    return
+                self._dir = {v: gn[v] / mag for v in self.variables}
+                self._phase = "line"; self._line_tries = 0
+            return
+        # line result
+        if score > self._base_val + 1e-12:                # improved → accept, grow step
+            self._base = {v: x[v] for v in self.variables}
+            self._base_val = score
+            self.lr = min(self.lr * 1.5, 0.5)
+            self._probe_i = 0; self._slope = {}; self._phase = "probe"
+        else:                                             # no gain → shrink & retry
+            self.lr *= 0.5; self._line_tries += 1
+            if self.lr < self.tol or self._line_tries >= self.max_line:
+                self.done = True
