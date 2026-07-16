@@ -62,24 +62,32 @@ class HardwareEvaluator:
     def __init__(self, stage: Stage, meter: Meter,
                  settle_time: float = 0.0, averages: int = 1,
                  safety: Optional[SafetyLimits] = None,
-                 store: Optional[object] = None):
+                 store: Optional[object] = None,
+                 costs: Optional[dict[str, float]] = None):
         self.stage = stage
         self.meter = meter
         self.settle_time = settle_time
         self.averages = max(1, averages)
         self.safety = safety
         self.store = store
+        self.costs = costs or {}
         self.history: list[dict] = []
+        self.reads: dict[str, int] = {}
+        self.sim_seconds: float = 0.0
 
-    def evaluate(self, x: dict[str, float], stage: str = "") -> dict[str, float]:
+    def evaluate(self, x: dict[str, float], stage: str = "",
+                 channels=None) -> dict[str, float]:
         target = self.safety.enforce(x) if self.safety else x
         for axis, val in target.items():
             self.stage.move(axis, val)
         if self.settle_time:
             time.sleep(self.settle_time)
         reads = [self.meter.read() for _ in range(self.averages)]
-        keys = reads[0].keys()
+        keys = reads[0].keys() if channels is None else [k for k in channels if k in reads[0]]
         y = {k: sum(r[k] for r in reads) / len(reads) for k in keys}
+        for k in y:
+            self.reads[k] = self.reads.get(k, 0) + 1
+            self.sim_seconds += self.costs.get(k, 0.0)
         self.history.append({"stage": stage, **target, **y})
         if self.store is not None:
             self.store.append(stage, target, y)

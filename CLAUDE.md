@@ -68,10 +68,15 @@
   - **逐变量安全限位**：`EvaluatorConfig.safety_limits` 覆盖；勾选后画布逐自变量填 low/high。模拟硬件下有**接口映射**占位(自变量↔执行器 / 目标↔功率计)。
   - **节点配色 + 循环回边绕行布线**（回边/自环走下方，避免交叉）；**保存/加载方案 JSON**；**表格式目标条件**(until 构建器) + 原始表达式。
   - **更轻盈的浅色主题**(默认) + 深色切换；帮助补**可用表达式**说明(比较/and·or·not/abs·min·max/变量名)。
-- **测试**：`python -m pytest -q` → **29 项全过**（algorithms / graph / p1b / api）。
+- **P2c 评估架构 + 算法/拟合增强**（Chromium 验证，pytest 37 项全过）：
+  - **按通道选择性读取 + 成本模型**：`Objective` 加 `cost`(秒)/`device`/`param`（通道规范）；`Evaluator`/`HardwareEvaluator.evaluate(x,stage,channels)` 只读需要的通道；`StageEngine._needed_channels`＝目标∪keep∪stop∪until 引用的目标——**只优化 y1 的步骤不读 y2**；结果返回 `reads`/`sim_seconds`；画布显示测量耗时/读取次数，通道规范可编辑(设备/参数/耗时)，`channel_costs` 可覆盖。
+  - **经典测试函数**：`demo.py` 加 Rosenbrock(相关谷)/Rastrigin/Ackley(多峰)；`POST /surface` 采样响应面；画布 2D 视图可**叠加响应面等高线**(纯函数场景)。
+  - **梯度上升(PI闪电式)** `gradient_ascent`：有限差分测局部梯度、沿上升方向步进+步长自适应。
+  - **拟合公式回显**：`SurrogateFit`/`FormulaMethod`/`ParametricFit` 暴露 `fit_info`（峰位/参数/R²），引擎收进 `result.fits`（用 finally 保证全局早停也记录），画布对应**节点卡片显示拟合公式**。
+- **测试**：`python -m pytest -q` → **37 项全过**（algorithms / graph / p1b / api）。
 
-算法库（8 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
-`nelder_mead` `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula` `bayesian`。
+算法库（10 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
+`nelder_mead` `gradient_ascent`(PI闪电式) `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula` `bayesian`。
 
 ## 5. 路线图（下一步候选，未做）
 

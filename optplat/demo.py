@@ -48,15 +48,54 @@ def skew_bench(x: dict[str, float]) -> dict[str, float]:
     return {"y1": round(y1, 6), "y2": round(y2, 6)}
 
 
+def _y2_from(y1, x3):
+    return y1 * math.exp(-((x3 - 0.6) ** 2) / (2 * 0.25 ** 2))
+
+
+def rosenbrock_bench(x: dict[str, float]) -> dict[str, float]:
+    """经典 Rosenbrock『香蕉谷』：强相关的狭长弯谷，最优在 (1,1)。
+    逐轴下降极慢，考验相关变量的联合优化（协方差）。"""
+    x1, x2, x3 = x["x1"], x["x2"], x["x3"]
+    f = (1 - x1) ** 2 + 100 * (x2 - x1 ** 2) ** 2      # min 0 @ (1,1)
+    y1 = math.exp(-f / 200.0)
+    return {"y1": round(y1, 6), "y2": round(_y2_from(y1, x3), 6)}
+
+
+def rastrigin_bench(x: dict[str, float]) -> dict[str, float]:
+    """经典 Rastrigin：大量规则排布的局部极大，全局在 (0,0)。强多峰。"""
+    x1, x2, x3 = x["x1"], x["x2"], x["x3"]
+    f = 20 + (x1 ** 2 - 10 * math.cos(2 * math.pi * x1)) \
+           + (x2 ** 2 - 10 * math.cos(2 * math.pi * x2))     # min 0 @ (0,0)
+    y1 = math.exp(-f / 18.0)
+    return {"y1": round(y1, 6), "y2": round(_y2_from(y1, x3), 6)}
+
+
+def ackley_bench(x: dict[str, float]) -> dict[str, float]:
+    """经典 Ackley：近乎平坦的外围 + 中心一个尖锐全局峰在 (0,0)，多峰、易困外围。"""
+    x1, x2, x3 = x["x1"], x["x2"], x["x3"]
+    f = (-20 * math.exp(-0.2 * math.sqrt(0.5 * (x1 ** 2 + x2 ** 2)))
+         - math.exp(0.5 * (math.cos(2 * math.pi * x1) + math.cos(2 * math.pi * x2)))
+         + math.e + 20)                                       # min 0 @ (0,0)
+    y1 = math.exp(-f / 6.0)
+    return {"y1": round(y1, 6), "y2": round(_y2_from(y1, x3), 6)}
+
+
 # Selectable simulated benches (the canvas 场景 dropdown reads this via /benches).
 # All share the same variable space (x1,x2,x3 / y1,y2) so one VOCS stays valid.
+# `smooth` marks continuous surfaces worth drawing as a response-surface contour.
 BENCHES = {
-    "single_peak": {"label": "单峰光纤耦合", "func": optical_bench,
+    "single_peak": {"label": "单峰光纤耦合", "func": optical_bench, "smooth": True,
                     "desc": "一个高斯主瓣，经典找光→精调，最好上手。"},
-    "multi_peak": {"label": "多峰光耦合", "func": multi_peak_bench,
+    "multi_peak": {"label": "多峰光耦合", "func": multi_peak_bench, "smooth": True,
                    "desc": "主瓣+多个旁瓣（局部极大），考验找光/全局搜索是否会卡旁瓣。"},
-    "skew_peak": {"label": "偏斜相关峰", "func": skew_bench,
+    "skew_peak": {"label": "偏斜相关峰", "func": skew_bench, "smooth": True,
                   "desc": "峰沿斜轴拉长、两轴相关，逐轴下降慢，单纯形/贝叶斯更优。"},
+    "rosenbrock": {"label": "Rosenbrock 香蕉谷", "func": rosenbrock_bench, "smooth": True,
+                   "desc": "经典相关谷（协方差），最优在(1,1)；逐轴下降慢，考验联合优化。"},
+    "rastrigin": {"label": "Rastrigin 多峰", "func": rastrigin_bench, "smooth": True,
+                  "desc": "经典强多峰，大量局部极大，全局在(0,0)；找光/贝叶斯的试金石。"},
+    "ackley": {"label": "Ackley 多峰", "func": ackley_bench, "smooth": True,
+               "desc": "经典多峰，外围近平坦、中心尖峰在(0,0)，容易困在外围。"},
 }
 
 
@@ -72,8 +111,12 @@ def demo_vocs() -> VOCS:
             "x3": Variable(low=0.0, high=1.5),
         },
         objectives={
-            "y1": Objective(mode=ObjectiveMode.MAXIMIZE),
-            "y2": Objective(mode=ObjectiveMode.MAXIMIZE),
+            # 通道规范 + 读取成本示例：读一次 y1≈1s（光功率计），y2≈2s（偏振分析仪）。
+            # 只优化 y1 的阶段不会去读 y2，省掉 2s/点。
+            "y1": Objective(mode=ObjectiveMode.MAXIMIZE, cost=1.0,
+                            device="光功率计", param="power"),
+            "y2": Objective(mode=ObjectiveMode.MAXIMIZE, cost=2.0,
+                            device="偏振分析仪", param="wdl_balance"),
         },
     )
 

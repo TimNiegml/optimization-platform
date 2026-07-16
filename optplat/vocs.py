@@ -33,9 +33,19 @@ class Variable(BaseModel):
 
 
 class Objective(BaseModel):
-    """A measured output we care about."""
+    """A measured output we care about.
+
+    `cost` models the price of *reading this channel once* (e.g. seconds for a
+    power-meter integration). The engine only measures the channels a stage
+    actually needs, so a step that optimises y1 alone never pays y2's cost.
+    `device` / `param` describe which instrument+parameter the channel maps to
+    (光功率计 / 指向角 …) — the '通道规范', carried for real-hardware wiring.
+    """
     mode: ObjectiveMode = ObjectiveMode.MAXIMIZE
     target: Optional[float] = None       # required when mode == TARGET
+    cost: float = 0.0                    # seconds to read this channel once
+    device: Optional[str] = None         # e.g. "光功率计"
+    param: Optional[str] = None          # e.g. "power" / "指向角"
 
     def direction(self) -> int:
         """+1 if larger score is better, -1 if smaller is better.

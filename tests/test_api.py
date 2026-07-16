@@ -46,8 +46,34 @@ def test_run_graph_hardware_sim():
 def test_benches_lists_scenarios():
     d = client.get("/benches").json()["benches"]
     names = {b["name"] for b in d}
-    assert {"single_peak", "multi_peak", "skew_peak"} <= names
+    assert {"single_peak", "multi_peak", "skew_peak",
+            "rosenbrock", "rastrigin", "ackley"} <= names
     assert all(b["label"] and b["desc"] for b in d)
+
+
+def test_vocs_exposes_channel_cost():
+    objs = client.get("/vocs").json()["objectives"]
+    assert objs["y1"]["cost"] == 1.0 and objs["y1"]["device"] == "光功率计"
+    assert objs["y2"]["cost"] == 2.0
+
+
+def test_surface_returns_grid():
+    r = client.post("/surface", json={"bench": "single_peak", "objective": "y1",
+                                      "xvar": "x1", "yvar": "x2", "nx": 11, "ny": 9})
+    assert r.status_code == 200
+    d = r.json()
+    assert len(d["xs"]) == 11 and len(d["ys"]) == 9
+    assert len(d["z"]) == 9 and len(d["z"][0]) == 11
+    # the sampled surface must contain the near-1.0 peak somewhere
+    assert max(max(row) for row in d["z"]) > 0.9
+
+
+def test_run_reports_cost_and_fits():
+    r = client.post("/run/graph", json={"graph": TWO_PHASE_GRAPH,
+                                        "evaluator": {"mode": "function"}})
+    d = r.json()
+    assert d["sim_seconds"] > 0 and "y1" in d["reads"]
+    assert isinstance(d["fits"], dict)
 
 
 def test_run_graph_multi_peak_bench():
