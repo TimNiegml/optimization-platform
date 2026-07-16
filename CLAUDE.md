@@ -84,9 +84,12 @@
 - **P3 Agent/AutoTuner（Phase A 已做）**：见 `AGENT_AUTOTUNE_DESIGN.md`。
   - **L1 AutoTuner**（`optplat/autotune.py`）：在"粗调(网格/线扫/**贝叶斯**)×精调(单纯形/坐标/梯度)×拟合"三相空间搜索，
     变异集＝参数变异(含拟合/解析参数)+噪声变异；多试验按**质量/时长(sim_seconds)/稳定性(达标率或重复性)**打分、排名、帕累托；`POST /autotune`；画布 **🤖 自动调优** 面板(三权重滑块+帕累托散点+候选卡片+一键采用)。
+    - **变异 registry 驱动**：相/算法按 `category→phase` 自动分组、档位从参数 schema 派生（`phase_algorithms`/`default_variation`），新算法自动纳入；画布**变异表格**可勾选/编辑（`GET /autotune/space`、`TuneSpec.variation`）。
+    - **帕累托 2D 可选轴**（质量/时长/稳定/评估次数任选两轴，画非支配前沿）。
+  - **加权组合单目标**（`StageEngine._scorer` + 节点 `objective_weights`）：单目标算子可优化 `Σ w·目标`(各目标按自身 mode 计分)。
   - **模型接口**（`optplat/models.py`）：ModelProvider 可插拔，`analytic`/`dataset_idw`，为客户采集数据建模留口。
   - **L2 MCP / L3 GLM5.1 副驾**：设计已定，待做（MCP SDK=MIT）。
-- **pytest 43 项全过**（algorithms/graph/p1b/api/autotune）。
+- **pytest 48 项全过**（algorithms/graph/p1b/api/autotune）。
 
 ## 5. 路线图（下一步候选，未做）
 

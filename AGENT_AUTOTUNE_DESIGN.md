@@ -44,11 +44,12 @@
 ### 2.2 变异集（Variation Set）— 三个变异轴
 候选 = 三相组合 **×** 下面三种变异：
 
-1. **参数变异 param variation**：对每个算法，从 registry 的参数 schema（min/max/default）取几档展开。
-   包括**解析/拟合模型的参数**：如 `gaussian_fit`/`parametric_fit` 的 `r2_gate`、`n_samples`，
-   `parametric_fit` 的 `model`/`fixed`（钉死的已知参数），`grid_scan.n_per_axis`，
-   `bayesian.n_calls/sampler`，`gradient_ascent.step_frac/probe_frac` 等。
-   （每个算法在 `autotune` 里登记一个"变异档位表"，默认从 registry schema 推，可覆盖。）
+1. **参数变异 param variation（registry 驱动，非写死）**：相/算法从 registry 按
+   `category→phase` 自动分组（`find-light`/`bayesian`→粗调、`local`→精调、`fit`/`analytic`→拟合），
+   **新算法只要声明 category 就自动进对应相**；每个算法的变异档位**从其参数 schema 自动派生**
+   （默认+各参数极值），无需在 autotune 里写死。用户可在画布**变异表格**里勾选参与的算法、
+   编辑每个参数的取值档位（`TuneSpec.variation` 覆盖）。`GET /autotune/space` 提供表格数据。
+   —— 已实现：`phase_algorithms()` / `default_variation()` / 画布『变异表格』。
 
 2. **噪声变异 noise variation**：在多个噪声档（如 `σ∈{0, 0.02, 0.05}`）× 多 seed 下重复跑，
    考察**稳定性/鲁棒性**——好方案要在噪声下仍达标、方差小。
@@ -115,9 +116,15 @@ class CandidateResult(BaseModel):
 ```
 
 ### 2.7 API / 画布
-- `POST /autotune` → `{ranked: [CandidateResult...], pareto: [...], spec_echo}`。
-- 画布 **🤖 自动调优** 面板：三滑块（质量/速度/稳定）+ 噪声档 + 预算 → 运行 →
-  候选卡片（指标 + "采用"一键上画布）+ **帕累托散点**（x=时长, y=质量, 色=稳定）。
+- `POST /autotune` → `{ranked: [CandidateResult...], spec_echo}`；`GET /autotune/space`（变异表格数据）。
+- 画布 **🤖 自动调优** 面板：三滑块（质量/速度/稳定）+ 噪声档 + 预算 + **变异表格**（勾选算法/编辑参数档位）→ 运行 →
+  候选卡片（指标 + "采用"一键上画布）+ **帕累托散点，坐标轴可选**（质量/时长/稳定/评估次数任选两轴，画 2D 非支配前沿）。
+
+### 2.8 加权组合单目标（composite objective）
+单目标算子（单纯形/坐标/梯度/拟合）可优化**多目标的加权合成**：节点带 `objective_weights`
+（如 `{"y1":0.7,"y2":0.3}`），引擎对每个目标**按其自身 mode(最大/最小/逼近)计分后加权求和**
+作为该 stage 的标量分数；通道读取自动覆盖所有被引用目标。画布节点属性面板可勾『加权组合多目标』并逐目标填权重。
+—— 已实现：`StageEngine._scorer`；画布 composite 权重编辑。
 
 ---
 

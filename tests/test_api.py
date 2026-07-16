@@ -68,6 +68,22 @@ def test_surface_returns_grid():
     assert max(max(row) for row in d["z"]) > 0.9
 
 
+def test_autotune_space_lists_phases():
+    d = client.get("/autotune/space").json()["phases"]
+    assert set(d) == {"coarse", "refine", "fit"}
+    coarse = {a["name"] for a in d["coarse"]}
+    assert "grid_scan" in coarse and "bayesian" in coarse       # bayesian is coarse
+    assert all("default_variation" in a for a in d["refine"])
+
+
+def test_autotune_endpoint_ranks():
+    r = client.post("/autotune", json={"bench": "single_peak", "n_trials": 1,
+                                       "noise_levels": [0.0], "max_candidates": 5})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["n_candidates"] > 0 and d["ranked"][0]["quality"] > 0.9
+
+
 def test_run_reports_cost_and_fits():
     r = client.post("/run/graph", json={"graph": TWO_PHASE_GRAPH,
                                         "evaluator": {"mode": "function"}})

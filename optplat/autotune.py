@@ -35,23 +35,59 @@ from .models import build_model
 from .registry import REGISTRY
 from .vocs import VOCS
 
-# ---- default per-algorithm 变异档位 (param variation tables) ----
-COARSE_VARIANTS = {
-    "grid_scan":  [{"n_per_axis": 7}, {"n_per_axis": 11}],
-    "line_scan":  [{"n_per_axis": 9}],
-    "bayesian":   [{"n_calls": 40, "sampler": "tpe"}, {"n_calls": 60, "sampler": "tpe"}],
+# Which registry `category` belongs to which pipeline phase. A NEW algorithm
+# only has to declare its category — it then joins the right phase automatically,
+# so the variation set is never hard-wired to a fixed algorithm list.
+CATEGORY_PHASE = {
+    "find-light": "coarse", "bayesian": "coarse",
+    "local": "refine",
+    "fit": "fit", "analytic": "fit",
 }
-REFINE_VARIANTS = {
-    "nelder_mead":        [{}],
-    "coordinate_descent": [{}],
-    "gradient_ascent":    [{"step_frac": 0.15}, {"step_frac": 0.25}],
-}
-FIT_VARIANTS = {
-    "gaussian_fit":   [{"r2_gate": 0.9}],
-    "quadratic_fit":  [{"r2_gate": 0.9}],
-    "formula":        [{}],
-    "parametric_fit": [{"model": "gaussian"}],
-}
+
+
+def algo_phase(algo: str) -> Optional[str]:
+    spec = REGISTRY.get(algo)
+    return CATEGORY_PHASE.get(spec.category) if spec else None
+
+
+def phase_algorithms() -> dict[str, list[str]]:
+    """Group all registered algorithms into coarse / refine / fit phases."""
+    out: dict[str, list[str]] = {"coarse": [], "refine": [], "fit": []}
+    for name, spec in REGISTRY.items():
+        ph = CATEGORY_PHASE.get(spec.category)
+        if ph:
+            out[ph].append(name)
+    return out
+
+
+def _param_value_set(meta: dict) -> list:
+    """Candidate values for one param, auto-derived from its schema."""
+    t = meta.get("type")
+    if t == "enum" and meta.get("options"):
+        return list(meta["options"])
+    if t in ("int", "float"):
+        vals = []
+        if "min" in meta:
+            vals.append(int(meta["min"]) if t == "int" else float(meta["min"]))
+        if "max" in meta:
+            vals.append(int(meta["max"]) if t == "int" else float(meta["max"]))
+        return vals
+    return []                                   # str / dict: not auto-enumerable
+
+
+def default_variation(algo: str) -> list[dict]:
+    """Auto-build the 变异档位 for an algorithm from its registry param schema:
+    the default (empty = builder defaults) plus one variant per param extreme.
+    Any user override in TuneSpec.variation replaces this."""
+    spec = REGISTRY.get(algo)
+    params = (spec.params if spec else {}) or {}
+    variants = [{}]
+    for pname, meta in params.items():
+        default = meta.get("default")
+        for v in _param_value_set(meta):
+            if v != default:
+                variants.append({pname: v})
+    return variants
 
 
 class TuneSpec(BaseModel):
@@ -70,9 +106,14 @@ class TuneSpec(BaseModel):
     eval_budget: int = 2000
     seed: int = 0
     param_variation: bool = True
-    allow_coarse: list[str] = Field(default_factory=lambda: ["grid_scan", "line_scan", "bayesian"])
-    allow_refine: list[str] = Field(default_factory=lambda: ["nelder_mead", "coordinate_descent", "gradient_ascent"])
-    allow_fit: list[str] = Field(default_factory=lambda: ["gaussian_fit", "quadratic_fit", "formula"])
+    # None = use ALL registered algorithms in that phase (new algorithms included
+    # automatically). A list restricts to those algorithms.
+    allow_coarse: Optional[list[str]] = None
+    allow_refine: Optional[list[str]] = None
+    allow_fit: Optional[list[str]] = None
+    # per-algorithm 变异档位 override: {algo: [ {param: value, ...}, ... ]}.
+    # Absent algorithms fall back to default_variation() from the param schema.
+    variation: Optional[dict[str, list[dict]]] = None
 
 
 def _label(algo: str) -> str:
@@ -80,24 +121,31 @@ def _label(algo: str) -> str:
     return (spec.label if spec and spec.label else algo)
 
 
-def _variants(algo: str, table: dict, param_variation: bool) -> list[dict]:
-    vs = table.get(algo, [{}])
-    return vs if param_variation else vs[:1]
+def _variants(spec: TuneSpec, algo: str) -> list[dict]:
+    if spec.variation and algo in spec.variation:
+        return spec.variation[algo] or [{}]
+    return default_variation(algo) if spec.param_variation else [{}]
 
 
-def _phase_options(allow: list[str], table: dict, param_variation: bool):
+def _phase_options(spec: TuneSpec, phase: str, allow: Optional[list[str]], nvars: int):
+    algos = allow if allow is not None else phase_algorithms()[phase]
     opts = [("none", {})]
-    for algo in allow:
-        for p in _variants(algo, table, param_variation):
+    for algo in algos:
+        s = REGISTRY.get(algo)
+        if s is None:
+            continue
+        if nvars > 1 and s.single_var:            # single-var algo can't drive a multi-var phase
+            continue
+        for p in _variants(spec, algo):
             opts.append((algo, p))
     return opts
 
 
 def generate_candidates(spec: TuneSpec) -> list[dict]:
-    """Build the candidate workflow graphs (three-phase combos × param variation)."""
-    coarse = _phase_options(spec.allow_coarse, COARSE_VARIANTS, spec.param_variation)
-    refine = _phase_options(spec.allow_refine, REFINE_VARIANTS, spec.param_variation)
-    fit = _phase_options(spec.allow_fit, FIT_VARIANTS, spec.param_variation) \
+    """Build the candidate workflow graphs (three-phase combos × variation)."""
+    coarse = _phase_options(spec, "coarse", spec.allow_coarse, len(spec.landscape_vars))
+    refine = _phase_options(spec, "refine", spec.allow_refine, len(spec.landscape_vars))
+    fit = _phase_options(spec, "fit", spec.allow_fit, len(spec.balance_vars)) \
         if spec.balance_obj else [("none", {})]
 
     combos = []
@@ -181,9 +229,13 @@ def evaluate_candidate(spec: TuneSpec, vocs: VOCS, model_fn, costs, graph: dict)
     for noise in spec.noise_levels:
         for t in range(spec.n_trials):
             seed = spec.seed + t * 7 + int(noise * 1000)
-            ev = _make_evaluator(vocs, model_fn, costs, noise, seed)
-            res = GraphRunner(vocs, ev, graph, eval_budget=spec.eval_budget).run()
-            qs.append(float(res["objectives"].get(qobj, float("nan"))))
+            try:
+                ev = _make_evaluator(vocs, model_fn, costs, noise, seed)
+                res = GraphRunner(vocs, ev, graph, eval_budget=spec.eval_budget).run()
+            except Exception:
+                qs.append(0.0); ts.append(0.0); succ.append(0.0)     # broken candidate scores 0
+                continue
+            qs.append(float(res["objectives"].get(qobj, 0.0)))
             ts.append(float(res.get("sim_seconds", 0.0)))
             evs.append(float(res.get("n_evals", 0)))
             r = _reached(spec.target, res)

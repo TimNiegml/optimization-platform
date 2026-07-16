@@ -1,7 +1,15 @@
 """AutoTuner (L1) + ModelProvider tests."""
-from optplat.autotune import TuneSpec, generate_candidates, run_autotune
+from optplat.autotune import (
+    TuneSpec,
+    default_variation,
+    generate_candidates,
+    phase_algorithms,
+    run_autotune,
+)
 from optplat.demo import optical_bench
+from optplat.generators import CoordinateDescent
 from optplat.models import build_model, register_model
+from optplat.registry import AlgorithmSpec, register_algorithm
 
 
 def test_generate_candidates_are_three_phase_graphs():
@@ -14,6 +22,33 @@ def test_generate_candidates_are_three_phase_graphs():
         # nodes chain via edges; at least one algorithm node
         assert all(n["type"] == "algorithm" for n in g["nodes"])
         assert c["label"]
+
+
+def test_variation_is_registry_driven():
+    # variation 档位 auto-derives from each algorithm's param schema
+    gv = default_variation("grid_scan")
+    assert {} in gv and any("n_per_axis" in v for v in gv)
+    # a NEWLY registered algorithm auto-joins its phase and appears in candidates
+    register_algorithm(AlgorithmSpec(
+        "at_new_local", "local", False,
+        lambda v, s: CoordinateDescent(v, s["variables"], s["objective"]),
+        {"gain": {"type": "float", "default": 1.0, "min": 0.5, "max": 2.0}},
+        label="调优新算子"))
+    assert "at_new_local" in phase_algorithms()["refine"]
+    assert any({"gain": 0.5} == v or {"gain": 2.0} == v for v in default_variation("at_new_local"))
+    cands = generate_candidates(TuneSpec(max_candidates=60))
+    assert any("at_new_local" in str(c["graph"]) for c in cands)
+
+
+def test_variation_override_respected():
+    spec = TuneSpec(max_candidates=40, allow_coarse=["grid_scan"], allow_refine=[], allow_fit=[],
+                    balance_obj=None, variation={"grid_scan": [{"n_per_axis": 5}]})
+    cands = generate_candidates(spec)
+    # only grid_scan with the overridden param appears
+    for c in cands:
+        for node in c["graph"]["nodes"]:
+            assert node["data"]["algorithm"] == "grid_scan"
+            assert node["data"].get("n_per_axis") == 5
 
 
 def test_run_autotune_ranks_and_scores():

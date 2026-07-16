@@ -29,7 +29,7 @@ from .evaluator import Evaluator
 from .graph import GraphRunner
 from .hardware import HardwareEvaluator, SafetyLimits, SimulatedMeter, SimulatedStage
 from .orchestrator import Orchestrator
-from .registry import algorithm_catalog
+from .registry import REGISTRY, algorithm_catalog
 from .vocs import VOCS
 
 app = FastAPI(title="Optimization Platform API", version="0.1")
@@ -199,6 +199,20 @@ def run_pipeline(req: RunPipelineRequest):
         return _result(res)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
+@app.get("/autotune/space")
+def autotune_space():
+    """Per-phase algorithms + their auto-derived 变异档位 — the canvas renders an
+    editable variation table from this (registry-driven, new algorithms included)."""
+    from .autotune import default_variation, phase_algorithms
+    phases = phase_algorithms()
+    out = {}
+    for ph, algos in phases.items():
+        out[ph] = [{"name": a, "label": REGISTRY[a].label or a,
+                    "params": REGISTRY[a].params,
+                    "default_variation": default_variation(a)} for a in algos]
+    return {"phases": out}
 
 
 @app.post("/autotune")

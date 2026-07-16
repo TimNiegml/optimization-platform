@@ -108,6 +108,17 @@ def test_node_objective_target_mode():
     assert abs(r["objectives"]["y1"] - 0.5) < 0.05
 
 
+def test_composite_weighted_objective():
+    # one operator optimises a weighted blend of y1 and y2 over all three vars
+    graph = {"nodes": [{"id": "n", "type": "algorithm", "data": {
+        "algorithm": "nelder_mead", "variables": ["x1", "x2", "x3"],
+        "objective": "y1", "objective_weights": {"y1": 0.5, "y2": 0.5},
+        "stop": {"max_iter": 400}}}], "edges": []}
+    r = _run(graph)
+    assert r["objectives"]["y1"] > 0.95 and r["objectives"]["y2"] > 0.9   # joint optimum
+    assert any("加权组合" in e for e in r["events"])
+
+
 def test_selective_channel_reads_and_cost():
     # a y1-only stage (no keep, no until) must NOT read y2 during the stage;
     # y2 is only measured once, by the initial prime(). Costs accumulate per read.

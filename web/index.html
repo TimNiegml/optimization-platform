@@ -108,6 +108,13 @@
   .tcard .tlabel { font-size:12px; color:var(--text); }
   .tcard .tmetrics { margin-top:5px; display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
   .tcard .tmetrics .metric { margin:0 2px 0 0; padding:3px 7px; }
+  .vphase { font-size:11px; color:var(--accent); margin:8px 0 3px; font-weight:600; }
+  .vrow { display:grid; grid-template-columns:150px 1fr; gap:6px; align-items:center; margin-bottom:4px; }
+  .vrow .vname { font-size:12px; }
+  .vrow .vparams { display:flex; gap:6px; flex-wrap:wrap; }
+  .vrow .vp { font-size:10px; color:var(--muted); display:flex; align-items:center; gap:3px; }
+  .vrow .vp input { width:96px; }
+  .paxes { display:flex; gap:8px; align-items:center; font-size:11px; color:var(--muted); margin-bottom:5px; }
 </style>
 </head>
 <body>
@@ -251,6 +258,10 @@
     <div><label>候选上限</label><input id="tuneMax" type="number" min="4" max="40" value="18"></div>
     <div style="display:flex;align-items:flex-end"><button id="tuneRun" onclick="runTune()" style="width:100%">▶ 开始搜索</button></div>
   </div>
+  <details id="varDetails" style="margin-top:6px">
+    <summary style="cursor:pointer;font-size:12px;color:var(--muted)">变异表格（选哪些算法/参数参与变异 · 从算法登记表自动生成，新算法自动出现）</summary>
+    <div id="varTable" style="margin-top:6px"></div>
+  </details>
   <div id="tuneBody" style="margin-top:12px"></div>
 </div>
 
@@ -308,7 +319,7 @@ function addNode(algo, at) {
     id: 'n' + (++seq), algorithm: algo, color: nextColor(),
     variables: s.single_var ? [vars[vars.length-1]] : vars.slice(0, 2),
     objective: Object.keys(vocs.objectives)[0] || 'y1',
-    objectiveMode: '', objectiveTarget: '',
+    objectiveMode: '', objectiveTarget: '', objectiveWeights: null,
     params: Object.fromEntries(Object.entries(s.params||{}).map(([k,v])=>[k, v.default])),
     keep: '', stopTarget: '',
     x: at ? at.x : 60 + (nodes.length%4)*30, y: at ? at.y : 60 + nodes.length*70,
@@ -324,9 +335,11 @@ function render() {
     el.className = 'node' + (sel===n.id ? ' sel':''); el.setAttribute('data-id', n.id);
     el.style.left = n.x+'px'; el.style.top = n.y+'px'; el.style.borderTopColor = n.color;
     let mode = n.objectiveMode ? `<span class="badge">${MODE_LABEL[n.objectiveMode]}${n.objectiveMode==='target'&&n.objectiveTarget!==''?'='+n.objectiveTarget:''}</span>` : '';
+    const comp = compWeights(n);
+    const target = comp ? `组合(${Object.entries(comp).map(([k,w])=>`${w}·${k}`).join('+')})` : n.objective;
     let fit = n.fitInfo ? `<div class="fit" title="${n.fitInfo.replace(/"/g,'&quot;')}">📐 ${n.fitInfo}</div>` : '';
     el.innerHTML = `<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">${labelOf(n.algorithm)}</span><span class="x">✕</span></div>
-      <div class="bd">${n.variables.join(',')} → ${n.objective}${mode?'<br>'+mode:''}${fit}</div><div class="port"></div>`;
+      <div class="bd">${n.variables.join(',')} → ${target}${mode&&!comp?'<br>'+mode:''}${fit}</div><div class="port"></div>`;
     el.querySelector('.hd').onmousedown = e => { if(!e.target.classList.contains('x')) startDrag(e, n); };
     el.querySelector('.hd .x').onclick = e => { e.stopPropagation(); delNode(n.id); };
     el.onclick = e => { if (connectFrom && connectFrom!==n.id) { addEdge(connectFrom, n.id); endConnect(); } else select(n.id); };
@@ -433,10 +446,21 @@ function inspectNode(n){
     h += `<label style="display:inline-block;margin-right:8px;color:var(--text)"><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleVar('${n.id}','${v}',this.checked)"> ${v}</label>`; });
   h += `</div><label>目标</label><select onchange="setF('${n.id}','objective',this.value)">`;
   Object.keys(vocs.objectives).forEach(o => h += `<option ${o===n.objective?'selected':''}>${o}</option>`);
-  h += `</select><label>目标模式 <span class="info" data-tip="默认=按问题声明。最大化/最小化把目标推大/小；逼近目标值=驱动到某个数（标定）；扫描=只扫不寻优。">i</span></label><select onchange="setMode('${n.id}',this.value)">`;
-  Object.entries(MODE_LABEL).forEach(([k,lab]) => h += `<option value="${k}" ${k===n.objectiveMode?'selected':''}>${lab}</option>`);
   h += `</select>`;
-  if(n.objectiveMode==='target') h += `<label>目标值</label><input type="number" step="0.01" value="${n.objectiveTarget}" onchange="setF('${n.id}','objectiveTarget',this.value)">`;
+  const comp = compWeights(n);
+  h += `<label style="margin-top:8px"><input type="checkbox" style="width:auto" ${comp?'checked':''} onchange="toggleComposite('${n.id}',this.checked)"> 加权组合多目标
+        <span class="info" data-tip="把多个目标按权重合成一个单目标（Σ w·目标，每个目标按各自的最大/最小/逼近模式计分）。单目标算子(单纯形/坐标/梯度/拟合)即可优化多目标折中，如 0.7·y1+0.3·y2。">i</span></label>`;
+  if(comp){
+    Object.keys(vocs.objectives).forEach(o => {
+      h += `<div class="lim" style="grid-template-columns:34px 1fr"><b>${o}</b>
+        <input type="number" step="0.1" value="${comp[o]!=null?comp[o]:0}" oninput="setWeight('${n.id}','${o}',this.value)" title="权重(0=不参与)"></div>`; });
+    h += `<p class="hint">权重和不必为 1；每个目标按其『目标模式』计分后加权。</p>`;
+  } else {
+    h += `<label>目标模式 <span class="info" data-tip="默认=按问题声明。最大化/最小化把目标推大/小；逼近目标值=驱动到某个数（标定）；扫描=只扫不寻优。">i</span></label><select onchange="setMode('${n.id}',this.value)">`;
+    Object.entries(MODE_LABEL).forEach(([k,lab]) => h += `<option value="${k}" ${k===n.objectiveMode?'selected':''}>${lab}</option>`);
+    h += `</select>`;
+    if(n.objectiveMode==='target') h += `<label>目标值</label><input type="number" step="0.01" value="${n.objectiveTarget}" onchange="setF('${n.id}','objectiveTarget',this.value)">`;
+  }
   Object.entries(s.params||{}).forEach(([k,meta]) => {
     const lab = meta.label ? `${meta.label} <span style="color:var(--muted)">(${k})</span>` : k;
     const tip = meta.hint ? ` <span class="info" data-tip="${meta.hint}">i</span>` : '';
@@ -466,6 +490,12 @@ window.toggleVar=(id,v,on)=>{const n=nodes.find(x=>x.id===id);const s=spec(n.alg
   if(s.single_var){n.variables=on?[v]:[];} else {n.variables=on?[...new Set([...n.variables,v])]:n.variables.filter(x=>x!==v);} render();};
 window.setF=(id,f,v)=>{nodes.find(x=>x.id===id)[f]=v; render();};
 window.setMode=(id,v)=>{const n=nodes.find(x=>x.id===id); n.objectiveMode=v; render(); inspectNode(n);};
+function compWeights(n){ const w=n.objectiveWeights; if(!w) return null; const nz=Object.entries(w).filter(([k,v])=>+v); return nz.length?Object.fromEntries(nz.map(([k,v])=>[k,+v])):null; }
+window.toggleComposite=(id,on)=>{ const n=nodes.find(x=>x.id===id);
+  if(on){ n.objectiveWeights={}; Object.keys(vocs.objectives).forEach((o,i)=>n.objectiveWeights[o]=i===0?1:0); }
+  else n.objectiveWeights=null;
+  render(); inspectNode(n); };
+window.setWeight=(id,o,v)=>{ const n=nodes.find(x=>x.id===id); if(!n.objectiveWeights) n.objectiveWeights={}; n.objectiveWeights[o]=+v; render(); };
 window.setParam=(id,k,v)=>{const n=nodes.find(x=>x.id===id); const num=Number(v); n.params[k]=(v!==''&&!isNaN(num))?num:v;};
 
 // ---------- evaluation panel extras (safety limits + instrument mapping) ----------
@@ -504,8 +534,10 @@ function toGraph(){
     let base=labelOf(n.algorithm); let sName=base;
     used[base]=(used[base]||0)+1; if(used[base]>1) sName=base+'#'+used[base];
     lastStages[sName]={color:n.color, label:sName}; stageToNode[sName]=n.id;
-    const data = {algorithm:n.algorithm, variables:n.variables, objective:n.objective, stage:sName, ...n.params};
-    if(n.objectiveMode){ data.objective_mode=n.objectiveMode; if(n.objectiveMode==='target'&&n.objectiveTarget!=='') data.objective_target=Number(n.objectiveTarget); }
+    const cw=compWeights(n);
+    const data = {algorithm:n.algorithm, variables:n.variables, objective:(cw?Object.keys(cw)[0]:n.objective), stage:sName, ...n.params};
+    if(cw){ data.objective_weights=cw; }
+    else if(n.objectiveMode){ data.objective_mode=n.objectiveMode; if(n.objectiveMode==='target'&&n.objectiveTarget!=='') data.objective_target=Number(n.objectiveTarget); }
     if(n.keep) data.keep=n.keep;
     if(n.stopTarget) data.stop={target:n.stopTarget};
     return {id:n.id, type:'algorithm', data, position:{x:n.x,y:n.y}};
@@ -728,7 +760,7 @@ function saveSolution(){
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 function applySolution(o){
-  nodes=(o.nodes||[]).map((n,i)=>({color:NODE_COLORS[i%NODE_COLORS.length], objectiveMode:'', objectiveTarget:'', keep:'', stopTarget:'', params:{}, fitInfo:'', ...n}));
+  nodes=(o.nodes||[]).map((n,i)=>({color:NODE_COLORS[i%NODE_COLORS.length], objectiveMode:'', objectiveTarget:'', objectiveWeights:null, keep:'', stopTarget:'', params:{}, fitInfo:'', ...n}));
   edges=(o.edges||[]).map(e=>({condition:'', ...e}));
   untilExpr=o.until||''; untilRawEdited=false; untilRows=[];
   seq=o.seq||nodes.length+edges.length;
@@ -889,15 +921,60 @@ const EXAMPLES = {
 };
 
 // ---------- AutoTuner (L1) ----------
-let tuneResult = null;
-function openTune(){ const t=untilExpr||document.getElementById('tuneTarget').value; document.getElementById('tuneTarget').value=t||'y1>=0.95 and y2>=0.9'; showModal('tuneModal'); }
+let tuneResult = null, tuneSpace = null, varState = {};
+let paretoX = 'time', paretoY = 'quality';
+const METRICS = {time:{label:'时长',better:'low'}, quality:{label:'质量',better:'high'}, stability:{label:'稳定',better:'high'}, evals:{label:'评估次数',better:'low'}};
+
+async function openTune(){
+  const t=untilExpr||document.getElementById('tuneTarget').value;
+  document.getElementById('tuneTarget').value=t||'y1>=0.95 and y2>=0.9';
+  if(!tuneSpace){ try{ tuneSpace=(await (await fetch(API+'/autotune/space')).json()).phases; initVarState(); }catch(e){ tuneSpace=null; } }
+  renderVarTable(); showModal('tuneModal');
+}
+const PHASE_LABEL={coarse:'粗调 / 找光', refine:'精调', fit:'拟合 / 定值'};
+function initVarState(){
+  varState={};
+  Object.entries(tuneSpace||{}).forEach(([phase,algos])=> algos.forEach(a=>{
+    const params={};
+    (a.default_variation||[]).forEach(v=>Object.entries(v).forEach(([p,val])=>{ (params[p]=params[p]||[]).push(val); }));
+    varState[a.name]={include:true, phase, label:a.label, params};
+  }));
+}
+function renderVarTable(){
+  const box=document.getElementById('varTable'); if(!box) return;
+  if(!tuneSpace){ box.innerHTML='<p class="hint">未取到算法登记表。</p>'; return; }
+  let h='';
+  Object.entries(tuneSpace).forEach(([phase,algos])=>{
+    h+=`<div class="vphase">${PHASE_LABEL[phase]||phase}</div>`;
+    algos.forEach(a=>{ const st=varState[a.name]; if(!st) return;
+      const ps=Object.entries(st.params).map(([p,vals])=>
+        `<span class="vp">${p}[<input value="${vals.join(',')}" oninput="setVar('${a.name}','${p}',this.value)" title="逗号分隔的取值档位（空=只用默认）">]</span>`).join('');
+      h+=`<div class="vrow"><label class="vname"><input type="checkbox" style="width:auto" ${st.include?'checked':''} onchange="varState['${a.name}'].include=this.checked"> ${a.label}</label>
+          <div class="vparams">${ps||'<span class="vp">（无参数）</span>'}</div></div>`;
+    });
+  });
+  box.innerHTML=h;
+}
+window.setVar=(algo,p,txt)=>{ varState[algo].params[p]=txt.split(',').map(s=>s.trim()).filter(s=>s!==''); };
+function buildVariationSpec(){
+  if(!tuneSpace) return {};
+  const allow={coarse:[],refine:[],fit:[]}, variation={};
+  Object.entries(varState).forEach(([name,st])=>{ if(!st.include) return;
+    allow[st.phase].push(name);
+    const variants=[{}];
+    Object.entries(st.params).forEach(([p,vals])=>(vals||[]).forEach(v=>{ const num=+v; variants.push({[p]:(v!==''&&!isNaN(num))?num:v}); }));
+    variation[name]=variants;
+  });
+  return {allow_coarse:allow.coarse, allow_refine:allow.refine, allow_fit:allow.fit, variation};
+}
 async function runTune(){
   const btn=document.getElementById('tuneRun'); btn.disabled=true; btn.textContent='搜索中…';
   const spec={ bench:document.getElementById('evBench').value,
     target:(document.getElementById('tuneTarget').value.trim()||null),
     weights:{quality:+document.getElementById('wQ').value, time:+document.getElementById('wT').value, stability:+document.getElementById('wS').value},
     noise_levels:document.getElementById('tuneNoise').value.split(',').map(s=>+s.trim()).filter(s=>!isNaN(s)),
-    n_trials:+document.getElementById('tuneTrials').value, max_candidates:+document.getElementById('tuneMax').value };
+    n_trials:+document.getElementById('tuneTrials').value, max_candidates:+document.getElementById('tuneMax').value,
+    ...buildVariationSpec() };
   document.getElementById('tuneBody').innerHTML='<p class="hint">正在搜索候选并按 质量/时长/稳定 打分…（多试验，稍候）</p>';
   try{
     const r=await fetch(API+'/autotune',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(spec)});
@@ -910,7 +987,11 @@ async function runTune(){
 function renderTuneResults(){
   const rows=(tuneResult&&tuneResult.ranked)||[];
   if(!rows.length){ document.getElementById('tuneBody').innerHTML='<p class="hint">没有候选。</p>'; return; }
+  const axopt=k=>Object.entries(METRICS).map(([m,d])=>`<option value="${m}" ${m===k?'selected':''}>${d.label}</option>`).join('');
   let h=`<div class="row" style="justify-content:space-between"><h3 style="margin:.2em 0">排名（共 ${rows.length} 个候选）</h3></div>`;
+  h+=`<div class="paxes">帕累托 <span class="info" data-tip="选任意两个指标看 2D 帕累托前沿：绿圈=在这两个指标上非支配的方案，绿线=前沿。">i</span>
+      X<select onchange="paretoX=this.value; renderTuneResults()">${axopt(paretoX)}</select>
+      Y<select onchange="paretoY=this.value; renderTuneResults()">${axopt(paretoY)}</select></div>`;
   h+=tuneParetoChart(rows);
   h+=rows.map((r,i)=>`<div class="tcard ${r.pareto?'par':''}">
       <div class="tlabel"><b>#${i+1}</b> ${r.label}</div>
@@ -924,19 +1005,31 @@ function renderTuneResults(){
       </div></div>`).join('');
   document.getElementById('tuneBody').innerHTML=h;
 }
+function pareto2D(rows, xk, yk){
+  const geq=(a,b,k)=> METRICS[k].better==='high' ? a>=b : a<=b;
+  const gt =(a,b,k)=> METRICS[k].better==='high' ? a>b  : a<b;
+  return rows.map((a,i)=> !rows.some((b,j)=> j!==i &&
+      geq(b[xk],a[xk],xk) && geq(b[yk],a[yk],yk) && (gt(b[xk],a[xk],xk)||gt(b[yk],a[yk],yk))));
+}
 function tuneParetoChart(rows){
-  const W=560,H=170,pad={l:44,r:12,t:10,b:26}, iw=W-pad.l-pad.r, ih=H-pad.t-pad.b;
-  const ts=rows.map(r=>r.time), qs=rows.map(r=>r.quality);
-  const tmin=Math.min(...ts),tmax=Math.max(...ts),qmin=Math.min(...qs),qmax=Math.max(...qs);
-  const tr=(tmax-tmin)||1,qr=(qmax-qmin)||1;
-  const X=v=>pad.l+((v-tmin)/tr)*iw, Y=v=>pad.t+ih-((v-qmin)/qr)*ih;
+  const xk=paretoX, yk=paretoY, W=560,H=180,pad={l:48,r:12,t:10,b:30}, iw=W-pad.l-pad.r, ih=H-pad.t-pad.b;
+  const xs=rows.map(r=>r[xk]), ys=rows.map(r=>r[yk]);
+  const xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys);
+  const xr=(xmax-xmin)||1,yr=(ymax-ymin)||1;
+  const X=v=>pad.l+((v-xmin)/xr)*iw, Y=v=>pad.t+ih-((v-ymin)/yr)*ih;
+  const front=pareto2D(rows,xk,yk);
   let g=`<svg width="${W}" height="${H}" style="max-width:100%;background:var(--chartbg);border:1px solid var(--line);border-radius:6px">`;
-  for(let k=0;k<=2;k++){ const qv=qmin+qr*k/2,y=Y(qv);
-    g+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="var(--line)"/><text x="${pad.l-5}" y="${y+3}" fill="var(--muted)" font-size="9" text-anchor="end">${qv.toFixed(3)}</text>`; }
-  rows.forEach((r,i)=>{ const c=heat(r.stability);
-    g+=`<circle cx="${X(r.time)}" cy="${Y(r.quality)}" r="${r.pareto?5:3.4}" fill="${c}" stroke="${r.pareto?'var(--ok)':'#0006'}" stroke-width="${r.pareto?2:0.8}"/>`;
-    if(i<3) g+=`<text x="${X(r.time)+6}" y="${Y(r.quality)+3}" fill="var(--muted)" font-size="9">#${i+1}</text>`; });
-  g+=`<text x="${pad.l+iw/2}" y="${H-4}" fill="var(--muted)" font-size="9" text-anchor="middle">时长 s →（左=更快）  ↑质量　点色=稳定(蓝低→红高)　绿圈=帕累托</text>`;
+  for(let k=0;k<=2;k++){ const yv=ymin+yr*k/2,y=Y(yv);
+    g+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="var(--line)"/><text x="${pad.l-5}" y="${y+3}" fill="var(--muted)" font-size="9" text-anchor="end">${yv.toFixed(yk==='quality'||yk==='stability'?3:0)}</text>`; }
+  // pareto front line (front points sorted by X)
+  const fpts=rows.map((r,i)=>({r,i})).filter(o=>front[o.i]).map(o=>o.r).sort((a,b)=>a[xk]-b[xk]);
+  if(fpts.length>1) g+=`<polyline points="${fpts.map(r=>`${X(r[xk])},${Y(r[yk])}`).join(' ')}" fill="none" stroke="var(--ok)" stroke-width="1.4" stroke-dasharray="4 3"/>`;
+  rows.forEach((r,i)=>{ const c=heat(r.stability); const pf=front[i];
+    g+=`<circle cx="${X(r[xk])}" cy="${Y(r[yk])}" r="${pf?5:3.4}" fill="${c}" stroke="${pf?'var(--ok)':'#0006'}" stroke-width="${pf?2:0.8}"/>`;
+    if(i<3) g+=`<text x="${X(r[xk])+6}" y="${Y(r[yk])+3}" fill="var(--muted)" font-size="9">#${i+1}</text>`; });
+  [xmin,xmax].forEach(xv=> g+=`<text x="${X(xv)}" y="${H-16}" fill="var(--muted)" font-size="9" text-anchor="middle">${xv.toFixed(xk==='quality'||xk==='stability'?3:0)}</text>`);
+  const xdir=METRICS[xk].better==='low'?'左=更好':'右=更好';
+  g+=`<text x="${pad.l+iw/2}" y="${H-3}" fill="var(--muted)" font-size="9" text-anchor="middle">${METRICS[xk].label} →（${xdir}）  ↑${METRICS[yk].label}　点色=稳定　绿圈/线=帕累托前沿</text>`;
   return g+'</svg>';
 }
 function adoptCandidate(i){ const r=tuneResult.ranked[i]; if(!r) return; adoptGraph(r.graph); closeModals();
@@ -948,6 +1041,7 @@ function adoptGraph(graph){
     return {id:gn.id||('n'+(i+1)), algorithm:d.algorithm, color:NODE_COLORS[i%NODE_COLORS.length],
       variables:d.variables||[], objective:d.objective||objKeys[0],
       objectiveMode:d.objective_mode||'', objectiveTarget:(d.objective_target!=null?d.objective_target:''),
+      objectiveWeights:d.objective_weights||null,
       params, keep:d.keep||'', stopTarget:(d.stop&&d.stop.target)||'', fitInfo:'', x:40+i*240, y:100}; });
   edges=(graph.edges||[]).map((e,i)=>({id:'e'+(i+1), source:e.source, target:e.target, condition:e.condition||''}));
   untilExpr=graph.until||''; untilRawEdited=false; untilRows=[]; seq=nodes.length+edges.length+1;

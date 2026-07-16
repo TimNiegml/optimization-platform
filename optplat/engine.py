@@ -98,10 +98,28 @@ class StageEngine:
         stage needs to optimise AND to evaluate its stopping conditions, and
         skip the rest (and their cost)."""
         need = {step["objective"]}
+        need |= set(step.get("objective_weights") or {})       # composite objective refs
         need |= self._objs_in(step.get("keep"))
         need |= self._objs_in(step.get("stop", {}).get("target"))
         need |= self._objs_in(self.global_until)
         return need & set(self.vocs.objectives)
+
+    # ---- scalar score for a stage (single objective OR weighted composite) ----
+    def _scorer(self, step: dict, obj_name: str):
+        """Return a callable y_dict -> scalar score (higher = better).
+
+        A node may optimise a single objective (default), or a **weighted
+        composite** of several objectives via `objective_weights`
+        (e.g. {"y1":0.7,"y2":0.3}) — each objective is scored mode-aware
+        (max/min/target) then combined, so a single-objective operator can drive
+        a multi-objective trade-off.
+        """
+        weights = step.get("objective_weights")
+        if weights:
+            objs = {k: self.vocs.objectives[k] for k in weights if k in self.vocs.objectives}
+            return lambda y: sum(w * objs[k].score(y[k]) for k, w in weights.items() if k in objs)
+        obj = self._objective(step, obj_name)
+        return lambda y: obj.score(y[obj_name])
 
     # ---- one measurement ----
     def evaluate(self, x: dict[str, float], stage: str,
@@ -129,15 +147,16 @@ class StageEngine:
     def run_stage(self, step: dict) -> None:
         name = step.get("stage", step["algorithm"])
         obj_name = step["objective"]
-        obj = self._objective(step, obj_name)
+        scorer = self._scorer(step, obj_name)
         keep = step.get("keep")
         max_iter = step.get("stop", {}).get("max_iter", 300)
 
         gen = self.make_generator(step)
         gen.set_base(self.state)
         channels = self._needed_channels(step)
+        goal = (f"加权组合{step['objective_weights']}" if step.get("objective_weights") else obj_name)
         self.events.append(
-            f"▶ stage '{name}': {step['algorithm']} on {step['variables']} → {obj_name}"
+            f"▶ stage '{name}': {step['algorithm']} on {step['variables']} → {goal}"
             f"  [读取通道 {sorted(channels)}]")
 
         try:
@@ -145,7 +164,7 @@ class StageEngine:
                 sub_x = gen.ask()
                 x = {**self.state, **sub_x}
                 y = self.evaluate(x, name, channels)
-                score = obj.score(y[obj_name])
+                score = scorer(y)
                 feasible = self._cond_local(keep, x, y) if keep else True
                 eff_score = score if feasible else score - 1e9    # penalty method
                 gen.tell(sub_x, eff_score)
