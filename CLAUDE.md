@@ -42,7 +42,9 @@
 | 执行核（共享） | `optplat/engine.py` | `StageEngine`：跑一个 stage、条件求值、全局早停、预算熔断 |
 | 编排（块式） | `optplat/orchestrator.py` | flow / if / loop{until,max_rounds} |
 | 编排（图式，Dify） | `optplat/graph.py` | `GraphRunner` 直接跑 {nodes,edges}；分支=条件边，循环=回边(max_visits/max_steps 限幅)；`to_mermaid` |
-| 评估接入 | `optplat/evaluator.py` `optplat/hardware.py` | 函数版 + 硬件版(稳定时间/平均/**独立安全限位** clamp)；含仿真 stage/meter |
+| 评估接入 | `optplat/evaluator.py` `optplat/hardware.py` | 函数版 + 硬件版(稳定时间/平均/**独立安全限位** clamp)；含仿真 stage/meter；按通道选择性读取+成本 |
+| 模型接口 | `optplat/models.py` | ModelProvider 注册式：`analytic`(解析 bench) / `dataset_idw`(用户数据 surrogate)，可插拔 |
+| 自动调优 | `optplat/autotune.py` | AutoTuner(L1)：候选生成(粗调×精调×拟合+参数/噪声变异)、多试验评估、质量/时长/稳定打分、帕累托 |
 | 持久化 | `optplat/store.py` | SQLite 归档 / 断点续跑(start_point) / 一键回滚(rollback_to_best) |
 | 后端 API | `optplat/api.py` | FastAPI：`/catalog` `/vocs` `/run/graph` `/run/pipeline` `/`(画布) |
 | 托拉拽画布 | `web/index.html` | **纯 vanilla JS+SVG，无 CDN，离线可用**；产 {nodes,edges} JSON |
@@ -78,6 +80,13 @@
 
 算法库（10 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
 `nelder_mead` `gradient_ascent`(PI闪电式) `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula` `bayesian`。
+
+- **P3 Agent/AutoTuner（Phase A 已做）**：见 `AGENT_AUTOTUNE_DESIGN.md`。
+  - **L1 AutoTuner**（`optplat/autotune.py`）：在"粗调(网格/线扫/**贝叶斯**)×精调(单纯形/坐标/梯度)×拟合"三相空间搜索，
+    变异集＝参数变异(含拟合/解析参数)+噪声变异；多试验按**质量/时长(sim_seconds)/稳定性(达标率或重复性)**打分、排名、帕累托；`POST /autotune`；画布 **🤖 自动调优** 面板(三权重滑块+帕累托散点+候选卡片+一键采用)。
+  - **模型接口**（`optplat/models.py`）：ModelProvider 可插拔，`analytic`/`dataset_idw`，为客户采集数据建模留口。
+  - **L2 MCP / L3 GLM5.1 副驾**：设计已定，待做（MCP SDK=MIT）。
+- **pytest 43 项全过**（algorithms/graph/p1b/api/autotune）。
 
 ## 5. 路线图（下一步候选，未做）
 

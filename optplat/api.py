@@ -23,6 +23,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from .autotune import TuneSpec, run_autotune
 from .demo import BENCHES, bench_func, demo_vocs, optical_bench
 from .evaluator import Evaluator
 from .graph import GraphRunner
@@ -196,6 +197,15 @@ def run_pipeline(req: RunPipelineRequest):
         res = Orchestrator(vocs, ev, req.pipeline, eval_budget=req.eval_budget,
                            start_point=req.start_point).run()
         return _result(res)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
+@app.post("/autotune")
+def autotune(spec: TuneSpec):
+    """AutoTuner (L1): search workflow candidates, rank by quality/time/stability."""
+    try:
+        return run_autotune(spec)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
 

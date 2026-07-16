@@ -100,6 +100,14 @@
   #uPreview { background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:8px; font-family:ui-monospace,monospace; font-size:12px; margin-top:8px; word-break:break-all; }
   .librow { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 4px; border-bottom:1px solid var(--line); font-size:13px; }
   .librow b { font-weight:500; }
+  .trow2 { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+  .trow2 > div { flex:1; min-width:150px; }
+  .trow2 input[type=range] { width:100%; }
+  .tcard { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:7px; background:var(--panel2); }
+  .tcard.par { border-color:var(--ok); box-shadow:0 0 0 1px var(--ok) inset; }
+  .tcard .tlabel { font-size:12px; color:var(--text); }
+  .tcard .tmetrics { margin-top:5px; display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+  .tcard .tmetrics .metric { margin:0 2px 0 0; padding:3px 7px; }
 </style>
 </head>
 <body>
@@ -109,6 +117,7 @@
     <span class="hint" id="conn">连接后端中…</span>
     <span class="sp"></span>
     <button class="ghost sm" onclick="openUntil()" data-tip="用表格方式设置『全局达成条件』（各目标 达到/逼近 某值，与/或组合），不用手写表达式。">🎯 目标条件</button>
+    <button class="ghost sm" onclick="openTune()" data-tip="自动调优：按当前场景搜索多种算法方案，按质量/时长/稳定性打分排名，一键采用最优方案。">🤖 自动调优</button>
     <span class="fs-ctl" data-tip="调节画布里节点与连线的字体大小。">字号 <input id="fsRange" type="range" min="10" max="22" step="1" value="13"></span>
     <button class="ghost sm" onclick="toggleTheme()" id="themeBtn" data-tip="切换浅色 / 深色主题。">🌙</button>
     <button class="ghost sm" onclick="openHelp()" data-tip="打开使用说明：节点、连线、目标、轨迹图、表达式怎么用。">帮助 ?</button>
@@ -222,6 +231,27 @@
   <div id="libBody"></div>
   <input type="file" id="libFolder" webkitdirectory directory multiple style="display:none" onchange="loadFolderFiles(this.files)">
   <input type="file" id="libFiles" accept=".json,application/json" multiple style="display:none" onchange="loadFolderFiles(this.files)">
+</div>
+
+<div id="tuneModal" class="modal">
+  <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
+  <h2>自动调优 <span class="info" data-tip="按当前『仿真场景』自动搜索多种算法工作流（粗调×精调×拟合 及参数/噪声变异），按质量/时长/稳定性打分排名，采用最优。">i</span></h2>
+  <p class="hint">场景取左下『仿真场景』。调三个优先级权重与噪声档后点搜索；结果按效用排名，可一键『采用』到画布。</p>
+  <div class="trow2">
+    <div><label>质量权重 <b id="wQv">1.0</b></label><input id="wQ" type="range" min="0" max="3" step="0.5" value="1" oninput="wQv.textContent=(+this.value).toFixed(1)"></div>
+    <div><label>速度权重 <b id="wTv">0.5</b></label><input id="wT" type="range" min="0" max="3" step="0.5" value="0.5" oninput="wTv.textContent=(+this.value).toFixed(1)"></div>
+    <div><label>稳定权重 <b id="wSv">1.0</b></label><input id="wS" type="range" min="0" max="3" step="0.5" value="1" oninput="wSv.textContent=(+this.value).toFixed(1)"></div>
+  </div>
+  <div class="trow2">
+    <div><label>目标达成条件（稳定性=达标率；留空则用重复性）</label><input id="tuneTarget" value="y1>=0.95 and y2>=0.9"></div>
+    <div><label>噪声档（逗号分隔）</label><input id="tuneNoise" value="0, 0.02"></div>
+  </div>
+  <div class="trow2">
+    <div><label>每档试验次数</label><input id="tuneTrials" type="number" min="1" max="8" value="2"></div>
+    <div><label>候选上限</label><input id="tuneMax" type="number" min="4" max="40" value="18"></div>
+    <div style="display:flex;align-items:flex-end"><button id="tuneRun" onclick="runTune()" style="width:100%">▶ 开始搜索</button></div>
+  </div>
+  <div id="tuneBody" style="margin-top:12px"></div>
 </div>
 
 <script>
@@ -857,6 +887,72 @@ const EXAMPLES = {
     exUntil('y1>=0.9 and y2>=0.8');
   },
 };
+
+// ---------- AutoTuner (L1) ----------
+let tuneResult = null;
+function openTune(){ const t=untilExpr||document.getElementById('tuneTarget').value; document.getElementById('tuneTarget').value=t||'y1>=0.95 and y2>=0.9'; showModal('tuneModal'); }
+async function runTune(){
+  const btn=document.getElementById('tuneRun'); btn.disabled=true; btn.textContent='搜索中…';
+  const spec={ bench:document.getElementById('evBench').value,
+    target:(document.getElementById('tuneTarget').value.trim()||null),
+    weights:{quality:+document.getElementById('wQ').value, time:+document.getElementById('wT').value, stability:+document.getElementById('wS').value},
+    noise_levels:document.getElementById('tuneNoise').value.split(',').map(s=>+s.trim()).filter(s=>!isNaN(s)),
+    n_trials:+document.getElementById('tuneTrials').value, max_candidates:+document.getElementById('tuneMax').value };
+  document.getElementById('tuneBody').innerHTML='<p class="hint">正在搜索候选并按 质量/时长/稳定 打分…（多试验，稍候）</p>';
+  try{
+    const r=await fetch(API+'/autotune',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(spec)});
+    const d=await r.json();
+    if(!r.ok){ document.getElementById('tuneBody').innerHTML=`<p style="color:var(--danger)">${d.detail||'出错'}</p>`; return; }
+    tuneResult=d; renderTuneResults();
+  }catch(e){ document.getElementById('tuneBody').innerHTML=`<p style="color:var(--danger)">${e}</p>`; }
+  finally{ btn.disabled=false; btn.textContent='▶ 开始搜索'; }
+}
+function renderTuneResults(){
+  const rows=(tuneResult&&tuneResult.ranked)||[];
+  if(!rows.length){ document.getElementById('tuneBody').innerHTML='<p class="hint">没有候选。</p>'; return; }
+  let h=`<div class="row" style="justify-content:space-between"><h3 style="margin:.2em 0">排名（共 ${rows.length} 个候选）</h3></div>`;
+  h+=tuneParetoChart(rows);
+  h+=rows.map((r,i)=>`<div class="tcard ${r.pareto?'par':''}">
+      <div class="tlabel"><b>#${i+1}</b> ${r.label}</div>
+      <div class="tmetrics">
+        <span class="metric" data-tip="综合效用=质量·w + 速度·w + 稳定·w（各项归一化）">效用 <b>${(+r.utility).toFixed(2)}</b></span>
+        <span class="metric">质量 <b>${(+r.quality).toFixed(3)}</b></span>
+        <span class="metric" data-tip="按通道成本累计的平均测量耗时">时长 <b>${(+r.time).toFixed(0)}s</b></span>
+        <span class="metric" data-tip="有目标时=达标率；否则=重复性">稳定 <b>${(r.stability*100).toFixed(0)}%</b></span>
+        ${r.pareto?'<span class="metric" style="color:var(--ok)">帕累托</span>':''}
+        <button class="ghost sm" onclick="adoptCandidate(${i})" data-tip="把这个方案放到画布（切到该场景，可直接运行/微调）。">采用</button>
+      </div></div>`).join('');
+  document.getElementById('tuneBody').innerHTML=h;
+}
+function tuneParetoChart(rows){
+  const W=560,H=170,pad={l:44,r:12,t:10,b:26}, iw=W-pad.l-pad.r, ih=H-pad.t-pad.b;
+  const ts=rows.map(r=>r.time), qs=rows.map(r=>r.quality);
+  const tmin=Math.min(...ts),tmax=Math.max(...ts),qmin=Math.min(...qs),qmax=Math.max(...qs);
+  const tr=(tmax-tmin)||1,qr=(qmax-qmin)||1;
+  const X=v=>pad.l+((v-tmin)/tr)*iw, Y=v=>pad.t+ih-((v-qmin)/qr)*ih;
+  let g=`<svg width="${W}" height="${H}" style="max-width:100%;background:var(--chartbg);border:1px solid var(--line);border-radius:6px">`;
+  for(let k=0;k<=2;k++){ const qv=qmin+qr*k/2,y=Y(qv);
+    g+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="var(--line)"/><text x="${pad.l-5}" y="${y+3}" fill="var(--muted)" font-size="9" text-anchor="end">${qv.toFixed(3)}</text>`; }
+  rows.forEach((r,i)=>{ const c=heat(r.stability);
+    g+=`<circle cx="${X(r.time)}" cy="${Y(r.quality)}" r="${r.pareto?5:3.4}" fill="${c}" stroke="${r.pareto?'var(--ok)':'#0006'}" stroke-width="${r.pareto?2:0.8}"/>`;
+    if(i<3) g+=`<text x="${X(r.time)+6}" y="${Y(r.quality)+3}" fill="var(--muted)" font-size="9">#${i+1}</text>`; });
+  g+=`<text x="${pad.l+iw/2}" y="${H-4}" fill="var(--muted)" font-size="9" text-anchor="middle">时长 s →（左=更快）  ↑质量　点色=稳定(蓝低→红高)　绿圈=帕累托</text>`;
+  return g+'</svg>';
+}
+function adoptCandidate(i){ const r=tuneResult.ranked[i]; if(!r) return; adoptGraph(r.graph); closeModals();
+  document.getElementById('conn').textContent='已采用方案 #'+(i+1); }
+function adoptGraph(graph){
+  const known=new Set(['algorithm','variables','objective','stage','objective_mode','objective_target','keep','stop']);
+  nodes=(graph.nodes||[]).map((gn,i)=>{ const d=gn.data||{}; const params={};
+    Object.keys(d).forEach(k=>{ if(!known.has(k)) params[k]=d[k]; });
+    return {id:gn.id||('n'+(i+1)), algorithm:d.algorithm, color:NODE_COLORS[i%NODE_COLORS.length],
+      variables:d.variables||[], objective:d.objective||objKeys[0],
+      objectiveMode:d.objective_mode||'', objectiveTarget:(d.objective_target!=null?d.objective_target:''),
+      params, keep:d.keep||'', stopTarget:(d.stop&&d.stop.target)||'', fitInfo:'', x:40+i*240, y:100}; });
+  edges=(graph.edges||[]).map((e,i)=>({id:'e'+(i+1), source:e.source, target:e.target, condition:e.condition||''}));
+  untilExpr=graph.until||''; untilRawEdited=false; untilRows=[]; seq=nodes.length+edges.length+1;
+  sel=null; selEdge=null; render(); inspectEmpty(); renderUntilRows();
+}
 
 function loadExample(){
   const bench = document.getElementById('evBench').value;
