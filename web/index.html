@@ -98,6 +98,8 @@
   .urow { display:grid; grid-template-columns:64px 1fr 74px 1fr 26px; gap:6px; align-items:center; margin-bottom:6px; }
   .urow .conn { font-size:11px; }
   #uPreview { background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:8px; font-family:ui-monospace,monospace; font-size:12px; margin-top:8px; word-break:break-all; }
+  .librow { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 4px; border-bottom:1px solid var(--line); font-size:13px; }
+  .librow b { font-weight:500; }
 </style>
 </head>
 <body>
@@ -116,9 +118,10 @@
   <aside id="palette">
     <h2>方案 <span class="info" data-tip="把搭好的流程（节点+连线+目标+评估配置）保存成 JSON 文件，或加载回来继续编辑。">i</span></h2>
     <div class="toolbar">
-      <button class="ghost sm" onclick="loadExample()">载入示例</button>
-      <button class="ghost sm" onclick="saveSolution()" data-tip="保存当前方案为 JSON 文件。">保存</button>
-      <button class="ghost sm" onclick="document.getElementById('loadFile').click()" data-tip="加载之前保存的方案 JSON。">加载</button>
+      <button class="ghost sm" onclick="loadExample()" data-tip="按左下选中的『仿真场景』载入一条为该函数量身定制的示例流程（单峰=找光+精调；多峰/多模=贝叶斯全局；相关谷=单纯形；等等）。">载入示例（按场景）</button>
+      <button class="ghost sm" onclick="openLib()" data-tip="方案库：内置每个场景的示例，还能从一个文件夹批量加载你保存过的多个方案。">📁 方案库</button>
+      <button class="ghost sm" onclick="saveSolution()" data-tip="保存当前方案为 JSON 文件（存到你的方案文件夹，之后可用方案库整夹加载）。">保存</button>
+      <button class="ghost sm" onclick="document.getElementById('loadFile').click()" data-tip="加载单个方案 JSON。">加载</button>
       <input type="file" id="loadFile" accept=".json,application/json" style="display:none" onchange="loadSolutionFile(this.files[0])">
     </div>
 
@@ -210,6 +213,15 @@
     <button onclick="applyUntil()">应用</button>
     <button class="ghost" onclick="untilRows=[]; document.getElementById('uRaw').value=''; untilRawEdited=false; renderUntilRows()">清空</button>
   </div>
+</div>
+
+<div id="libModal" class="modal">
+  <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
+  <h2>方案库</h2>
+  <p class="hint">内置每个仿真场景的量身示例；也可从一个文件夹批量加载你保存过的方案（先用左侧『保存』把方案存进同一个文件夹）。</p>
+  <div id="libBody"></div>
+  <input type="file" id="libFolder" webkitdirectory directory multiple style="display:none" onchange="loadFolderFiles(this.files)">
+  <input type="file" id="libFiles" accept=".json,application/json" multiple style="display:none" onchange="loadFolderFiles(this.files)">
 </div>
 
 <script>
@@ -685,19 +697,51 @@ function saveSolution(){
   a.download=name.replace(/[\\/:*?"<>|]/g,'_')+'.json';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
+function applySolution(o){
+  nodes=(o.nodes||[]).map((n,i)=>({color:NODE_COLORS[i%NODE_COLORS.length], objectiveMode:'', objectiveTarget:'', keep:'', stopTarget:'', params:{}, fitInfo:'', ...n}));
+  edges=(o.edges||[]).map(e=>({condition:'', ...e}));
+  untilExpr=o.until||''; untilRawEdited=false; untilRows=[];
+  seq=o.seq||nodes.length+edges.length;
+  if(o.evaluator) applyEvalConfig(o.evaluator);
+  sel=null; selEdge=null; render(); inspectEmpty(); renderUntilRows();
+  document.getElementById('conn').textContent='已加载方案：'+(o.name||'');
+}
 function loadSolutionFile(file){
   if(!file) return; const rd=new FileReader();
-  rd.onload=()=>{ try{
-      const o=JSON.parse(rd.result);
-      nodes=(o.nodes||[]).map((n,i)=>({color:NODE_COLORS[i%NODE_COLORS.length], objectiveMode:'', objectiveTarget:'', keep:'', stopTarget:'', params:{}, fitInfo:'', ...n}));
-      edges=(o.edges||[]).map(e=>({condition:'', ...e}));
-      untilExpr=o.until||''; untilRawEdited=false; untilRows=[];
-      seq=o.seq||nodes.length+edges.length;
-      if(o.evaluator) applyEvalConfig(o.evaluator);
-      sel=null; selEdge=null; render(); inspectEmpty(); renderUntilRows();
-      document.getElementById('conn').textContent='已加载方案：'+(o.name||'');
-    } catch(e){ alert('方案文件解析失败：'+e); } };
+  rd.onload=()=>{ try{ applySolution(JSON.parse(rd.result)); } catch(e){ alert('方案文件解析失败：'+e); } };
   rd.readAsText(file);
+}
+
+// ---------- solution library (built-in examples + a folder of saved solutions) ----------
+let library = [];
+function openLib(){ renderLibrary(); showModal('libModal'); }
+function loadExampleFor(bench){ const bs=document.getElementById('evBench'); if([...bs.options].some(o=>o.value===bench)) bs.value=bench; renderEvalExtras(); loadExample(); closeModals(); }
+function loadFolderFiles(files){
+  const js=[...files].filter(f=>/\.json$/i.test(f.name));
+  if(!js.length){ alert('这个文件夹里没找到 .json 方案文件'); return; }
+  let pending=js.length;
+  js.forEach(f=>{ const rd=new FileReader();
+    rd.onload=()=>{ try{ const o=JSON.parse(rd.result); library.push({name:o.name||f.name.replace(/\.json$/i,''), obj:o}); }catch(e){}
+      if(--pending===0) renderLibrary(); };
+    rd.readAsText(f); });
+}
+function loadLibItem(i){ if(library[i]) applySolution(library[i].obj); closeModals(); }
+function delLibItem(i){ library.splice(i,1); renderLibrary(); }
+function renderLibrary(){
+  const box=document.getElementById('libBody'); if(!box) return;
+  let h=`<h3>内置示例（按仿真场景）</h3>`;
+  (benches.length?benches:[{name:'single_peak',label:'单峰光纤耦合'}]).forEach(bt=>
+    h+=`<div class="librow"><b>${bt.label}</b><button class="ghost sm" onclick="loadExampleFor('${bt.name}')">载入</button></div>`);
+  h+=`<h3 style="margin-top:14px">已加载方案（来自文件夹 / 文件）</h3>
+      <div class="row" style="gap:8px;margin:4px 0 8px">
+        <button class="ghost sm" onclick="document.getElementById('libFolder').click()" data-tip="选一个装着多个 .json 方案的文件夹，一次全部载入方案库。">选文件夹…</button>
+        <button class="ghost sm" onclick="document.getElementById('libFiles').click()" data-tip="多选若干 .json 方案文件载入方案库。">选多个文件…</button>
+        ${library.length?`<button class="ghost sm danger" onclick="library=[];renderLibrary()">清空</button>`:''}
+      </div>`;
+  if(!library.length) h+=`<p class="hint">还没有加载的方案。用『保存』把当前方案存成 .json 收进你的文件夹，之后在这里选整个文件夹即可一次加载出所有方案。</p>`;
+  else library.forEach((s,i)=>
+    h+=`<div class="librow"><b>${s.name}</b><span><button class="ghost sm" onclick="loadLibItem(${i})">载入</button> <button class="ghost sm danger" onclick="delLibItem(${i})">✕</button></span></div>`);
+  box.innerHTML=h;
 }
 function applyEvalConfig(c){
   if(c.mode) document.getElementById('evMode').value=c.mode;
@@ -761,15 +805,66 @@ document.addEventListener('mousemove', e=>{ if(tip.style.display==='block') posi
 document.addEventListener('mouseout', e=>{ if(e.target.closest && e.target.closest('[data-tip]')) tip.style.display='none'; });
 function positionTip(e){ let x=e.clientX+14,y=e.clientY+16; if(x+290>innerWidth)x=e.clientX-290; if(y+90>innerHeight)y=e.clientY-80; tip.style.left=x+'px'; tip.style.top=y+'px'; }
 
+// each simulated function gets a workflow tuned to its landscape
+function exNode(algo, x, cfg){
+  addNode(algo, {x, y:70});
+  const n = nodes[nodes.length-1];
+  if(cfg.variables) n.variables = cfg.variables;
+  if(cfg.objective) n.objective = cfg.objective;
+  if(cfg.keep!=null) n.keep = cfg.keep;
+  if(cfg.stopTarget!=null) n.stopTarget = cfg.stopTarget;
+  if(cfg.params) n.params = {...n.params, ...cfg.params};
+  return n;
+}
+function chain(){ for(let i=1;i<nodes.length;i++) addEdge(nodes[i-1].id, nodes[i].id); }
+function exUntil(expr){ untilExpr=expr; untilRows=[]; untilRawEdited=true; document.getElementById('conn').textContent='目标：'+expr; }
+
+const EXAMPLES = {
+  single_peak(){ // 高斯单峰：找光 → 单纯形精调 → 公式法均衡 y2
+    exNode('grid_scan',40,{variables:['x1','x2'],objective:'y1',stopTarget:'y1>0.2'});
+    exNode('nelder_mead',280,{variables:['x1','x2'],objective:'y1'});
+    exNode('formula',520,{variables:['x3'],objective:'y2',keep:'y1>0.8'});
+    exUntil('y1>=0.98 and y2>=0.95');
+  },
+  multi_peak(){ // 多旁瓣：贝叶斯全局找主瓣 → 单纯形精调 → 高斯拟合 y2
+    exNode('bayesian',40,{variables:['x1','x2'],objective:'y1',params:{n_calls:60}});
+    exNode('nelder_mead',280,{variables:['x1','x2'],objective:'y1'});
+    exNode('gaussian_fit',520,{variables:['x3'],objective:'y2',keep:'y1>0.8'});
+    exUntil('y1>=0.95 and y2>=0.9');
+  },
+  skew_peak(){ // 偏斜相关峰：粗找 → 梯度上升沿脊快速对准 → 公式法 y2
+    exNode('grid_scan',40,{variables:['x1','x2'],objective:'y1',stopTarget:'y1>0.2'});
+    exNode('gradient_ascent',280,{variables:['x1','x2'],objective:'y1'});
+    exNode('formula',520,{variables:['x3'],objective:'y2',keep:'y1>0.8'});
+    exUntil('y1>=0.97 and y2>=0.92');
+  },
+  rosenbrock(){ // 香蕉谷(相关)：密网格入谷 → 单纯形沿弯谷 → 公式法 y2
+    exNode('grid_scan',40,{variables:['x1','x2'],objective:'y1',stopTarget:'y1>0.1',params:{n_per_axis:11}});
+    exNode('nelder_mead',280,{variables:['x1','x2'],objective:'y1'});
+    exNode('formula',520,{variables:['x3'],objective:'y2',keep:'y1>0.6'});
+    exUntil('y1>=0.9 and y2>=0.8');
+  },
+  rastrigin(){ // 强多峰：贝叶斯全局 → 坐标下降落入盆地 → 公式法 y2
+    exNode('bayesian',40,{variables:['x1','x2'],objective:'y1',params:{n_calls:80}});
+    exNode('coordinate_descent',280,{variables:['x1','x2'],objective:'y1'});
+    exNode('formula',520,{variables:['x3'],objective:'y2',keep:'y1>0.6'});
+    exUntil('y1>=0.9 and y2>=0.8');
+  },
+  ackley(){ // 多峰+外围平坦：贝叶斯找中心盆地 → 梯度上升登尖峰 → 高斯拟合 y2
+    exNode('bayesian',40,{variables:['x1','x2'],objective:'y1',params:{n_calls:70}});
+    exNode('gradient_ascent',280,{variables:['x1','x2'],objective:'y1'});
+    exNode('gaussian_fit',520,{variables:['x3'],objective:'y2',keep:'y1>0.6'});
+    exUntil('y1>=0.9 and y2>=0.8');
+  },
+};
+
 function loadExample(){
+  const bench = document.getElementById('evBench').value;
   nodes=[]; edges=[]; seq=0; sel=null; selEdge=null;
-  untilExpr='y1>=0.98 and y2>=0.95';
-  untilRows=[{obj:'y1',op:'≥',val:'0.98',tol:'0.02',conn:'and'},{obj:'y2',op:'≥',val:'0.95',tol:'0.02',conn:'and'}]; untilRawEdited=false;
-  addNode('grid_scan',{x:40,y:70});   nodes[0].stopTarget='y1>0.2';
-  addNode('nelder_mead',{x:280,y:70});
-  addNode('formula',{x:520,y:70});     nodes[2].keep='y1>0.8'; nodes[2].variables=['x3']; nodes[2].objective='y2';
-  addEdge(nodes[0].id,nodes[1].id); addEdge(nodes[1].id,nodes[2].id);
-  select(nodes[0].id); renderUntilRows();
+  (EXAMPLES[bench] || EXAMPLES.single_peak)();
+  chain();
+  if(nodes[0]) select(nodes[0].id);
+  renderUntilRows();
 }
 
 boot();

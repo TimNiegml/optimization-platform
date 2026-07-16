@@ -73,6 +73,7 @@
   - **经典测试函数**：`demo.py` 加 Rosenbrock(相关谷)/Rastrigin/Ackley(多峰)；`POST /surface` 采样响应面；画布 2D 视图可**叠加响应面等高线**(纯函数场景)。
   - **梯度上升(PI闪电式)** `gradient_ascent`：有限差分测局部梯度、沿上升方向步进+步长自适应。
   - **拟合公式回显**：`SurrogateFit`/`FormulaMethod`/`ParametricFit` 暴露 `fit_info`（峰位/参数/R²），引擎收进 `result.fits`（用 finally 保证全局早停也记录），画布对应**节点卡片显示拟合公式**。
+  - **按场景示例 + 方案库**：`载入示例` 按当前仿真场景放量身流程（多峰/多模用贝叶斯全局、相关谷用单纯形、偏斜/尖峰用梯度上升等）；`📁 方案库` 内置各场景示例，并可选**整个文件夹批量加载**保存过的方案（webkitdirectory / 多选文件）。
 - **测试**：`python -m pytest -q` → **37 项全过**（algorithms / graph / p1b / api）。
 
 算法库（10 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
