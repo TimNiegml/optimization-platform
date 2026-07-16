@@ -1,0 +1,12 @@
+{
+  "$comment": "Hermes 读取本文件连接平台的 MCP 服务器。把 url 换成平台的内网可达地址，token 换成平台 OPTPLAT_TOKEN 的值。平台以 `OPTPLAT_TOKEN=... python -m optplat.api` 启动，MCP 端点在 /mcp（streamable-HTTP）。",
+  "mcpServers": {
+    "optplat": {
+      "type": "http",
+      "url": "https://REPLACE-WITH-PLATFORM-HOST/mcp",
+      "headers": {
+        "Authorization": "Bearer REPLACE-WITH-OPTPLAT_TOKEN"
+      }
+    }
+  }
+}

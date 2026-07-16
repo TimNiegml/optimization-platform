@@ -13,8 +13,15 @@ streamlit run app.py          # 表单式交互控制台（选工作流/算法/�
 python run_demo.py            # 两阶段：找光 → Nelder-Mead 精调 → 公式法均衡
 python run_graph.py           # 节点+连线图 JSON（Dify 风格）直接执行 + mermaid 预览
 python demo_hardware.py       # 硬件接入 + 噪声/平均/安全 + 断点续跑 + 一键回滚
-python -m pytest -q           # 回归测试（算法 + 块/图/API + 硬件/归档，23 项）
+python run_mcp.py             # ★ L2 MCP 服务器 → 让 Agent 直接驱动平台（配置见 MCP_AGENT.md）
+python -m pytest -q           # 回归测试（算法 + 块/图/API + 硬件/归档 + 自动调优 + MCP + 实时联动，66 项）
 ```
+
+## 用 Agent 驱动（L2 · MCP）
+
+平台可作为 **MCP 服务器**被任意 Agent（内部 GLM5.1 / Claude Desktop / Cursor）驱动：新增算法节点、
+加载以前的方案、跑仿真、对比不同策略、自动调优。启动 `python run_mcp.py`（stdio）或
+`python run_mcp.py --http`（HTTP），配置与对接方式详见 **[`MCP_AGENT.md`](MCP_AGENT.md)**。
 
 ## 典型流程（两阶段，已支持）
 

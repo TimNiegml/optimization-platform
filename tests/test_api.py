@@ -124,3 +124,16 @@ def test_bad_algorithm_returns_400():
 def test_serves_canvas():
     r = client.get("/")
     assert r.status_code == 200 and "<html" in r.text.lower()
+
+
+def test_workspace_get_post_roundtrip():
+    sid = "apitest"
+    graph = {"nodes": [{"id": "n1", "type": "algorithm",
+                        "data": {"algorithm": "grid_scan", "variables": ["x1"], "objective": "y1"}}],
+             "edges": []}
+    r0 = client.get(f"/workspace/{sid}").json()
+    r1 = client.post(f"/workspace/{sid}", json={"graph": graph, "bench": "multi_peak"}).json()
+    assert r1["revision"] == r0["revision"] + 1
+    r2 = client.get(f"/workspace/{sid}").json()
+    assert r2["bench"] == "multi_peak"
+    assert r2["graph"]["nodes"][0]["data"]["algorithm"] == "grid_scan"

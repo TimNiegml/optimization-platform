@@ -8,3 +8,6 @@ venv/
 
 *.db
 demo_run.db
+
+# saved MCP/canvas solutions (user data, not source)
+solutions/

@@ -16,23 +16,61 @@ FastAPI (MIT) + uvicorn (BSD) — permissive.
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
 import os
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
 
 from .autotune import TuneSpec, run_autotune
 from .demo import BENCHES, bench_func, demo_vocs, optical_bench
 from .evaluator import Evaluator
 from .graph import GraphRunner
 from .hardware import HardwareEvaluator, SafetyLimits, SimulatedMeter, SimulatedStage
+from .mcp_server import mcp
 from .orchestrator import Orchestrator
 from .registry import REGISTRY, algorithm_catalog
 from .vocs import VOCS
+from .workspace import WORKSPACE
 
-app = FastAPI(title="Optimization Platform API", version="0.1")
+# The MCP server is mounted at /mcp (streamable-HTTP) so ONE process serves the
+# canvas, the REST API AND the agent-facing MCP endpoint, all sharing the same
+# in-memory WORKSPACE — that shared state is what lets an agent's edits show up
+# on the canvas automatically. Its session manager must run for the lifetime of
+# the app, so we drive it from the FastAPI lifespan.
+mcp.settings.streamable_http_path = "/"
+
+# Optional bearer token guarding /mcp and /workspace (set OPTPLAT_TOKEN in prod;
+# unset = open, for localhost dev). EventSource can't send headers, so the SSE
+# stream also accepts the token as a ?token= query param.
+_TOKEN = os.environ.get("OPTPLAT_TOKEN")
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
+    async with mcp.session_manager.run():
+        yield
+
+
+app = FastAPI(title="Optimization Platform API", version="0.2", lifespan=_lifespan)
+
+
+@app.middleware("http")
+async def _auth(request: Request, call_next):
+    path = request.url.path
+    if _TOKEN and (path.startswith("/mcp") or path.startswith("/workspace")):
+        auth = request.headers.get("authorization", "")
+        provided = auth[7:].strip() if auth.lower().startswith("bearer ") else None
+        provided = provided or request.query_params.get("token")
+        if provided != _TOKEN:
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
 
 _WEB = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
 
@@ -222,6 +260,49 @@ def autotune(spec: TuneSpec):
         return run_autotune(spec)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
+# ============================ live workspace (agent ↔ canvas) ============================
+class WorkspacePatch(BaseModel):
+    graph: Optional[dict] = None
+    bench: Optional[str] = None
+    note: Optional[str] = None
+
+
+@app.get("/workspace/{sid}")
+def workspace_get(sid: str):
+    """Current live workspace for a session (graph / bench / last result / autotune
+    / revision). The canvas polls this (or the /stream SSE) to auto-refresh."""
+    return WORKSPACE.snapshot(sid)
+
+
+@app.post("/workspace/{sid}")
+def workspace_patch(sid: str, patch: WorkspacePatch):
+    """Canvas → workspace: the user's own edits, so an agent can get_canvas them back."""
+    return WORKSPACE.update(sid, graph=patch.graph, bench=patch.bench, note=patch.note)
+
+
+@app.get("/workspace/{sid}/stream")
+async def workspace_stream(sid: str, request: Request):
+    """SSE stream: emits the workspace snapshot whenever its revision changes, so a
+    connected canvas re-renders automatically when an agent pushes a new graph."""
+    async def gen():
+        last = -1
+        yield {"event": "snapshot", "data": json.dumps(WORKSPACE.snapshot(sid))}
+        last = WORKSPACE.revision(sid)
+        while True:
+            if await request.is_disconnected():
+                break
+            await asyncio.sleep(1.0)
+            rev = WORKSPACE.revision(sid)
+            if rev != last:
+                last = rev
+                yield {"event": "update", "data": json.dumps(WORKSPACE.snapshot(sid))}
+    return EventSourceResponse(gen())
+
+
+# Mount the agent-facing MCP endpoint (streamable-HTTP) at /mcp.
+app.mount("/mcp", mcp.streamable_http_app())
 
 
 @app.get("/")

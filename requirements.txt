@@ -11,6 +11,8 @@ optuna             # MIT     — Bayesian / TPE generator (lazy-imported wrapper
 fastapi            # MIT     — backend service (catalog + run endpoints)
 uvicorn            # BSD-3   — ASGI server for the API
 httpx              # BSD-3   — used by the API tests (TestClient)
+mcp>=1.2           # MIT     — L2 MCP server (expose the platform to any MCP agent)
+sse-starlette      # BSD-3   — SSE stream for live canvas refresh (ships with mcp)
 # sqlite3 is stdlib (archive/resume/rollback); PyVISA/PyMeasure (MIT) optional,
 # only needed for real instruments — the simulated stage/meter need nothing.
 # The drag-drop canvas (web/index.html) is dependency-free vanilla JS — no CDN.
