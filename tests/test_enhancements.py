@@ -9,10 +9,11 @@ import math
 import pytest
 
 from optplat.autotune import TuneSpec, _random_start, run_autotune
-from optplat.demo import demo_vocs, linear_sens_bench
+from optplat.demo import demo_vocs, linear_sens_bench, nonlinear_sens_bench
 from optplat.evaluator import Evaluator, read_seconds
 from optplat.generators import DampedSensitivity
 from optplat.graph import GraphRunner
+from optplat.hardware import HardwareEvaluator, SimulatedMeter, SimulatedStage
 
 
 # ---------------- DampedSensitivity ----------------
@@ -51,6 +52,20 @@ def test_damped_sensitivity_only_reads_target_channels():
     GraphRunner(vocs, ev, _solve_graph({"y1": 2.0})).run()
     assert ev.reads.get("y1", 0) > 2                     # iterated on the target
     assert ev.reads.get("y2", 0) <= 1                    # only the init prime, if any
+
+
+def test_damped_sensitivity_solves_noisy_nonlinear_to_zero():
+    # near-linear plant (mild cubic far from solution), target y=0, WITH noise —
+    # damped least squares + averaging still drives both outputs to ~0.
+    vocs = demo_vocs()
+    graph = _solve_graph({"y1": 0.0, "y2": 0.0}, damping=0.6)
+    graph["nodes"][1]["data"]["max_solves"] = 60
+    stage = SimulatedStage(vocs.initial_point())
+    meter = SimulatedMeter(stage, nonlinear_sens_bench, noise=0.01, seed=1)
+    ev = HardwareEvaluator(stage, meter, averages=5)
+    res = GraphRunner(vocs, ev, graph, start_point={"x1": 5.0, "x2": -3.0, "x3": 0.7}).run()
+    assert abs(res["objectives"]["y1"]) < 0.05
+    assert abs(res["objectives"]["y2"]) < 0.05
 
 
 def test_damped_sensitivity_regularised_inverse_is_stable():

@@ -92,6 +92,19 @@ def linear_sens_bench(x: dict[str, float]) -> dict[str, float]:
     return {"y1": round(y1, 6), "y2": round(y2, 6)}
 
 
+def nonlinear_sens_bench(x: dict[str, float]) -> dict[str, float]:
+    """近线性灵敏度台（带弱非线性，定零）：y1,y2 与 x1,x2 近似线性耦合，靠近解时几乎线性、
+    远离解时带少量三次非线性；零点在 (x1,x2)=(2,0)，目标是把 y1,y2 都调到 0。
+    典型标定/打架均衡：即使读数带噪，用『阻尼灵敏度求解』的阻尼最小二乘也能稳稳解到。
+        y1 = 0.8·Δ1 + 0.3·Δ2 + 0.02·Δ1³
+        y2 = 0.2·Δ1 − 0.6·Δ2 + 0.02·Δ2³      （Δ1=x1−2, Δ2=x2−0；x3 不参与）
+    → 解处 ∂y/∂x = [[0.8, 0.3], [0.2, −0.6]]（三次项在解处导数为 0）。"""
+    d1, d2 = x["x1"] - 2.0, x["x2"] - 0.0
+    y1 = 0.8 * d1 + 0.3 * d2 + 0.02 * d1 ** 3
+    y2 = 0.2 * d1 - 0.6 * d2 + 0.02 * d2 ** 3
+    return {"y1": round(y1, 6), "y2": round(y2, 6)}
+
+
 # Selectable simulated benches (the canvas 场景 dropdown reads this via /benches).
 # All share the same variable space (x1,x2,x3 / y1,y2) so one VOCS stays valid.
 # `smooth` marks continuous surfaces worth drawing as a response-surface contour.
@@ -110,6 +123,8 @@ BENCHES = {
                "desc": "经典多峰，外围近平坦、中心尖峰在(0,0)，容易困在外围。"},
     "linear_sens": {"label": "线性灵敏度台(定值)", "func": linear_sens_bench, "smooth": True,
                     "desc": "y1,y2 与 x1,x2 线性耦合，∂y/∂x 已知；配『阻尼灵敏度求解』把 y 逼到目标值。"},
+    "nonlinear_sens": {"label": "近线性灵敏度台(带噪定零)", "func": nonlinear_sens_bench, "smooth": True,
+                       "desc": "近似线性(远处含弱非线性)，零点在(2,0)，目标 y 全零；即便带噪也能靠阻尼最小二乘解出。"},
 }
 
 

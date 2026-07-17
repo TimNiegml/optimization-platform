@@ -90,8 +90,9 @@
   - **Agent 消息面板**：画布左下角 `#agentLog`——实时会话里 Agent 推来的 `note`/运行结果/自动调优最优会按修订号追加显示（`applyLiveSnapshot`）。
   - **自定义起始点**：`start_point` 早已在引擎/图，画布评估面板加『自定义起始点』表单，且**运行后可在 2D 轨迹图点击直接选起点(★)**（`pick2D`/`twoDMap`）；随方案保存/加载。
   - **自动调优随机初始点**：`TuneSpec.random_start`(默认 True)+`start_domain`（每自变量随机起点定义域，默认全量程）；`evaluate_candidate` 每次试验用**种子随机起点**（`_random_start`），更贴近冷启动/更公平评稳定性；自动调优面板可勾选并逐变量设定义域。
-  - **阻尼灵敏度求解**（`generators.DampedSensitivity`，category=`solve`，不入自动调优变异）：已知灵敏度 ∂y/∂x + 各 y 目标，`Δx=阻尼·S⁺_λ·(目标−当前)`，`S⁺_λ` 用 **SVD 正则伪逆**（σ/(σ²+λ)，比 pinv 稳，行列不等/病态/秩亏都不发散）；x/y 维度任选。引擎加 `observe(x,y)` 钩子把**整条 y 向量**喂给多出算子、`_needed_channels` 纳入 `targets`；画布该节点有**目标勾选+灵敏度矩阵**编辑器；`demo.linear_sens_bench` 为其量身场景+示例。
+  - **阻尼灵敏度求解**（`generators.DampedSensitivity`，category=`solve`，不入自动调优变异）：已知灵敏度 ∂y/∂x + 各 y 目标，`Δx=阻尼·S⁺_λ·(目标−当前)`，`S⁺_λ` 用 **SVD 正则伪逆**（σ/(σ²+λ)，比 pinv 稳，行列不等/病态/秩亏都不发散）；x/y 维度任选。引擎加 `observe(x,y)` 钩子把**整条 y 向量**喂给多出算子、`_needed_channels` 纳入 `targets`；画布该节点用**表格填**——『因变量目标表』(选/y/目标值) + 『灵敏度矩阵表』(行=选中 y、列=勾选 x，照表填 ∂y/∂x)；配套场景 `demo.linear_sens_bench`(定值) 与 `demo.nonlinear_sens_bench`(近线性+弱非线性，零点(2,0)，**带噪也能靠阻尼最小二乘解到 y≈0**，示例自动切模拟硬件+噪声+平均)。
   - **仪器测量时间 并行/串行分组**：`Objective.group` + `EvaluatorConfig.channel_groups`；`evaluator.read_seconds(keys,costs,groups)`——同组**并行**(耗时取 max)、不同组/未分组**串行**(相加)，`HardwareEvaluator` 还按 `averages` 倍数计；画布通道表加『测量组』列并实时预估耗时（光功率+PDL 并行、光功率+中心波长 串行）。
+  - **左右栏可拖宽/拖窄**：`#app` 网格列改 `--leftw/--rightw` CSS 变量，两条 `.resizer` 竖条拖动实时改宽（`initResizers`，含边界钳制 + 拖动后 `drawEdges` 重排连线）。
 
 - **P3 Agent/AutoTuner（Phase A 已做）**：见 `AGENT_AUTOTUNE_DESIGN.md`。
   - **L1 AutoTuner**（`optplat/autotune.py`）：在"粗调(网格/线扫/**贝叶斯**)×精调(单纯形/坐标/梯度)×拟合"三相空间搜索，

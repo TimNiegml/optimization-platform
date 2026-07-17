@@ -18,7 +18,11 @@
   }
   * { box-sizing: border-box; }
   body { margin:0; font-family: system-ui, "Segoe UI", "PingFang SC", sans-serif; background:var(--bg); color:var(--text); height:100vh; overflow:hidden; }
-  #app { display:grid; grid-template-columns: 222px 1fr 328px; grid-template-rows: 46px 1fr; height:100vh; }
+  #app { position:relative; display:grid; grid-template-columns: var(--leftw,222px) 1fr var(--rightw,328px); grid-template-rows: 46px 1fr; height:100vh; }
+  .resizer { position:absolute; top:46px; bottom:0; width:7px; z-index:55; cursor:col-resize; background:transparent; }
+  .resizer::after { content:""; position:absolute; left:3px; top:0; bottom:0; width:1px; background:var(--line); }
+  .resizer:hover::after, .resizer.active::after { left:2px; width:3px; background:var(--accent); }
+  body.resizing { cursor:col-resize; user-select:none; }
   header { grid-column:1/4; display:flex; align-items:center; gap:9px; padding:0 14px; background:var(--panel); border-bottom:1px solid var(--line); }
   header h1 { font-size:15px; margin:0; font-weight:600; white-space:nowrap; }
   header .sp { flex:1; }
@@ -198,6 +202,8 @@
     <div id="inspBody"></div>
     <div id="results"></div>
   </aside>
+  <div class="resizer" id="resizerL" data-tip="拖动调整左栏宽度"></div>
+  <div class="resizer" id="resizerR" data-tip="拖动调整右栏宽度"></div>
 </div>
 
 <div id="tipbox"></div>
@@ -562,18 +568,23 @@ function renderSolveEditor(n){
   ensureSolve(n);
   const tg=n.params.targets, sens=n.params.sensitivity;
   const ys=Object.keys(vocs.objectives), xs=n.variables;
-  let h=`<label>目标 y（勾选要定值的因变量 + 目标值） <span class="info" data-tip="勾选要驱动到目标值的因变量 y，并填目标值。可选多个 → 多进多出定值/标定。">i</span></label>`;
+  // ---- 因变量目标表：勾选要定值的 y，并逐行填目标值 ----
+  let h=`<label>因变量目标表 y* <span class="info" data-tip="勾选要驱动到目标值的因变量 y，逐行填目标值。可选多个 → 多进多出定值/标定。求解会把选中的 y 同时逼到各自目标。">i</span></label>`;
+  h+=`<div style="overflow-x:auto"><table class="sens"><tr><th>选</th><th>y</th><th>目标值 y*</th></tr>`;
   ys.forEach(o=>{ const on=(o in tg);
-    h+=`<div class="lim" style="grid-template-columns:22px 28px 1fr"><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleTarget('${n.id}','${o}',this.checked)"><b>${o}</b>
-      <input type="number" step="0.1" value="${on?tg[o]:''}" ${on?'':'disabled'} placeholder="目标值" oninput="setTargetVal('${n.id}','${o}',this.value)"></div>`; });
+    h+=`<tr><td><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleTarget('${n.id}','${o}',this.checked)"></td>
+      <th>${o}</th>
+      <td><input type="number" step="0.1" value="${on?tg[o]:''}" ${on?'':'disabled'} placeholder="目标值" oninput="setTargetVal('${n.id}','${o}',this.value)"></td></tr>`; });
+  h+=`</table></div>`;
   const rows=ys.filter(o=>o in tg);
-  h+=`<label style="margin-top:8px">灵敏度矩阵 ∂y/∂x <span class="info" data-tip="行=选中的目标 y，列=选中的自变量 x；填对应偏导 ∂y/∂x。求解用阻尼最小二乘(SVD 正则伪逆)，比 pinv 数值更稳，行列数不等/病态也不发散。">i</span></label>`;
-  if(!rows.length || !xs.length){ h+=`<p class="hint">先勾选至少一个目标 y，并在上方选至少一个变量 x。</p>`; return h; }
+  // ---- 灵敏度矩阵表：行=选中的 y，列=选中的 x ----
+  h+=`<label style="margin-top:10px">灵敏度矩阵 ∂y/∂x <span class="info" data-tip="行=选中的目标 y、列=上方勾选的自变量 x；每格填对应偏导 ∂y/∂x（照着表格填即可）。求解用阻尼最小二乘(SVD 正则伪逆)，比 pinv 数值更稳，行列数不等/病态也不发散。">i</span></label>`;
+  if(!rows.length || !xs.length){ h+=`<p class="hint">先在上表勾选至少一个目标 y，并在上方『变量』勾选至少一个自变量 x。</p>`; return h; }
   h+=`<div style="overflow-x:auto"><table class="sens"><tr><th>∂y/∂x</th>${xs.map(x=>`<th>${x}</th>`).join('')}</tr>`;
   rows.forEach(o=>{ h+=`<tr><th>${o}</th>`+xs.map(x=>{ const val=((sens[o]||{})[x]);
     return `<td><input type="number" step="0.01" value="${val!=null?val:''}" placeholder="0" oninput="setSensCell('${n.id}','${o}','${x}',this.value)"></td>`; }).join('')+`</tr>`; });
   h+=`</table></div>`;
-  h+=`<p class="hint">Δx = 阻尼 · SVD正则伪逆(∂y/∂x) · (目标 − 当前 y)，逐轮迭代把选中的 y 同时逼到目标。</p>`;
+  h+=`<p class="hint">Δx = 阻尼 · SVD正则伪逆(∂y/∂x) · (y* − 当前 y)，逐轮迭代把选中的 y 同时逼到目标。</p>`;
   return h;
 }
 window.toggleTarget=(id,o,on)=>{ const n=nodes.find(x=>x.id===id); ensureSolve(n);
@@ -997,6 +1008,36 @@ function syncUntil(){ const built=buildUntil();
 function applyUntil(){ untilExpr=(document.getElementById('uRaw').value||buildUntil()).trim(); closeModals();
   document.getElementById('conn').textContent = untilExpr?('目标：'+untilExpr):'已连接'; }
 
+// ---------- resizable side panels ----------
+let leftW=222, rightW=328;
+function positionResizers(){
+  const rl=document.getElementById('resizerL'), rr=document.getElementById('resizerR');
+  if(rl) rl.style.left=(leftW-3)+'px';
+  if(rr) rr.style.right=(rightW-3)+'px';
+}
+function applyPanelWidths(){
+  const app=document.getElementById('app');
+  app.style.setProperty('--leftw', leftW+'px'); app.style.setProperty('--rightw', rightW+'px');
+  positionResizers(); drawEdges();
+}
+function initResizers(){
+  const rl=document.getElementById('resizerL'), rr=document.getElementById('resizerR');
+  const start=(which,el)=>e=>{ e.preventDefault(); el.classList.add('active'); document.body.classList.add('resizing');
+    const move=ev=>{
+      if(which==='L') leftW=Math.max(150, Math.min(520, ev.clientX));
+      else rightW=Math.max(200, Math.min(600, window.innerWidth-ev.clientX));
+      applyPanelWidths();
+    };
+    const up=()=>{ el.classList.remove('active'); document.body.classList.remove('resizing');
+      window.removeEventListener('mousemove',move); window.removeEventListener('mouseup',up); };
+    window.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
+  };
+  if(rl) rl.addEventListener('mousedown', start('L',rl));
+  if(rr) rr.addEventListener('mousedown', start('R',rr));
+  window.addEventListener('resize', positionResizers);
+  applyPanelWidths();
+}
+
 // ---------- misc UI ----------
 document.getElementById('fsRange').addEventListener('input', e => { fontScale=+e.target.value; document.documentElement.style.setProperty('--fs',fontScale+'px'); drawEdges(); });
 function toggleTheme(){ theme = theme==='light'?'dark':'light'; document.documentElement.setAttribute('data-theme',theme);
@@ -1066,6 +1107,15 @@ const EXAMPLES = {
     exNode('damped_sensitivity',160,{variables:['x1','x2'],params:{
       targets:{y1:2.0, y2:0.0}, sensitivity:{y1:{x1:0.8,x2:0.3}, y2:{x1:0.2,x2:-0.6}}, damping:0.8}});
     exUntil('abs(y1 - 2.0) <= 0.01 and abs(y2 - 0.0) <= 0.01');
+  },
+  nonlinear_sens(){ // 近线性带噪：阻尼灵敏度求解把 y1,y2 都定到 0（阻尼最小二乘抗噪）
+    exNode('damped_sensitivity',160,{variables:['x1','x2'],params:{
+      targets:{y1:0.0, y2:0.0}, sensitivity:{y1:{x1:0.8,x2:0.3}, y2:{x1:0.2,x2:-0.6}},
+      damping:0.6, max_solves:60}});
+    exUntil('abs(y1 - 0.0) <= 0.03 and abs(y2 - 0.0) <= 0.03');
+    // 用『模拟硬件+噪声+多次平均』演示带噪也能解到：阻尼 + 平均抑制噪声
+    const md=document.getElementById('evMode'), nz=document.getElementById('evNoise'), av=document.getElementById('evAvg');
+    if(md) md.value='hardware_sim'; if(nz) nz.value='0.01'; if(av) av.value='5'; renderEvalExtras();
   },
 };
 
@@ -1285,6 +1335,7 @@ function loadExample(){
 }
 
 boot();
+initResizers();
 </script>
 </body>
 </html>
