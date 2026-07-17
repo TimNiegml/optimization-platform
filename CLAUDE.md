@@ -1,7 +1,7 @@
 # CLAUDE.md — 项目上下文与继续指南
 
 > 这份文件是给 Claude Code 新会话的"接手说明"。读完它 + `ARCHITECTURE.md` 就能无缝继续。
-> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 66 项全过）。
+> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 74 项全过）。
 
 ---
 
@@ -79,10 +79,19 @@
   - **梯度上升(PI闪电式)** `gradient_ascent`：有限差分测局部梯度、沿上升方向步进+步长自适应。
   - **拟合公式回显**：`SurrogateFit`/`FormulaMethod`/`ParametricFit` 暴露 `fit_info`（峰位/参数/R²），引擎收进 `result.fits`（用 finally 保证全局早停也记录），画布对应**节点卡片显示拟合公式**。
   - **按场景示例 + 方案库**：`载入示例` 按当前仿真场景放量身流程（多峰/多模用贝叶斯全局、相关谷用单纯形、偏斜/尖峰用梯度上升等）；`📁 方案库` 内置各场景示例，并可选**整个文件夹批量加载**保存过的方案（webkitdirectory / 多选文件）。
-- **测试**：`python -m pytest -q` → **66 项全过**（algorithms / graph / p1b / api / autotune / mcp）。
+- **测试**：`python -m pytest -q` → **74 项全过**（algorithms / graph / p1b / api / autotune / mcp）。
 
-算法库（10 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
-`nelder_mead` `gradient_ascent`(PI闪电式) `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula` `bayesian`。
+算法库（11 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
+`nelder_mead` `gradient_ascent`(PI闪电式) `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula`
+`damped_sensitivity`(阻尼灵敏度求解/多进多出定值) `bayesian`。
+
+- **P2d 光调优增强**（Chromium 全流程验证，pytest 74 项全过）：
+  - **API host/port**：`main()` 默认 `0.0.0.0:8003`（可用 `OPTPLAT_HOST/OPTPLAT_PORT` 覆盖），画布/REST/MCP 一个进程。
+  - **Agent 消息面板**：画布左下角 `#agentLog`——实时会话里 Agent 推来的 `note`/运行结果/自动调优最优会按修订号追加显示（`applyLiveSnapshot`）。
+  - **自定义起始点**：`start_point` 早已在引擎/图，画布评估面板加『自定义起始点』表单，且**运行后可在 2D 轨迹图点击直接选起点(★)**（`pick2D`/`twoDMap`）；随方案保存/加载。
+  - **自动调优随机初始点**：`TuneSpec.random_start`(默认 True)+`start_domain`（每自变量随机起点定义域，默认全量程）；`evaluate_candidate` 每次试验用**种子随机起点**（`_random_start`），更贴近冷启动/更公平评稳定性；自动调优面板可勾选并逐变量设定义域。
+  - **阻尼灵敏度求解**（`generators.DampedSensitivity`，category=`solve`，不入自动调优变异）：已知灵敏度 ∂y/∂x + 各 y 目标，`Δx=阻尼·S⁺_λ·(目标−当前)`，`S⁺_λ` 用 **SVD 正则伪逆**（σ/(σ²+λ)，比 pinv 稳，行列不等/病态/秩亏都不发散）；x/y 维度任选。引擎加 `observe(x,y)` 钩子把**整条 y 向量**喂给多出算子、`_needed_channels` 纳入 `targets`；画布该节点有**目标勾选+灵敏度矩阵**编辑器；`demo.linear_sens_bench` 为其量身场景+示例。
+  - **仪器测量时间 并行/串行分组**：`Objective.group` + `EvaluatorConfig.channel_groups`；`evaluator.read_seconds(keys,costs,groups)`——同组**并行**(耗时取 max)、不同组/未分组**串行**(相加)，`HardwareEvaluator` 还按 `averages` 倍数计；画布通道表加『测量组』列并实时预估耗时（光功率+PDL 并行、光功率+中心波长 串行）。
 
 - **P3 Agent/AutoTuner（Phase A 已做）**：见 `AGENT_AUTOTUNE_DESIGN.md`。
   - **L1 AutoTuner**（`optplat/autotune.py`）：在"粗调(网格/线扫/**贝叶斯**)×精调(单纯形/坐标/梯度)×拟合"三相空间搜索，
@@ -106,7 +115,7 @@
     reference）上传 Hermes 即自动连 MCP 并会用；平台只做 schema 校验，不内置 LLM。
   - **L3 画布 Copilot（待做，可选）**：网页端自然语言输入框 → 平台内部 GLM5.1 出校验过的 IR(`draft_workflow`)，
     给不经 Hermes 的用户。工具面已备好。
-- **pytest 66 项全过**（algorithms/graph/p1b/api/autotune/mcp）。
+- **pytest 74 项全过**（algorithms/graph/p1b/api/autotune/mcp）。
 
 ## 5. 路线图（下一步候选，未做）
 
@@ -120,7 +129,7 @@
 ## 6. 待办 / 待用户反馈的点（重要）
 
 - **画布交互已用 Chromium 驱动验证**（拖拽/连线/删除/字号/目标模式/轨迹图/帮助/tooltip 均通过，无控制台报错）。
-  但真机手感、连线视觉细节仍以**用户打开 `http://127.0.0.1:8000/` 的反馈**为准，按需微调。
+  但真机手感、连线视觉细节仍以**用户打开 `http://127.0.0.1:8003/` 的反馈**为准，按需微调。
 - 用户会继续提需求（真实目标函数形态、WDL 均衡具体判据、仪器型号、界面细节）——按需迭代。
 
 ## 7. 关键决策与理由（别推翻，除非用户要求）
@@ -143,13 +152,13 @@
 
 ```bash
 pip install -r requirements.txt
-python -m optplat.api      # 后端 + 画布 → http://127.0.0.1:8000/   （/docs 有 API 文档）
+python -m optplat.api      # 后端 + 画布 → http://127.0.0.1:8003/   （/docs 有 API 文档）
 python run_graph.py        # 命令行跑图 JSON（Dify 风格）
 python run_demo.py         # 命令行跑两阶段流程
 python demo_hardware.py    # 硬件+噪声/平均/安全+续跑+回滚
 python run_mcp.py          # L2 MCP 服务器（stdio；--http 走 HTTP）→ 供 Agent 驱动，配置见 MCP_AGENT.md
 streamlit run app.py       # 表单式控制台
-python -m pytest -q        # 66 项测试
+python -m pytest -q        # 74 项测试
 ```
 
 接自己的优化函数：改 `optplat/demo.py` 的 `optical_bench(x)` 与 `demo_vocs()`。

@@ -42,6 +42,12 @@ class Generator:
         self.best_x: Optional[dict[str, float]] = None
         self.best_score: float = float("-inf")
 
+    # Optional richer feedback: if a generator defines observe(), the engine also
+    # hands it the FULL measured objective dict (not just the scalar score) after
+    # every evaluation. Multi-output solvers (e.g. 阻尼灵敏度求解) need the whole y
+    # vector; scalar-score algorithms simply don't implement this.
+    # def observe(self, x: dict[str, float], y: dict[str, float]) -> None: ...
+
     def set_base(self, point: dict[str, float]) -> None:
         """Seed the starting operating point (only our subset is read)."""
         self._base = {v: point[v] for v in self.variables}
@@ -663,3 +669,118 @@ class GradientAscent(Generator):
             self.lr *= 0.5; self._line_tries += 1
             if self.lr < self.tol or self._line_tries >= self.max_line:
                 self.done = True
+
+
+class DampedSensitivity(Generator):
+    """阻尼灵敏度求解: multi-in / multi-out target solving via damped least squares.
+
+    You know the sensitivity (Jacobian) S = ∂y/∂x of a set of measured outputs y
+    (n_y of them) w.r.t. a set of actuators x (n_x of them), and a target value for
+    each y. Each round measures y, forms the residual Δy = y_target − y_meas, and
+    steps the actuators by
+
+        Δx = damping · S⁺_λ · Δy ,      x ← clip(x + Δx)
+
+    where S⁺_λ is a **regularised (Tikhonov / damped-SVD) pseudo-inverse** rather
+    than a raw `pinv`: via the SVD S = U diag(σ) Vᵀ,
+
+        S⁺_λ Δy = Σ_i  σ_i / (σ_i² + λ) · (u_iᵀ Δy) · v_i .
+
+    This is the numerically-stable form used in beam-steering / adaptive-optics
+    controllers — it stays bounded when S is singular, ill-conditioned, tall, wide
+    or rank-deficient (a plain pinv blows up on the small singular values). The
+    `damping` ratio (0<d≤1) additionally under-relaxes the step so a locally-linear
+    model tracks a genuinely non-linear plant without overshoot.
+
+    Dimensions are free: the node picks which x it drives and which y it targets;
+    `sensitivity` and `targets` just have to match those. Iterates until the
+    residual norm falls below `tol` or `max_solves` steps are taken.
+    """
+
+    def __init__(self, vocs, variables, objective, sensitivity=None, targets=None,
+                 damping=0.5, reg=1e-6, tol=1e-4, max_solves=40):
+        super().__init__(vocs, variables, objective)
+        # target outputs: explicit {y: value}, else every TARGET-mode VOCS objective
+        if targets:
+            self.targets = {k: float(v) for k, v in targets.items()}
+        else:
+            self.targets = {n: float(o.target) for n, o in vocs.objectives.items()
+                            if o.target is not None}
+        if not self.targets:
+            raise ValueError("DampedSensitivity needs targets (y→目标值) — none given "
+                             "and no TARGET-mode objectives in VOCS")
+        self.objs = list(self.targets)                 # row order of S
+        self.damping = float(damping)
+        self.reg = float(reg)
+        self.tol = float(tol)
+        self.max_solves = int(max_solves)
+        self._S = self._as_matrix(sensitivity)         # n_y × n_x
+        self._next: Optional[dict[str, float]] = None
+        self._solves = 0
+
+    def channels(self) -> set:
+        """Objective channels this solver must read every step (all its targets)."""
+        return set(self.objs)
+
+    def _as_matrix(self, sens) -> list[list[float]]:
+        """Accept a nested dict {y:{x:val}} OR a plain 2-D list, ordered to
+        (self.objs × self.variables). Missing entries default to 0."""
+        rows = []
+        if isinstance(sens, dict):
+            for o in self.objs:
+                row = sens.get(o, {}) or {}
+                rows.append([float(row.get(v, 0.0)) for v in self.variables])
+        elif sens:                                     # list-of-lists / rows
+            for i, o in enumerate(self.objs):
+                r = list(sens[i]) if i < len(sens) else []
+                rows.append([float(r[j]) if j < len(r) else 0.0
+                             for j in range(len(self.variables))])
+        else:
+            raise ValueError("DampedSensitivity needs a `sensitivity` matrix (∂y/∂x)")
+        return rows
+
+    def set_base(self, point: dict[str, float]) -> None:
+        super().set_base(point)
+        self._next = dict(self._base)
+
+    def ask(self) -> dict[str, float]:
+        if self._next is None:
+            self._next = dict(self._base)
+        return dict(self._next)
+
+    def _solve(self, resid) -> list[float]:
+        """Δx = damped-SVD pseudo-inverse of S applied to the residual Δy."""
+        import numpy as np
+        S = np.asarray(self._S, float)
+        dy = np.asarray(resid, float)
+        u, s, vt = np.linalg.svd(S, full_matrices=False)
+        # damped inverse singular values: σ/(σ²+λ) — bounded even as σ→0
+        d = s / (s * s + self.reg)
+        dx = vt.T @ (d * (u.T @ dy))
+        return [float(v) for v in dx]
+
+    def observe(self, x: dict[str, float], y: dict[str, float]) -> None:
+        import numpy as np
+        self._solves += 1
+        resid = [self.targets[o] - float(y.get(o, 0.0)) for o in self.objs]
+        err = float(np.linalg.norm(resid))
+        score = -err                                   # smaller residual = better
+        if score > self.best_score:
+            self.best_score = score
+            self.best_x = {v: x[v] for v in self.variables}
+        self.fit_info = ("阻尼灵敏度求解：残差‖Δy‖=%.3g，目标 %s（阻尼 d=%.2g, λ=%.1g）"
+                         % (err, ", ".join(f"{o}→{self.targets[o]:.4g}" for o in self.objs),
+                            self.damping, self.reg))
+        if err < self.tol or self._solves >= self.max_solves:
+            self.done = True
+            return
+        dx = self._solve(resid)
+        nxt = {}
+        for i, v in enumerate(self.variables):
+            nxt[v] = self.vocs.variables[v].clip(x[v] + self.damping * dx[i])
+        self._next = nxt
+
+    def tell(self, x: dict[str, float], score: float) -> None:
+        # best-x / stopping are handled in observe() with the full y vector; the
+        # scalar score path is intentionally a no-op here.
+        return

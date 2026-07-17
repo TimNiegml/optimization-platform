@@ -83,8 +83,28 @@
   .map2 { display:grid; grid-template-columns:44px 1fr; gap:5px; align-items:center; margin-bottom:4px; }
   .map2 b { font-size:11px; }
   .lim3 { display:grid; grid-template-columns:28px 1fr 1fr 54px; gap:4px; align-items:center; margin-bottom:4px; }
+  .lim4 { display:grid; grid-template-columns:24px 1fr 1fr 46px 46px; gap:4px; align-items:center; margin-bottom:4px; }
   .map3 { display:grid; grid-template-columns:28px 1fr 1fr; gap:4px; align-items:center; margin-bottom:4px; }
-  .lim3 b, .map3 b { font-size:11px; color:var(--text); }
+  .lim3 b, .map3 b, .lim4 b { font-size:11px; color:var(--text); }
+  table.sens { border-collapse:collapse; font-size:11px; }
+  table.sens th, table.sens td { border:1px solid var(--line); padding:2px; text-align:center; }
+  table.sens th { color:var(--muted); font-weight:600; background:var(--panel2); }
+  table.sens td input { width:54px; padding:3px 4px; }
+  /* agent messages panel (bottom-left) */
+  #agentLog { position:fixed; left:12px; bottom:12px; z-index:70; width:300px; max-height:44vh; display:flex; flex-direction:column;
+              background:var(--panel); border:1px solid var(--accent); border-radius:10px; box-shadow:0 8px 28px #0004; overflow:hidden; }
+  #agentLog.hidden { display:none; }
+  #agentLog .alHd { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 10px;
+                    background:var(--panel2); border-bottom:1px solid var(--line); font-size:12px; font-weight:600; color:var(--text); }
+  #agentLog .alBtns { display:flex; gap:8px; }
+  #agentLog .alBtn { cursor:pointer; color:var(--muted); font-weight:400; }
+  #agentLog .alBtn:hover { color:var(--accent); }
+  #agentLogBody { overflow:auto; padding:6px 8px; }
+  #agentLogBody .alRow { font-size:11.5px; line-height:1.5; padding:5px 6px; margin-bottom:5px; border-radius:6px;
+                         background:var(--panel2); border-left:3px solid var(--muted); word-break:break-word; }
+  #agentLogBody .alRow.note { border-left-color:var(--accent); }
+  #agentLogBody .alRow.result { border-left-color:var(--ok); }
+  #agentLogBody .alTime { display:block; font-size:9.5px; color:var(--muted); margin-bottom:1px; }
   /* modal */
   #modalBack { position:fixed; inset:0; background:#0006; z-index:80; display:none; }
   .modal { position:fixed; z-index:81; top:50%; left:50%; transform:translate(-50%,-50%); width:min(720px,92vw); max-height:86vh;
@@ -181,6 +201,12 @@
 </div>
 
 <div id="tipbox"></div>
+<div id="agentLog" class="hidden">
+  <div class="alHd">🤖 Agent 消息 / 结果
+    <span class="alBtns"><span class="alBtn" onclick="clearAgentLog()" title="清空">🗑</span><span class="alBtn" onclick="document.getElementById('agentLog').classList.add('hidden')" title="收起">✕</span></span>
+  </div>
+  <div id="agentLogBody"></div>
+</div>
 <div id="modalBack" onclick="closeModals()"></div>
 
 <div id="helpModal" class="modal">
@@ -207,9 +233,14 @@
     <li>例：<code>y1&gt;=0.98 and y2&gt;=0.95</code>；逼近：<code>abs(y1 - 0.5) &lt;= 0.02</code>；保持：<code>y1 &gt; 0.8</code></li>
   </ul>
 
-  <h3>④ 评估 / 场景 / 通道规范 / 成本</h3>
-  <p>左下选<b>仿真场景</b>（单峰/多峰/偏斜峰，以及 Rosenbrock/Rastrigin/Ackley 等经典测试函数）与<b>方式</b>。</p>
-  <p><b>通道规范</b>：每个因变量 y 映射到读取设备(光功率计/偏振分析仪…)+参数，并标注<b>读取耗时(秒)</b>；每个自变量 x 映射到执行器。引擎<b>只读取某步真正需要的通道</b>——只优化 y1 的步骤不会去读 y2，省掉它的耗时；运行后结果里有<b>测量耗时</b>和每通道<b>读取次数</b>。勾<b>安全限位</b>可为每个自变量单独设安全范围。</p>
+  <h3>④ 评估 / 场景 / 通道规范 / 成本 / 起始点</h3>
+  <p>左下选<b>仿真场景</b>（单峰/多峰/偏斜峰，Rosenbrock/Rastrigin/Ackley，以及<b>线性灵敏度台</b>）与<b>方式</b>。</p>
+  <p><b>通道规范</b>：每个因变量 y 映射到读取设备(光功率计/偏振分析仪…)+参数，标注<b>读取耗时(秒)</b>，并填<b>测量组</b>；每个自变量 x 映射到执行器。引擎<b>只读取某步真正需要的通道</b>——只优化 y1 的步骤不会去读 y2，省掉它的耗时。</p>
+  <p><b>测量组（并行/串行）</b>：同一组的通道<b>并行测量</b>，该组耗时取组内<b>最大</b>；不同组（或留空）<b>串行测量</b>，耗时<b>相加</b>。例：光功率+PDL 同组并行、光功率+中心波长 不同组串行。面板会实时预估『读全部通道一次』的耗时，运行后按每步实际读取的通道累计更准的<b>测量总时长</b>。</p>
+  <p><b>自定义起始点</b>：勾选后可为每个自变量填优化的起点（而非定义域中点）；也可在运行后的 <b>2D 轨迹图里点击</b>直接选起点（★）。勾<b>安全限位</b>可为每个自变量单独设安全范围。</p>
+
+  <h3>④b 阻尼灵敏度求解（多进多出定值/标定）</h3>
+  <p>已知<b>灵敏度 ∂y/∂x</b> 和各 y 的<b>目标值</b>时，加<b>阻尼灵敏度求解</b>节点：勾选要定值的 y 填目标、勾选要动的 x，再填灵敏度矩阵（行=y、列=x）。它用<b>阻尼最小二乘(SVD 正则伪逆)</b>解 Δx=阻尼·S⁺·(目标−当前)，比 pinv 数值更稳，迭代把多个 y 同时逼到目标；x/y 维度按勾选自动匹配。</p>
 
   <h3>⑤ 运行 / 轨迹图 / 拟合公式</h3>
   <p>点 <b>▶ 运行</b> 出指标（含测量耗时/读取次数）+ 轨迹图，三种视图：</p>
@@ -267,6 +298,11 @@
     <div><label>候选上限</label><input id="tuneMax" type="number" min="4" max="40" value="18"></div>
     <div style="display:flex;align-items:flex-end"><button id="tuneRun" onclick="runTune()" style="width:100%">▶ 开始搜索</button></div>
   </div>
+  <div style="margin-top:6px">
+    <label style="display:inline;margin:0"><input type="checkbox" id="tuneRandom" style="width:auto" checked onchange="tuneRandomStart=this.checked; renderStartDomain()"> 随机初始点
+      <span class="info" data-tip="每次试验从随机操作点开始（而非定义域中点），更贴近冷启动、更公平地评估稳定性。下面可为每个自变量限定随机起点的定义域。">i</span></label>
+    <div id="startDomainBox" style="margin-top:4px"></div>
+  </div>
   <details id="varDetails" style="margin-top:6px">
     <summary style="cursor:pointer;font-size:12px;color:var(--muted)">变异表格（选哪些算法/参数参与变异 · 从算法登记表自动生成，新算法自动出现）</summary>
     <div id="varTable" style="margin-top:6px"></div>
@@ -284,9 +320,11 @@ let chartView = 'conv', chartSeries = 'obj', chartMode = 'all', chartInterval = 
 let c1dVar = null, c1dObj = null, c2dX = null, c2dY = null, c2dObj = null;
 let lastStages = {}, stageToNode = {};              // stageName -> {color,label} / node id
 let lastFits = {}, lastReads = {}, lastSim = 0, lastState = {};
-let safetyLimits = {}, channels = {}, actuators = {};   // channels: y->{device,param,cost}
+let safetyLimits = {}, channels = {}, actuators = {};   // channels: y->{device,param,cost,group}
 let benchSmooth = {}, showSurface = false, lastSurface = null;
 let untilExpr = '', untilRows = [], untilRawEdited = false;
+let startPoint = {}, useStartPoint = false, twoDMap = null;   // 自定义起始点 + 2D图坐标映射
+let tuneRandomStart = true, tuneStartDomain = {};             // 自动调优随机初始点 + 定义域
 
 const NODE_COLORS = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#ec4899','#84cc16'];
 const MODE_LABEL = {'':'默认','maximize':'最大化','minimize':'最小化','target':'逼近目标值','scan':'扫描'};
@@ -311,8 +349,10 @@ async function boot() {
     bs.innerHTML = benches.map(b=>`<option value="${b.name}">${b.label}</option>`).join('') || '<option value="single_peak">单峰光纤耦合</option>';
     bs.onchange = () => renderEvalExtras();
     benches.forEach(b => benchSmooth[b.name] = !!b.smooth);
-    varKeys.forEach((v,i) => { safetyLimits[v]=[vocs.variables[v].low, vocs.variables[v].high]; actuators[v]={device:'PI六足', param:'axis'+(i+1)}; });
-    objKeys.forEach(o => { const m=vocs.objectives[o]||{}; channels[o]={device:m.device||'功率计', param:m.param||o, cost:m.cost!=null?m.cost:0}; });
+    varKeys.forEach((v,i) => { const V=vocs.variables[v];
+      safetyLimits[v]=[V.low, V.high]; actuators[v]={device:'PI六足', param:'axis'+(i+1)};
+      startPoint[v]=+(0.5*(V.low+V.high)).toFixed(4); tuneStartDomain[v]=[V.low, V.high]; });
+    objKeys.forEach(o => { const m=vocs.objectives[o]||{}; channels[o]={device:m.device||'功率计', param:m.param||o, cost:m.cost!=null?m.cost:0, group:m.group||''}; });
   } catch (e) { document.getElementById('conn').textContent = '后端未连接'; }
   renderEvalExtras(); inspectEmpty(); renderUntilRows();
 }
@@ -329,7 +369,7 @@ function addNode(algo, at) {
     variables: s.single_var ? [vars[vars.length-1]] : vars.slice(0, 2),
     objective: Object.keys(vocs.objectives)[0] || 'y1',
     objectiveMode: '', objectiveTarget: '', objectiveWeights: null,
-    params: Object.fromEntries(Object.entries(s.params||{}).map(([k,v])=>[k, v.default])),
+    params: Object.fromEntries(Object.entries(s.params||{}).map(([k,v])=>[k, (v.default&&typeof v.default==='object')?JSON.parse(JSON.stringify(v.default)):v.default])),
     keep: '', stopTarget: '',
     x: at ? at.x : 60 + (nodes.length%4)*30, y: at ? at.y : 60 + nodes.length*70,
   };
@@ -447,30 +487,37 @@ function inspectEmpty(){ document.getElementById('inspBody').innerHTML=
 
 function inspectNode(n){
   if(!n) return; const s = spec(n.algorithm); const vars = Object.keys(vocs.variables);
+  const isSolve = n.algorithm==='damped_sensitivity';
   let h = `<label>算法</label><input value="${labelOf(n.algorithm)}" disabled>`;
   if(s.desc) h += `<p class="hint" style="margin:4px 0 0">${s.desc}</p>`;
   if(n.fitInfo) h += `<p class="hint" style="margin:6px 0 0;color:var(--ok)">📐 ${n.fitInfo}</p>`;
   h += `<label>变量${s.single_var?'（单变量）':''} <span class="info" data-tip="勾选这个节点要调的自变量。">i</span></label><div>`;
   vars.forEach(v => { const on=n.variables.includes(v);
     h += `<label style="display:inline-block;margin-right:8px;color:var(--text)"><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleVar('${n.id}','${v}',this.checked)"> ${v}</label>`; });
-  h += `</div><label>目标</label><select onchange="setF('${n.id}','objective',this.value)">`;
-  Object.keys(vocs.objectives).forEach(o => h += `<option ${o===n.objective?'selected':''}>${o}</option>`);
-  h += `</select>`;
-  const comp = compWeights(n);
-  h += `<label style="margin-top:8px"><input type="checkbox" style="width:auto" ${comp?'checked':''} onchange="toggleComposite('${n.id}',this.checked)"> 加权组合多目标
-        <span class="info" data-tip="把多个目标按权重合成一个单目标（Σ w·目标，每个目标按各自的最大/最小/逼近模式计分）。单目标算子(单纯形/坐标/梯度/拟合)即可优化多目标折中，如 0.7·y1+0.3·y2。">i</span></label>`;
-  if(comp){
-    Object.keys(vocs.objectives).forEach(o => {
-      h += `<div class="lim" style="grid-template-columns:34px 1fr"><b>${o}</b>
-        <input type="number" step="0.1" value="${comp[o]!=null?comp[o]:0}" oninput="setWeight('${n.id}','${o}',this.value)" title="权重(0=不参与)"></div>`; });
-    h += `<p class="hint">权重和不必为 1；每个目标按其『目标模式』计分后加权。</p>`;
+  h += `</div>`;
+  if(isSolve){
+    h += renderSolveEditor(n);
   } else {
-    h += `<label>目标模式 <span class="info" data-tip="默认=按问题声明。最大化/最小化把目标推大/小；逼近目标值=驱动到某个数（标定）；扫描=只扫不寻优。">i</span></label><select onchange="setMode('${n.id}',this.value)">`;
-    Object.entries(MODE_LABEL).forEach(([k,lab]) => h += `<option value="${k}" ${k===n.objectiveMode?'selected':''}>${lab}</option>`);
+    h += `<label>目标</label><select onchange="setF('${n.id}','objective',this.value)">`;
+    Object.keys(vocs.objectives).forEach(o => h += `<option ${o===n.objective?'selected':''}>${o}</option>`);
     h += `</select>`;
-    if(n.objectiveMode==='target') h += `<label>目标值</label><input type="number" step="0.01" value="${n.objectiveTarget}" onchange="setF('${n.id}','objectiveTarget',this.value)">`;
+    const comp = compWeights(n);
+    h += `<label style="margin-top:8px"><input type="checkbox" style="width:auto" ${comp?'checked':''} onchange="toggleComposite('${n.id}',this.checked)"> 加权组合多目标
+          <span class="info" data-tip="把多个目标按权重合成一个单目标（Σ w·目标，每个目标按各自的最大/最小/逼近模式计分）。单目标算子(单纯形/坐标/梯度/拟合)即可优化多目标折中，如 0.7·y1+0.3·y2。">i</span></label>`;
+    if(comp){
+      Object.keys(vocs.objectives).forEach(o => {
+        h += `<div class="lim" style="grid-template-columns:34px 1fr"><b>${o}</b>
+          <input type="number" step="0.1" value="${comp[o]!=null?comp[o]:0}" oninput="setWeight('${n.id}','${o}',this.value)" title="权重(0=不参与)"></div>`; });
+      h += `<p class="hint">权重和不必为 1；每个目标按其『目标模式』计分后加权。</p>`;
+    } else {
+      h += `<label>目标模式 <span class="info" data-tip="默认=按问题声明。最大化/最小化把目标推大/小；逼近目标值=驱动到某个数（标定）；扫描=只扫不寻优。">i</span></label><select onchange="setMode('${n.id}',this.value)">`;
+      Object.entries(MODE_LABEL).forEach(([k,lab]) => h += `<option value="${k}" ${k===n.objectiveMode?'selected':''}>${lab}</option>`);
+      h += `</select>`;
+      if(n.objectiveMode==='target') h += `<label>目标值</label><input type="number" step="0.01" value="${n.objectiveTarget}" onchange="setF('${n.id}','objectiveTarget',this.value)">`;
+    }
   }
   Object.entries(s.params||{}).forEach(([k,meta]) => {
+    if(isSolve && (k==='targets'||k==='sensitivity')) return;      // handled by the solve editor
     const lab = meta.label ? `${meta.label} <span style="color:var(--muted)">(${k})</span>` : k;
     const tip = meta.hint ? ` <span class="info" data-tip="${meta.hint}">i</span>` : '';
     h += `<label>${lab}${tip}</label><input value="${n.params[k]??meta.default??''}" onchange="setParam('${n.id}','${k}',this.value)">`;
@@ -507,22 +554,80 @@ window.toggleComposite=(id,on)=>{ const n=nodes.find(x=>x.id===id);
 window.setWeight=(id,o,v)=>{ const n=nodes.find(x=>x.id===id); if(!n.objectiveWeights) n.objectiveWeights={}; n.objectiveWeights[o]=+v; render(); };
 window.setParam=(id,k,v)=>{const n=nodes.find(x=>x.id===id); const num=Number(v); n.params[k]=(v!==''&&!isNaN(num))?num:v;};
 
-// ---------- evaluation panel extras (safety limits + instrument mapping) ----------
+// ---------- 阻尼灵敏度求解 node editor (targets + sensitivity matrix) ----------
+function ensureSolve(n){ if(!n.params) n.params={};
+  if(typeof n.params.targets!=='object'||n.params.targets===null) n.params.targets={};
+  if(typeof n.params.sensitivity!=='object'||n.params.sensitivity===null) n.params.sensitivity={}; }
+function renderSolveEditor(n){
+  ensureSolve(n);
+  const tg=n.params.targets, sens=n.params.sensitivity;
+  const ys=Object.keys(vocs.objectives), xs=n.variables;
+  let h=`<label>目标 y（勾选要定值的因变量 + 目标值） <span class="info" data-tip="勾选要驱动到目标值的因变量 y，并填目标值。可选多个 → 多进多出定值/标定。">i</span></label>`;
+  ys.forEach(o=>{ const on=(o in tg);
+    h+=`<div class="lim" style="grid-template-columns:22px 28px 1fr"><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleTarget('${n.id}','${o}',this.checked)"><b>${o}</b>
+      <input type="number" step="0.1" value="${on?tg[o]:''}" ${on?'':'disabled'} placeholder="目标值" oninput="setTargetVal('${n.id}','${o}',this.value)"></div>`; });
+  const rows=ys.filter(o=>o in tg);
+  h+=`<label style="margin-top:8px">灵敏度矩阵 ∂y/∂x <span class="info" data-tip="行=选中的目标 y，列=选中的自变量 x；填对应偏导 ∂y/∂x。求解用阻尼最小二乘(SVD 正则伪逆)，比 pinv 数值更稳，行列数不等/病态也不发散。">i</span></label>`;
+  if(!rows.length || !xs.length){ h+=`<p class="hint">先勾选至少一个目标 y，并在上方选至少一个变量 x。</p>`; return h; }
+  h+=`<div style="overflow-x:auto"><table class="sens"><tr><th>∂y/∂x</th>${xs.map(x=>`<th>${x}</th>`).join('')}</tr>`;
+  rows.forEach(o=>{ h+=`<tr><th>${o}</th>`+xs.map(x=>{ const val=((sens[o]||{})[x]);
+    return `<td><input type="number" step="0.01" value="${val!=null?val:''}" placeholder="0" oninput="setSensCell('${n.id}','${o}','${x}',this.value)"></td>`; }).join('')+`</tr>`; });
+  h+=`</table></div>`;
+  h+=`<p class="hint">Δx = 阻尼 · SVD正则伪逆(∂y/∂x) · (目标 − 当前 y)，逐轮迭代把选中的 y 同时逼到目标。</p>`;
+  return h;
+}
+window.toggleTarget=(id,o,on)=>{ const n=nodes.find(x=>x.id===id); ensureSolve(n);
+  if(on){ if(n.params.targets[o]==null) n.params.targets[o]=0; }
+  else { delete n.params.targets[o]; delete n.params.sensitivity[o]; }
+  render(); inspectNode(n); };
+window.setTargetVal=(id,o,v)=>{ const n=nodes.find(x=>x.id===id); ensureSolve(n); n.params.targets[o]=(v===''?0:+v); };
+window.setSensCell=(id,o,x,v)=>{ const n=nodes.find(x=>x.id===id); ensureSolve(n);
+  (n.params.sensitivity[o]=n.params.sensitivity[o]||{})[x]=(v===''?0:+v); };
+
+// ---------- measurement-time model: same group = 并行(取 max)，不同组 = 串行(相加) ----------
+function readSeconds(keys){
+  const byGroup={}; let serial=0;
+  keys.forEach(k=>{ const c=channels[k]||{}; const cost=+c.cost||0; const g=(c.group||'').trim();
+    if(!g){ serial+=cost; } else { byGroup[g]=Math.max(byGroup[g]||0, cost); } });
+  return serial + Object.values(byGroup).reduce((a,b)=>a+b,0);
+}
+function timingPreview(){
+  const per=readSeconds(objKeys);                    // 读全部通道一次的耗时
+  const groups={}; objKeys.forEach(o=>{ const g=(channels[o].group||'').trim()||('（'+o+' 独立串行）'); (groups[g]=groups[g]||[]).push(o); });
+  const desc=Object.entries(groups).map(([g,ks])=>ks.length>1?`${ks.join('∥')}(并行)`:ks[0]).join(' + ');
+  return `<div class="glab" style="margin-top:6px">读全部通道一次 ≈ <b style="color:var(--ok)">${per.toFixed(1)}s</b>　<span style="color:var(--muted)">${desc||'—'}</span>
+    <span class="info" data-tip="同一『组』的通道并行测量→耗时取组内最大；不同组(或未分组)串行→相加。例：光功率+PDL 同组并行，光功率+中心波长 不同组串行。运行时按每步实际读取的通道累计更准的测量总时长。">i</span></div>`;
+}
+
+// ---------- evaluation panel extras (channel spec + timing groups + safety + start point) ----------
 function renderEvalExtras(){
   const box=document.getElementById('evalExtras'); if(!box) return; let h='';
-  // 通道规范：每个 y 一个读取通道（设备/参数/耗时），每个 x 一个执行器。始终可配。
-  h += `<div class="sub"><div class="glab">通道规范 <span class="info" data-tip="把每个因变量 y 映射到读取设备(如光功率计/偏振分析仪)+参数，并标注读取耗时(秒)；每个自变量 x 映射到执行器。引擎按耗时统计测量时间，且只读取某步真正需要的通道。">i</span></div>`;
-  h += `<div class="glab" style="margin-top:2px">因变量（读取通道）：设备 / 参数 / 耗时s</div>`;
+  // 通道规范：每个 y 一个读取通道（设备/参数/耗时/测量组），每个 x 一个执行器。始终可配。
+  h += `<div class="sub"><div class="glab">通道规范 <span class="info" data-tip="把每个因变量 y 映射到读取设备(如光功率计/偏振分析仪)+参数，标注读取耗时(秒)，并填『测量组』——同组并行测(耗时取最大)、不同组串行测(相加)。每个自变量 x 映射到执行器。引擎只读取某步真正需要的通道。">i</span></div>`;
+  h += `<div class="glab" style="margin-top:2px">因变量（读取通道）：设备 / 参数 / 耗时s / <b>测量组</b></div>`;
   objKeys.forEach(o=>{ const c=channels[o];
-    h += `<div class="lim3"><b>${o}</b>
+    h += `<div class="lim4"><b>${o}</b>
       <input value="${c.device}" oninput="channels['${o}'].device=this.value" title="读取设备">
       <input value="${c.param}" oninput="channels['${o}'].param=this.value" title="参数">
-      <input type="number" step="0.5" min="0" value="${c.cost}" oninput="channels['${o}'].cost=+this.value" title="读取耗时(秒)"></div>`; });
+      <input type="number" step="0.5" min="0" value="${c.cost}" oninput="channels['${o}'].cost=+this.value; renderEvalExtras()" title="读取耗时(秒)">
+      <input value="${c.group||''}" oninput="channels['${o}'].group=this.value; renderEvalExtras()" title="测量组：同组并行、不同组串行；留空=独立串行" placeholder="组"></div>`; });
+  h += timingPreview();
   h += `<div class="glab" style="margin-top:6px">自变量（执行器）：设备 / 参数</div>`;
   varKeys.forEach(v=>{ const a=actuators[v];
     h += `<div class="map3"><b>${v}</b>
       <input value="${a.device}" oninput="actuators['${v}'].device=this.value" title="执行器">
       <input value="${a.param}" oninput="actuators['${v}'].param=this.value" title="轴/参数"></div>`; });
+  h += `</div>`;
+  // 自定义起始点（可在 2D 轨迹图中点击选择）
+  h += `<div class="sub"><div class="glab"><label style="display:inline;margin:0"><input type="checkbox" style="width:auto" ${useStartPoint?'checked':''} onchange="useStartPoint=this.checked; renderEvalExtras()"> 自定义起始点</label>
+    <span class="info" data-tip="勾选后，优化从你指定的操作点开始（而非定义域中点）。可直接填每个自变量的起点，或运行后在下方『2D』轨迹图里点击选点。">i</span></div>`;
+  if(useStartPoint){
+    varKeys.forEach(v=>{ const V=vocs.variables[v];
+      h += `<div class="lim"><b>${v}</b>
+        <input type="number" step="0.1" value="${startPoint[v]}" oninput="startPoint['${v}']=+this.value" title="起点值（${V.low}~${V.high}）">
+        <span class="hint" style="margin:0">范围 ${V.low}~${V.high}</span></div>`; });
+    h += `<div class="glab" style="margin-top:2px;color:var(--muted)">提示：运行后在 2D 轨迹图点击可直接选起点。</div>`;
+  }
   h += `</div>`;
   if(document.getElementById('evSafety').checked){
     h += `<div class="sub"><div class="glab">安全范围（每个自变量）</div>`;
@@ -544,7 +649,11 @@ function toGraph(){
     used[base]=(used[base]||0)+1; if(used[base]>1) sName=base+'#'+used[base];
     lastStages[sName]={color:n.color, label:sName}; stageToNode[sName]=n.id;
     const cw=compWeights(n);
-    const data = {algorithm:n.algorithm, variables:n.variables, objective:(cw?Object.keys(cw)[0]:n.objective), stage:sName, ...n.params};
+    let obj = cw?Object.keys(cw)[0]:n.objective;
+    if(n.algorithm==='damped_sensitivity'){                 // objective must be a targeted channel
+      const tks=Object.keys(n.params&&n.params.targets||{}); if(tks.length) obj=tks[0];
+    }
+    const data = {algorithm:n.algorithm, variables:n.variables, objective:obj, stage:sName, ...n.params};
     if(cw){ data.objective_weights=cw; }
     else if(n.objectiveMode){ data.objective_mode=n.objectiveMode; if(n.objectiveMode==='target'&&n.objectiveTarget!=='') data.objective_target=Number(n.objectiveTarget); }
     if(n.keep) data.keep=n.keep;
@@ -555,15 +664,17 @@ function toGraph(){
   const g = {nodes:gnodes, edges:gedges}; if(untilExpr) g.until=untilExpr; return g;
 }
 function readEvalConfig(){
-  const channel_costs={}; objKeys.forEach(o=>channel_costs[o]=channels[o].cost);
+  const channel_costs={}, channel_groups={};
+  objKeys.forEach(o=>{ channel_costs[o]=channels[o].cost; channel_groups[o]=(channels[o].group||'').trim(); });
   return { mode:document.getElementById('evMode').value, bench:document.getElementById('evBench').value,
     noise:+document.getElementById('evNoise').value, averages:+document.getElementById('evAvg').value,
     safety:document.getElementById('evSafety').checked, safety_limits:safetyLimits,
-    channel_costs, channels, actuators }; }
+    channel_costs, channel_groups, channels, actuators }; }
 
 async function run(){
   const btn=document.getElementById('runBtn'); btn.disabled=true; btn.textContent='运行中…';
   const body = {graph:toGraph(), evaluator:readEvalConfig()};
+  if(useStartPoint){ const sp={}; varKeys.forEach(v=>sp[v]=+startPoint[v]); body.start_point=sp; }
   try {
     const r = await fetch(API+'/run/graph',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d = await r.json();
@@ -721,7 +832,8 @@ function twoDChart(){
   else { xmin=Math.min(...xs);xmax=Math.max(...xs);ymin=Math.min(...ys);ymax=Math.max(...ys);vmin=Math.min(...vs);vmax=Math.max(...vs); }
   const xr=(xmax-xmin)||1,yr=(ymax-ymin)||1,vr=(vmax-vmin)||1;
   const X=v=>pad.l+((v-xmin)/xr)*iw, Y=v=>pad.t+ih-((v-ymin)/yr)*ih;
-  let g=`<svg width="${W}" height="${H}" style="background:var(--chartbg);border:1px solid var(--line);border-radius:6px">`;
+  twoDMap={xk,yk,xmin,xmax,ymin,ymax,pad,iw,ih,W,H};       // for click-to-pick start point
+  let g=`<svg id="twoDSvg" width="${W}" height="${H}" style="cursor:crosshair;background:var(--chartbg);border:1px solid var(--line);border-radius:6px" onclick="pick2D(event)">`;
   if(surf){                          // response-surface as a filled contour (cells)
     const nx=surf.xs.length, ny=surf.ys.length, cw=iw/(nx-1), ch=ih/(ny-1);
     for(let j=0;j<ny-1;j++) for(let i=0;i<nx-1;i++){
@@ -740,9 +852,29 @@ function twoDChart(){
   g+=`<text x="${cbx+12}" y="${cbtop+7}" fill="var(--muted)" font-size="8">${vmax.toFixed(2)}</text>`;
   g+=`<text x="${cbx+12}" y="${cbtop+cbh}" fill="var(--muted)" font-size="8">${vmin.toFixed(2)}</text>`;
   g+=`<text x="${cbx+2}" y="${cbtop-1}" fill="var(--muted)" font-size="8">${ok}</text>`;
+  // custom start-point marker (★) — draggable/clickable via pick2D
+  if(useStartPoint && startPoint[xk]!=null && startPoint[yk]!=null){
+    const sx=X(startPoint[xk]), sy=Y(startPoint[yk]);
+    if(sx>=pad.l-2&&sx<=W-pad.r+2&&sy>=pad.t-2&&sy<=pad.t+ih+2)
+      g+=`<text x="${sx}" y="${sy+4}" font-size="15" text-anchor="middle" fill="var(--warn)" stroke="#0008" stroke-width="0.4" pointer-events="none">★</text>`;
+  }
   g+='</svg>';
   const note = surf ? `背景=响应面等高线（${ok}），点=采样落点` : `点颜色 = ${ok} 值（蓝低→黄中→红高），灰线=采样顺序`;
-  return g+`<div class="legend">${note}</div>`;
+  return g+`<div class="legend">${note}　<span style="color:var(--warn)">点击图内可设起始点(★)</span></div>`;
+}
+function pick2D(e){
+  if(!twoDMap) return; const m=twoDMap;
+  const svg=document.getElementById('twoDSvg'); if(!svg) return;
+  const r=svg.getBoundingClientRect();
+  const px=(e.clientX-r.left)*(m.W/r.width), py=(e.clientY-r.top)*(m.H/r.height);
+  let fx=(px-m.pad.l)/m.iw, fy=1-(py-m.pad.t)/m.ih;                 // 0..1 fractions
+  fx=Math.max(0,Math.min(1,fx)); fy=Math.max(0,Math.min(1,fy));
+  const clip=(v,V)=>Math.max(V.low,Math.min(V.high,v));
+  startPoint[m.xk]=+clip(m.xmin+fx*(m.xmax-m.xmin), vocs.variables[m.xk]).toFixed(4);
+  startPoint[m.yk]=+clip(m.ymin+fy*(m.ymax-m.ymin), vocs.variables[m.yk]).toFixed(4);
+  useStartPoint=true;
+  renderEvalExtras(); renderChart();
+  document.getElementById('conn').textContent=`已设起始点 ${m.xk}=${startPoint[m.xk]}, ${m.yk}=${startPoint[m.yk]}`;
 }
 
 function downloadTrajectory(){
@@ -762,6 +894,7 @@ function downloadTrajectory(){
 function saveSolution(){
   const name = prompt('方案名称', '优化方案') || '优化方案';
   const obj = {version:1, name, until:untilExpr, evaluator:readEvalConfig(),
+    useStartPoint, startPoint:{...startPoint},
     nodes:nodes.map(n=>({...n})), edges:edges.map(e=>({...e})), seq};
   const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
@@ -773,6 +906,8 @@ function applySolution(o){
   edges=(o.edges||[]).map(e=>({condition:'', ...e}));
   untilExpr=o.until||''; untilRawEdited=false; untilRows=[];
   seq=o.seq||nodes.length+edges.length;
+  if(o.useStartPoint!=null) useStartPoint=!!o.useStartPoint;
+  if(o.startPoint) varKeys.forEach(v=>{ if(o.startPoint[v]!=null) startPoint[v]=+o.startPoint[v]; });
   if(o.evaluator) applyEvalConfig(o.evaluator);
   sel=null; selEdge=null; render(); inspectEmpty(); renderUntilRows();
   document.getElementById('conn').textContent='已加载方案：'+(o.name||'');
@@ -927,6 +1062,11 @@ const EXAMPLES = {
     exNode('gaussian_fit',520,{variables:['x3'],objective:'y2',keep:'y1>0.6'});
     exUntil('y1>=0.9 and y2>=0.8');
   },
+  linear_sens(){ // 线性台：阻尼灵敏度求解把 y1→2.0、y2→0.0（多进多出定值）
+    exNode('damped_sensitivity',160,{variables:['x1','x2'],params:{
+      targets:{y1:2.0, y2:0.0}, sensitivity:{y1:{x1:0.8,x2:0.3}, y2:{x1:0.2,x2:-0.6}}, damping:0.8}});
+    exUntil('abs(y1 - 2.0) <= 0.01 and abs(y2 - 0.0) <= 0.01');
+  },
 };
 
 // ---------- AutoTuner (L1) ----------
@@ -938,7 +1078,18 @@ async function openTune(){
   const t=untilExpr||document.getElementById('tuneTarget').value;
   document.getElementById('tuneTarget').value=t||'y1>=0.95 and y2>=0.9';
   if(!tuneSpace){ try{ tuneSpace=(await (await fetch(API+'/autotune/space')).json()).phases; initVarState(); }catch(e){ tuneSpace=null; } }
-  renderVarTable(); showModal('tuneModal');
+  const rc=document.getElementById('tuneRandom'); if(rc) rc.checked=tuneRandomStart;
+  renderStartDomain(); renderVarTable(); showModal('tuneModal');
+}
+function renderStartDomain(){
+  const box=document.getElementById('startDomainBox'); if(!box) return;
+  if(!tuneRandomStart){ box.innerHTML=''; return; }
+  let h=`<div class="glab" style="font-size:11px;color:var(--muted)">随机起点定义域（每个自变量 低/高，默认=全量程）</div>`;
+  varKeys.forEach(v=>{ const d=tuneStartDomain[v]||[vocs.variables[v].low,vocs.variables[v].high];
+    h+=`<div class="lim"><b>${v}</b>
+      <input type="number" step="0.1" value="${d[0]}" oninput="tuneStartDomain['${v}'][0]=+this.value" title="随机起点下限">
+      <input type="number" step="0.1" value="${d[1]}" oninput="tuneStartDomain['${v}'][1]=+this.value" title="随机起点上限"></div>`; });
+  box.innerHTML=h;
 }
 const PHASE_LABEL={coarse:'粗调 / 找光', refine:'精调', fit:'拟合 / 定值'};
 function initVarState(){
@@ -983,6 +1134,8 @@ async function runTune(){
     weights:{quality:+document.getElementById('wQ').value, time:+document.getElementById('wT').value, stability:+document.getElementById('wS').value},
     noise_levels:document.getElementById('tuneNoise').value.split(',').map(s=>+s.trim()).filter(s=>!isNaN(s)),
     n_trials:+document.getElementById('tuneTrials').value, max_candidates:+document.getElementById('tuneMax').value,
+    random_start:tuneRandomStart,
+    start_domain:(tuneRandomStart?Object.fromEntries(varKeys.map(v=>[v,[+tuneStartDomain[v][0],+tuneStartDomain[v][1]]])):null),
     ...buildVariationSpec() };
   document.getElementById('tuneBody').innerHTML='<p class="hint">正在搜索候选并按 质量/时长/稳定 打分…（多试验，稍候）</p>';
   try{
@@ -1077,12 +1230,36 @@ function toggleLiveSession(){
   liveES.addEventListener('update',onmsg);
   liveES.onerror=()=>liveStatus('连接中断（会自动重试）',false);
 }
+let lastAgentRev=-1;
+function agentLogPush(text, kind){
+  const box=document.getElementById('agentLogBody'); const panel=document.getElementById('agentLog');
+  if(!box||!panel||!text) return;
+  panel.classList.remove('hidden');
+  const row=document.createElement('div'); row.className='alRow'+(kind?(' '+kind):'');
+  row.innerHTML=`<span class="alTime">${new Date().toLocaleTimeString()}</span>${String(text).replace(/</g,'&lt;')}`;
+  box.insertBefore(row, box.firstChild);
+  while(box.children.length>50) box.removeChild(box.lastChild);
+}
+function clearAgentLog(){ const b=document.getElementById('agentLogBody'); if(b) b.innerHTML=''; }
 function applyLiveSnapshot(s){
   if(!s) return;
   liveStatus('已连接会话「'+(s.session||'')+'」· rev '+(s.revision||0)+(s.updated_at?(' · '+s.updated_at):''),true);
   if(s.bench){ const bs=document.getElementById('evBench'); if(bs&&[...bs.options].some(o=>o.value===s.bench)&&bs.value!==s.bench){ bs.value=s.bench; renderEvalExtras(); } }
   if(s.graph&&s.graph.nodes){ adoptGraph(s.graph); }
   if(s.autotune&&s.autotune.ranked){ tuneResult={ranked:s.autotune.ranked}; if(document.getElementById('tuneBody')) renderTuneResults(); }
+  // surface the agent's message / run result in the bottom-left panel (once per revision)
+  if((s.revision||0)!==lastAgentRev){
+    lastAgentRev=s.revision||0;
+    if(s.note) agentLogPush(s.note, 'note');
+    if(s.result && s.result.objectives){
+      const obj=Object.entries(s.result.objectives).map(([k,v])=>`${k}=${(+v).toFixed(4)}`).join(', ');
+      const secs=s.result.sim_seconds!=null?`，测量耗时 ${(+s.result.sim_seconds).toFixed(1)}s`:'';
+      agentLogPush(`运行结果：${obj}（评估 ${s.result.n_evals!=null?s.result.n_evals:'?'} 次${secs}）`, 'result');
+    }
+    if(s.autotune && s.autotune.ranked && s.autotune.ranked.length){
+      const t=s.autotune.ranked[0]; agentLogPush(`自动调优最优：${t.label}（质量 ${(+t.quality).toFixed(3)}）`, 'result');
+    }
+  }
   const note=s.note?('　'+s.note):'';
   document.getElementById('conn').textContent='Agent 已更新画布（rev '+(s.revision||0)+'）'+note;
 }

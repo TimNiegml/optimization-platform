@@ -101,6 +101,12 @@ class TuneSpec(BaseModel):
     quality_obj: Optional[str] = None                # default = landscape_obj
     weights: dict = Field(default_factory=lambda: {"quality": 1.0, "time": 0.5, "stability": 1.0})
     noise_levels: list[float] = Field(default_factory=lambda: [0.0, 0.02])
+    # Start each trial from a RANDOM operating point (seeded, reproducible) instead
+    # of the domain centre — a fairer robustness estimate and closer to a cold real
+    # start. `start_domain` bounds where that random point is drawn from, per
+    # variable {x: [low, high]}; unspecified variables use their full VOCS range.
+    random_start: bool = True
+    start_domain: Optional[dict[str, list[float]]] = None
     n_trials: int = 2
     max_candidates: int = 18
     eval_budget: int = 2000
@@ -215,6 +221,21 @@ def _reached(target: Optional[str], res: dict) -> Optional[bool]:
         return False
 
 
+def _random_start(vocs: VOCS, spec: TuneSpec, seed: int) -> dict[str, float]:
+    """A seeded random operating point inside the (optionally narrowed) domain."""
+    import random
+    rng = random.Random(seed)
+    dom = spec.start_domain or {}
+    pt = {}
+    for name, var in vocs.variables.items():
+        lo, hi = var.low, var.high
+        d = dom.get(name)
+        if d and len(d) == 2:
+            lo, hi = float(d[0]), float(d[1])
+        pt[name] = rng.uniform(lo, hi)
+    return pt
+
+
 def _make_evaluator(vocs: VOCS, model_fn, costs, noise: float, seed: int):
     if noise > 0:
         stage = SimulatedStage(vocs.initial_point())
@@ -229,9 +250,11 @@ def evaluate_candidate(spec: TuneSpec, vocs: VOCS, model_fn, costs, graph: dict)
     for noise in spec.noise_levels:
         for t in range(spec.n_trials):
             seed = spec.seed + t * 7 + int(noise * 1000)
+            sp = _random_start(vocs, spec, seed) if spec.random_start else None
             try:
                 ev = _make_evaluator(vocs, model_fn, costs, noise, seed)
-                res = GraphRunner(vocs, ev, graph, eval_budget=spec.eval_budget).run()
+                res = GraphRunner(vocs, ev, graph, eval_budget=spec.eval_budget,
+                                  start_point=sp).run()
             except Exception:
                 qs.append(0.0); ts.append(0.0); succ.append(0.0)     # broken candidate scores 0
                 continue

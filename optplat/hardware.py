@@ -63,7 +63,8 @@ class HardwareEvaluator:
                  settle_time: float = 0.0, averages: int = 1,
                  safety: Optional[SafetyLimits] = None,
                  store: Optional[object] = None,
-                 costs: Optional[dict[str, float]] = None):
+                 costs: Optional[dict[str, float]] = None,
+                 groups: Optional[dict[str, str]] = None):
         self.stage = stage
         self.meter = meter
         self.settle_time = settle_time
@@ -71,12 +72,14 @@ class HardwareEvaluator:
         self.safety = safety
         self.store = store
         self.costs = costs or {}
+        self.groups = groups or {}
         self.history: list[dict] = []
         self.reads: dict[str, int] = {}
         self.sim_seconds: float = 0.0
 
     def evaluate(self, x: dict[str, float], stage: str = "",
                  channels=None) -> dict[str, float]:
+        from .evaluator import read_seconds
         target = self.safety.enforce(x) if self.safety else x
         for axis, val in target.items():
             self.stage.move(axis, val)
@@ -87,7 +90,9 @@ class HardwareEvaluator:
         y = {k: sum(r[k] for r in reads) / len(reads) for k in keys}
         for k in y:
             self.reads[k] = self.reads.get(k, 0) + 1
-            self.sim_seconds += self.costs.get(k, 0.0)
+        # averaging N reads costs N× the per-acquisition time; grouping models
+        # parallel (same group = max) vs serial (different groups = sum) instruments.
+        self.sim_seconds += self.averages * read_seconds(y.keys(), self.costs, self.groups)
         self.history.append({"stage": stage, **target, **y})
         if self.store is not None:
             self.store.append(stage, target, y)

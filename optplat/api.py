@@ -85,6 +85,9 @@ class EvaluatorConfig(BaseModel):
     safety_limits: Optional[dict[str, list[float]]] = None
     # optional per-channel read-cost override (seconds): {"y1": 1.0, "y2": 2.0}
     channel_costs: Optional[dict[str, float]] = None
+    # optional per-channel measurement group: {"y1": "g1", "y2": "g1", "y3": "g2"}.
+    # Same group = measured in parallel (time = max); different groups = serial (sum).
+    channel_groups: Optional[dict[str, str]] = None
 
 
 class RunRequest(BaseModel):
@@ -125,12 +128,14 @@ def _safety_limits(vocs: VOCS, cfg: EvaluatorConfig) -> Optional[SafetyLimits]:
 def _build_evaluator(vocs: VOCS, cfg: EvaluatorConfig):
     func = bench_func(cfg.bench)
     costs = {n: o.cost for n, o in vocs.objectives.items()}
+    groups = {n: g for n, g in (cfg.channel_groups or {}).items() if g not in (None, "")}
     if cfg.mode == "hardware_sim":
         stage = SimulatedStage(vocs.initial_point())
         meter = SimulatedMeter(stage, func, noise=cfg.noise, seed=0)
         return HardwareEvaluator(stage, meter, averages=cfg.averages,
-                                 safety=_safety_limits(vocs, cfg), costs=costs)
-    return Evaluator(func, costs=costs)
+                                 safety=_safety_limits(vocs, cfg), costs=costs,
+                                 groups=groups)
+    return Evaluator(func, costs=costs, groups=groups)
 
 
 def _result(res: dict) -> dict[str, Any]:
@@ -210,7 +215,7 @@ def vocs():
     return {
         "variables": {n: {"low": var.low, "high": var.high} for n, var in v.variables.items()},
         "objectives": {n: {"mode": o.mode.value, "cost": o.cost,
-                           "device": o.device, "param": o.param}
+                           "device": o.device, "param": o.param, "group": o.group}
                        for n, o in v.objectives.items()},
     }
 
@@ -315,7 +320,11 @@ def index():
 
 def main():
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # 0.0.0.0 so the canvas/API/MCP are reachable from other hosts on the LAN;
+    # override with OPTPLAT_HOST / OPTPLAT_PORT if needed.
+    host = os.environ.get("OPTPLAT_HOST", "0.0.0.0")
+    port = int(os.environ.get("OPTPLAT_PORT", "8003"))
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":

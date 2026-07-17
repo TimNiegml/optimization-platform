@@ -27,6 +27,7 @@ from typing import Callable
 
 from .generators import (
     CoordinateDescent,
+    DampedSensitivity,
     FormulaMethod,
     Generator,
     GradientAscent,
@@ -156,6 +157,27 @@ _BUILTINS = [
         {"span_frac": {"type": "float", "default": 0.5, "min": 0.1, "max": 1.0,
                        "label": "采样跨度比例"}},
         label="公式法(解析)", desc="三点解析定峰，参数拟合的快速特例，几个点直接算出极值位置。",
+    ),
+    AlgorithmSpec(
+        "damped_sensitivity", "solve", False,
+        lambda v, s: DampedSensitivity(
+            v, s["variables"], s["objective"],
+            sensitivity=s.get("sensitivity"), targets=s.get("targets"),
+            damping=s.get("damping", 0.5), reg=s.get("reg", 1e-6),
+            tol=s.get("tol", 1e-4), max_solves=s.get("max_solves", 40)),
+        {"damping": {"type": "float", "default": 0.5, "min": 0.05, "max": 1.0,
+                     "label": "阻尼比 d"},
+         "reg": {"type": "float", "default": 1e-6, "min": 0.0, "max": 1.0,
+                 "label": "正则 λ", "hint": "阻尼最小奇异值，越大越稳越慢"},
+         "tol": {"type": "float", "default": 1e-4, "min": 0.0, "max": 1.0,
+                 "label": "残差容差"},
+         "targets": {"type": "dict", "default": {}, "label": "各 y 目标值",
+                     "hint": "{y1: 目标, y2: 目标, ...}"},
+         "sensitivity": {"type": "matrix", "default": {}, "label": "灵敏度矩阵 ∂y/∂x",
+                         "hint": "{y1:{x1:.., x2:..}, ...} 或二维数组，行=y 列=x"}},
+        label="阻尼灵敏度求解",
+        desc="多进多出定值：已知灵敏度∂y/∂x与各y目标，用阻尼最小二乘(SVD正则,比pinv稳)解Δx，"
+             "迭代把多个y同时逼到目标；x/y维度任选。",
     ),
     AlgorithmSpec(
         "bayesian", "bayesian", False, _bayes_builder,

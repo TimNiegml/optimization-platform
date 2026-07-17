@@ -80,6 +80,18 @@ def ackley_bench(x: dict[str, float]) -> dict[str, float]:
     return {"y1": round(y1, 6), "y2": round(_y2_from(y1, x3), 6)}
 
 
+def linear_sens_bench(x: dict[str, float]) -> dict[str, float]:
+    """线性灵敏度台：y1,y2 与 x1,x2 线性耦合，∂y/∂x 已知常数，适合『阻尼灵敏度求解』
+    做多进多出定值/标定（如 WDL 打架均衡）。
+        y1 =  0.8·x1 + 0.3·x2 + 1.0
+        y2 =  0.2·x1 − 0.6·x2 + 0.5      （x3 不参与）
+    → 灵敏度矩阵 S(行=y,列=x) = [[0.8, 0.3], [0.2, −0.6]]。"""
+    x1, x2 = x["x1"], x["x2"]
+    y1 = 0.8 * x1 + 0.3 * x2 + 1.0
+    y2 = 0.2 * x1 - 0.6 * x2 + 0.5
+    return {"y1": round(y1, 6), "y2": round(y2, 6)}
+
+
 # Selectable simulated benches (the canvas 场景 dropdown reads this via /benches).
 # All share the same variable space (x1,x2,x3 / y1,y2) so one VOCS stays valid.
 # `smooth` marks continuous surfaces worth drawing as a response-surface contour.
@@ -96,6 +108,8 @@ BENCHES = {
                   "desc": "经典强多峰，大量局部极大，全局在(0,0)；找光/贝叶斯的试金石。"},
     "ackley": {"label": "Ackley 多峰", "func": ackley_bench, "smooth": True,
                "desc": "经典多峰，外围近平坦、中心尖峰在(0,0)，容易困在外围。"},
+    "linear_sens": {"label": "线性灵敏度台(定值)", "func": linear_sens_bench, "smooth": True,
+                    "desc": "y1,y2 与 x1,x2 线性耦合，∂y/∂x 已知；配『阻尼灵敏度求解』把 y 逼到目标值。"},
 }
 
 
