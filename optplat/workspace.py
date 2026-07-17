@@ -49,7 +49,7 @@ class WorkspaceStore:
             cur.setdefault("messages", [])
             if msg:
                 cur["messages"].append({"role": "user", "text": str(msg),
-                                        "ts": time.strftime("%H:%M:%S")})
+                                        "ts": time.strftime("%H:%M:%S"), "read": False})
             if fields.get("note"):
                 cur["messages"].append({"role": "agent", "text": str(fields["note"]),
                                         "ts": time.strftime("%H:%M:%S")})
@@ -60,6 +60,21 @@ class WorkspaceStore:
             cur["session"] = sid
             self._data[sid] = cur
             return dict(cur)
+
+    def poll_user_messages(self, sid: str, mark_read: bool = True) -> list[dict]:
+        """The agent's inbox: user chat messages it has not consumed yet. Since MCP
+        is client-initiated (the platform can't wake the agent), the agent drains
+        this by polling; `mark_read` flips them read so each is delivered once."""
+        with self._lock:
+            cur = self._data.get(sid)
+            if not cur:
+                return []
+            unread = [m for m in cur.get("messages", [])
+                      if m.get("role") == "user" and not m.get("read")]
+            if mark_read:
+                for m in unread:
+                    m["read"] = True
+            return [dict(m) for m in unread]
 
     def sessions(self) -> list[str]:
         with self._lock:

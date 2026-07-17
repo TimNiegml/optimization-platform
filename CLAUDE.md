@@ -47,7 +47,7 @@
 | 自动调优 | `optplat/autotune.py` | AutoTuner(L1)：候选生成(粗调×精调×拟合+参数/噪声变异)、多试验评估、质量/时长/稳定打分、帕累托 |
 | 持久化 | `optplat/store.py` | SQLite 归档 / 断点续跑(start_point) / 一键回滚(rollback_to_best) |
 | 后端 API | `optplat/api.py` | FastAPI：`/catalog` `/vocs` `/run/graph` `/run/pipeline` `/`(画布) |
-| L2 MCP 服务器 | `optplat/mcp_server.py` | 把平台暴露成 15 个 MCP 工具供 Agent 驱动；配套 `optplat/solutions.py`(方案库) + `optplat/runner.py`(跑流程)；见 `MCP_AGENT.md` |
+| L2 MCP 服务器 | `optplat/mcp_server.py` | 把平台暴露成 16 个 MCP 工具供 Agent 驱动；配套 `optplat/solutions.py`(方案库) + `optplat/runner.py`(跑流程)；见 `MCP_AGENT.md` |
 | 实时工作区 | `optplat/workspace.py` | Agent↔画布共享状态(按 session)；MCP 挂进 FastAPI(`/mcp`) + `/workspace` SSE → Agent 改动画布自动刷新 |
 | Hermes skill | `skills/optplat/` | `SKILL.md`+`connect.json`+`reference/`：上传 Hermes 即自动连 MCP、学会用法(NL→IR 起草/推画布/跑对比调优) |
 | 托拉拽画布 | `web/index.html` | **纯 vanilla JS+SVG，无 CDN，离线可用**；产 {nodes,edges} JSON |
@@ -97,7 +97,7 @@
 - **P2e 光调优细化**（Chromium 验证，pytest 80 项全过）：
   - **相对扫描(无绝对坐标)**：`GridScan` 加 `span_frac`——0=全程绝对扫描；>0=以**起点**为中心、该比例的相对窗口(clip 进边界)。真实台架无绝对坐标，围绕当前位置局部扫更贴近实际；`grid_scan`/`line_scan` 暴露该参数。
   - **每轴超参数**：`CoordinateDescent(steps={x:绝对步距})` 每轴步距、`NelderMead(init_steps={x:边长})` 每轴初始 simplex（留空回退到统一比例 `step_frac`/`init_step_frac`）；registry 加参数类型 `axis_steps`，画布对应算法渲染**每轴表格**填写；`toggleVar` 改动变量时即时刷新面板列。
-  - **画布↔Agent 对话框**：左下角面板加输入框，发指令经 `POST /workspace/{sid}`(`user_message`) 写入会话 `messages`(role=user)，Agent 用 `get_canvas` 读到执行；Agent 的 `note` 也镜像进 `messages`(role=agent)。面板改**折叠/展开**（点标题栏，收起后可还原，修掉旧版最小化不可恢复的 bug）；消息按内容签名去重(不再因无关修订号重复推 note)。
+  - **画布↔Agent 对话框 + 收件箱**：左下角面板加输入框，发指令经 `POST /workspace/{sid}`(`user_message`) 写入会话 `messages`(role=user)。**MCP 是客户端(Agent)发起、服务器(平台)无法主动叫醒 Agent**，所以画布→Agent 非实时：消息进**收件箱**，Agent 靠新增的 MCP 工具 **`poll_messages(session)`** 拉取未读(读过标记 `read`，只消费一次)；`SKILL.md` 要求 Agent 每次交互开始/长任务中途先 `poll_messages`。Agent→画布 仍是 SSE 实时(浏览器挂常连)。面板改**折叠/展开**（点标题栏，收起后可还原，修掉旧版最小化不可恢复的 bug）；消息按内容签名去重(不再因无关修订号重复推 note)。
   - **响应面等高线修复**：2D 视图的等高线不再限定纯函数场景——`/surface` 采样底层函数(与噪声无关)，模拟硬件场景也可叠加等高线(灵敏度/带噪示例现在也能看地形)。
 
 - **P3 Agent/AutoTuner（Phase A 已做）**：见 `AGENT_AUTOTUNE_DESIGN.md`。

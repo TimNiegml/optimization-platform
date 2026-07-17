@@ -287,6 +287,24 @@ def get_canvas(session: str = "default") -> dict:
             "revision": snap.get("revision", 0), "updated_at": snap.get("updated_at")}
 
 
+@mcp.tool()
+def poll_messages(session: str = "default", mark_read: bool = True) -> dict:
+    """拉取用户在平台画布聊天框发来、你还没读过的指令（你的收件箱）。
+
+    为什么需要它：平台是 MCP 服务器、你是客户端，平台无法主动叫醒你——用户在画布上
+    发的指令只会先存进会话，等你来取。**建议每次和用户交互一开始、以及长任务中途，
+    都先调用一次 `poll_messages(session)`**：把收件箱里的用户新指令读出来优先处理，
+    处理/回应完再用 `push_to_canvas(session=...)` 把结果推回画布。
+
+    参数：
+      session    用户在画布『实时会话』里填的会话 ID（默认 default），要和其它调用一致。
+      mark_read  取出后标记为已读（默认 True），保证每条指令只被消费一次；传 False 只看不消费。
+    返回：{session, messages:[{role:"user", text, ts}...], count}。count=0 表示没有新指令。
+    """
+    msgs = WORKSPACE.poll_user_messages(session, mark_read=mark_read)
+    return {"session": session, "messages": msgs, "count": len(msgs)}
+
+
 # ============================ auto-tune ============================
 @mcp.tool()
 def autotune(bench: str = "single_peak", target: Optional[str] = "y1>=0.95 and y2>=0.9",

@@ -227,7 +227,7 @@
   </div>
   <div id="agentLogBody"></div>
   <div class="alInput">
-    <input id="agentInput" placeholder="给 Agent 发指令…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendAgentMessage();}">
+    <input id="agentInput" placeholder="给 Agent 留言/发指令…（它下次 poll 到即执行）" onkeydown="if(event.key==='Enter'){event.preventDefault();sendAgentMessage();}">
     <button class="sm" onclick="sendAgentMessage()">发送</button>
   </div>
 </div>
@@ -1340,8 +1340,8 @@ function sendAgentMessage(){
     headers:Object.assign({'Content-Type':'application/json'}, tok?{'Authorization':'Bearer '+tok}:{}),
     body:JSON.stringify({user_message:text})})
     .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-    .then(d=>{ if(!liveES) agentLogPush('已存入会话「'+sid+'」，连接后 Agent 用 get_canvas 即可读到并执行。','sys'); })
-    .catch(e=>agentLogPush('发送失败：'+e+'（消息发到实时会话工作区，需要后端在运行）','sys'));
+    .then(d=>{ agentLogPush('已送到会话「'+sid+'」收件箱。平台无法主动叫醒 Agent——在 Hermes 里对它说一句(哪怕「看下画布」)，它会 poll_messages 读到并执行；要马上执行也可直接在 Hermes 对话里下指令。','sys'); })
+    .catch(e=>agentLogPush('发送失败：'+e+'（消息发往实时会话工作区，需要后端在运行、会话 ID 一致）','sys'));
 }
 function applyLiveSnapshot(s){
   if(!s) return;

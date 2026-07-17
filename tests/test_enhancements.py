@@ -135,6 +135,21 @@ def test_workspace_user_message_and_note_log():
     assert roles == ["user", "agent"]
 
 
+def test_workspace_inbox_polls_unread_once():
+    ws = WorkspaceStore()
+    ws.update("s2", user_message="第一条")
+    ws.update("s2", user_message="第二条")
+    first = ws.poll_user_messages("s2")               # drains both unread
+    assert [m["text"] for m in first] == ["第一条", "第二条"]
+    assert ws.poll_user_messages("s2") == []          # already read → empty
+    ws.update("s2", user_message="第三条")             # a new one arrives
+    assert [m["text"] for m in ws.poll_user_messages("s2")] == ["第三条"]
+    # non-consuming peek leaves it unread
+    ws.update("s2", user_message="第四条")
+    assert ws.poll_user_messages("s2", mark_read=False)
+    assert ws.poll_user_messages("s2", mark_read=False)
+
+
 # ---------------- measurement-time grouping ----------------
 def test_read_seconds_serial_and_parallel():
     costs = {"y1": 1.0, "y2": 2.0, "y3": 4.0}
