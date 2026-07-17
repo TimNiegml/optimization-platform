@@ -73,12 +73,16 @@ class CoordinateDescent(Generator):
     Robust, derivative-free, and a faithful 'coordinate gradient' for the MVP.
     """
 
-    def __init__(self, vocs, variables, objective, init_step_frac=0.25, tol_frac=1e-3):
+    def __init__(self, vocs, variables, objective, init_step_frac=0.25, tol_frac=1e-3,
+                 steps=None):
         super().__init__(vocs, variables, objective)
-        self._step = {
-            v: init_step_frac * (vocs.variables[v].high - vocs.variables[v].low)
-            for v in variables
-        }
+        steps = steps or {}
+        # per-axis step: an explicit ABSOLUTE value per axis overrides the fraction
+        # of that axis' range (so each motor can get its own probe distance).
+        self._step = {}
+        for v in variables:
+            rng = vocs.variables[v].high - vocs.variables[v].low
+            self._step[v] = float(steps[v]) if v in steps else init_step_frac * rng
         self._tol = {
             v: tol_frac * (vocs.variables[v].high - vocs.variables[v].low)
             for v in variables
@@ -244,9 +248,15 @@ class GridScan(Generator):
     "y1 > first_light"), otherwise it stops when the grid is exhausted.
     """
 
-    def __init__(self, vocs, variables, objective, n_per_axis=7):
+    def __init__(self, vocs, variables, objective, n_per_axis=7, span_frac=0.0):
         super().__init__(vocs, variables, objective)
         self.n_per_axis = n_per_axis
+        # span_frac == 0 → absolute full-range raster (the default). span_frac > 0 →
+        # a RELATIVE window of that fraction of each axis' range, centred on the
+        # current operating point (start point). Physically there is no absolute
+        # stage origin, so a local scan around where we already are is what a real
+        # alignment does; the window is clipped into the variable bounds.
+        self.span_frac = span_frac
         self._grid: list[dict[str, float]] = []
 
     def _build_grid(self) -> None:
@@ -256,7 +266,13 @@ class GridScan(Generator):
         for v in self.variables:
             var = self.vocs.variables[v]
             n = self.n_per_axis
-            axes.append([var.low + (var.high - var.low) * i / (n - 1) for i in range(n)])
+            if self.span_frac and self.span_frac > 0:          # relative window around base
+                half = 0.5 * self.span_frac * (var.high - var.low)
+                c = self._base[v]
+                lo, hi = var.clip(c - half), var.clip(c + half)
+            else:                                              # absolute full range
+                lo, hi = var.low, var.high
+            axes.append([lo + (hi - lo) * i / (n - 1) for i in range(n)])
         self._grid = [dict(zip(self.variables, combo)) for combo in itertools.product(*axes)]
 
     def ask(self) -> dict[str, float]:
@@ -282,13 +298,16 @@ class NelderMead(Generator):
     """
 
     def __init__(self, vocs, variables, objective,
-                 init_step_frac=0.1, tol_frac=1e-3, max_evals=400):
+                 init_step_frac=0.1, tol_frac=1e-3, max_evals=400, init_steps=None):
         super().__init__(vocs, variables, objective)
         self.dim = len(variables)
-        self._init_step = {
-            v: init_step_frac * (vocs.variables[v].high - vocs.variables[v].low)
-            for v in variables
-        }
+        init_steps = init_steps or {}
+        # initial simplex edge per axis: an explicit ABSOLUTE value per axis overrides
+        # the fraction of that axis' range (each axis can seed its own simplex size).
+        self._init_step = {}
+        for v in variables:
+            rng = vocs.variables[v].high - vocs.variables[v].low
+            self._init_step[v] = float(init_steps[v]) if v in init_steps else init_step_frac * rng
         self._tol = tol_frac * min(
             vocs.variables[v].high - vocs.variables[v].low for v in variables
         )

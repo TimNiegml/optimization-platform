@@ -11,9 +11,15 @@ import pytest
 from optplat.autotune import TuneSpec, _random_start, run_autotune
 from optplat.demo import demo_vocs, linear_sens_bench, nonlinear_sens_bench
 from optplat.evaluator import Evaluator, read_seconds
-from optplat.generators import DampedSensitivity
+from optplat.generators import (
+    CoordinateDescent,
+    DampedSensitivity,
+    GridScan,
+    NelderMead,
+)
 from optplat.graph import GraphRunner
 from optplat.hardware import HardwareEvaluator, SimulatedMeter, SimulatedStage
+from optplat.workspace import WorkspaceStore
 
 
 # ---------------- DampedSensitivity ----------------
@@ -78,6 +84,55 @@ def test_damped_sensitivity_regularised_inverse_is_stable():
     dx = gen._solve([10.0, 10.0])
     assert all(math.isfinite(v) for v in dx)
     assert max(abs(v) for v in dx) < 1e6                # bounded, not exploded
+
+
+# ---------------- relative scan window + per-axis hyperparameters ----------------
+def test_grid_scan_relative_window_centres_on_start():
+    vocs = demo_vocs()
+    g = GridScan(vocs, ["x1"], "y1", n_per_axis=5, span_frac=0.25)
+    g.set_base({"x1": 2.0, "x2": 0.0, "x3": 0.0})
+    xs = []
+    for _ in range(5):
+        x = g.ask()["x1"]; xs.append(x); g.tell({"x1": x}, 0.0)
+    rng = vocs.variables["x1"].high - vocs.variables["x1"].low
+    half = 0.5 * 0.25 * rng
+    assert min(xs) >= 2.0 - half - 1e-9 and max(xs) <= 2.0 + half + 1e-9
+    assert min(xs) < 2.0 < max(xs)                      # window is around the start point
+
+
+def test_grid_scan_absolute_by_default():
+    vocs = demo_vocs()
+    g = GridScan(vocs, ["x1"], "y1", n_per_axis=3)       # span_frac defaults to 0
+    g.set_base({"x1": 2.0, "x2": 0.0, "x3": 0.0})
+    xs = [g.ask()["x1"] for _ in range(3)]
+    assert min(xs) == vocs.variables["x1"].low and max(xs) == vocs.variables["x1"].high
+
+
+def test_coordinate_descent_per_axis_step():
+    vocs = demo_vocs()
+    g = CoordinateDescent(vocs, ["x1", "x2"], "y1", steps={"x1": 0.5})
+    assert g._step["x1"] == 0.5                          # explicit per-axis override
+    assert g._step["x2"] == pytest.approx(
+        0.25 * (vocs.variables["x2"].high - vocs.variables["x2"].low))   # frac fallback
+
+
+def test_nelder_mead_per_axis_simplex():
+    vocs = demo_vocs()
+    g = NelderMead(vocs, ["x1", "x2"], "y1", init_steps={"x2": 0.7})
+    assert g._init_step["x2"] == 0.7
+    assert g._init_step["x1"] == pytest.approx(
+        0.1 * (vocs.variables["x1"].high - vocs.variables["x1"].low))
+
+
+# ---------------- workspace canvas→agent chat ----------------
+def test_workspace_user_message_and_note_log():
+    ws = WorkspaceStore()
+    ws.update("s1", user_message="把 y1 调到 2")
+    snap = ws.snapshot("s1")
+    assert snap["messages"][-1]["role"] == "user" and "2" in snap["messages"][-1]["text"]
+    ws.update("s1", note="已完成 y1→2")
+    roles = [m["role"] for m in ws.snapshot("s1")["messages"]]
+    assert roles == ["user", "agent"]
 
 
 # ---------------- measurement-time grouping ----------------

@@ -272,6 +272,7 @@ class WorkspacePatch(BaseModel):
     graph: Optional[dict] = None
     bench: Optional[str] = None
     note: Optional[str] = None
+    user_message: Optional[str] = None      # canvas chat → agent (appended to log)
 
 
 @app.get("/workspace/{sid}")
@@ -284,7 +285,8 @@ def workspace_get(sid: str):
 @app.post("/workspace/{sid}")
 def workspace_patch(sid: str, patch: WorkspacePatch):
     """Canvas → workspace: the user's own edits, so an agent can get_canvas them back."""
-    return WORKSPACE.update(sid, graph=patch.graph, bench=patch.bench, note=patch.note)
+    return WORKSPACE.update(sid, graph=patch.graph, bench=patch.bench, note=patch.note,
+                            user_message=patch.user_message)
 
 
 @app.get("/workspace/{sid}/stream")

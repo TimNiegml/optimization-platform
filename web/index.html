@@ -95,20 +95,30 @@
   table.sens th { color:var(--muted); font-weight:600; background:var(--panel2); }
   table.sens td input { width:54px; padding:3px 4px; }
   /* agent messages panel (bottom-left) */
-  #agentLog { position:fixed; left:12px; bottom:12px; z-index:70; width:300px; max-height:44vh; display:flex; flex-direction:column;
+  #agentLog { position:fixed; left:12px; bottom:12px; z-index:70; width:300px; max-height:48vh; display:flex; flex-direction:column;
               background:var(--panel); border:1px solid var(--accent); border-radius:10px; box-shadow:0 8px 28px #0004; overflow:hidden; }
   #agentLog.hidden { display:none; }
-  #agentLog .alHd { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 10px;
+  #agentLog .alHd { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 10px; cursor:pointer;
                     background:var(--panel2); border-bottom:1px solid var(--line); font-size:12px; font-weight:600; color:var(--text); }
-  #agentLog .alBtns { display:flex; gap:8px; }
+  #agentLog .alBtns { display:flex; gap:8px; align-items:center; }
   #agentLog .alBtn { cursor:pointer; color:var(--muted); font-weight:400; }
   #agentLog .alBtn:hover { color:var(--accent); }
-  #agentLogBody { overflow:auto; padding:6px 8px; }
+  #agentLog .alChevron { transition:transform .15s; transform:rotate(90deg); }
+  #agentLog.collapsed .alChevron { transform:rotate(0deg); }
+  #agentLog.collapsed #agentLogBody, #agentLog.collapsed .alInput { display:none; }
+  #agentLog.collapsed { border-color:var(--line); box-shadow:var(--shadow); }
+  #agentLogBody { overflow:auto; padding:6px 8px; min-height:40px; }
+  #agentLogBody:empty::after { content:"连接实时会话后，Agent 的消息/运行结果会显示在这里；下方可给 Agent 发指令。"; font-size:10.5px; color:var(--muted); line-height:1.5; }
   #agentLogBody .alRow { font-size:11.5px; line-height:1.5; padding:5px 6px; margin-bottom:5px; border-radius:6px;
                          background:var(--panel2); border-left:3px solid var(--muted); word-break:break-word; }
   #agentLogBody .alRow.note { border-left-color:var(--accent); }
   #agentLogBody .alRow.result { border-left-color:var(--ok); }
+  #agentLogBody .alRow.user { border-left-color:var(--warn); background:var(--panel); }
+  #agentLogBody .alRow.sys { border-left-color:var(--muted); font-style:italic; color:var(--muted); }
   #agentLogBody .alTime { display:block; font-size:9.5px; color:var(--muted); margin-bottom:1px; }
+  #agentLog .alInput { display:flex; gap:5px; padding:7px 8px; border-top:1px solid var(--line); }
+  #agentLog .alInput input { flex:1; }
+  #agentLog .alInput button { flex:none; }
   /* modal */
   #modalBack { position:fixed; inset:0; background:#0006; z-index:80; display:none; }
   .modal { position:fixed; z-index:81; top:50%; left:50%; transform:translate(-50%,-50%); width:min(720px,92vw); max-height:86vh;
@@ -207,11 +217,19 @@
 </div>
 
 <div id="tipbox"></div>
-<div id="agentLog" class="hidden">
-  <div class="alHd">🤖 Agent 消息 / 结果
-    <span class="alBtns"><span class="alBtn" onclick="clearAgentLog()" title="清空">🗑</span><span class="alBtn" onclick="document.getElementById('agentLog').classList.add('hidden')" title="收起">✕</span></span>
+<div id="agentLog" class="collapsed">
+  <div class="alHd" onclick="toggleAgentLog()" data-tip="点标题栏展开/收起 Agent 对话；连接实时会话后可直接给 Agent 发指令。">
+    <span>🤖 Agent 对话</span>
+    <span class="alBtns">
+      <span class="alBtn" onclick="event.stopPropagation(); clearAgentLog()" title="清空">🗑</span>
+      <span class="alBtn alChevron" title="展开/收起">▸</span>
+    </span>
   </div>
   <div id="agentLogBody"></div>
+  <div class="alInput">
+    <input id="agentInput" placeholder="给 Agent 发指令…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendAgentMessage();}">
+    <button class="sm" onclick="sendAgentMessage()">发送</button>
+  </div>
 </div>
 <div id="modalBack" onclick="closeModals()"></div>
 
@@ -244,6 +262,11 @@
   <p><b>通道规范</b>：每个因变量 y 映射到读取设备(光功率计/偏振分析仪…)+参数，标注<b>读取耗时(秒)</b>，并填<b>测量组</b>；每个自变量 x 映射到执行器。引擎<b>只读取某步真正需要的通道</b>——只优化 y1 的步骤不会去读 y2，省掉它的耗时。</p>
   <p><b>测量组（并行/串行）</b>：同一组的通道<b>并行测量</b>，该组耗时取组内<b>最大</b>；不同组（或留空）<b>串行测量</b>，耗时<b>相加</b>。例：光功率+PDL 同组并行、光功率+中心波长 不同组串行。面板会实时预估『读全部通道一次』的耗时，运行后按每步实际读取的通道累计更准的<b>测量总时长</b>。</p>
   <p><b>自定义起始点</b>：勾选后可为每个自变量填优化的起点（而非定义域中点）；也可在运行后的 <b>2D 轨迹图里点击</b>直接选起点（★）。勾<b>安全限位</b>可为每个自变量单独设安全范围。</p>
+  <p><b>相对扫描（无绝对坐标）</b>：网格/线扫描的『扫描窗口(相对起点)』参数——填 0 = 全程绝对扫描；填 &gt;0 = 以<b>起点</b>为中心、按该比例开一个相对窗口来扫（真实台架没有绝对坐标，围绕当前位置局部扫更贴近实际）。</p>
+  <p><b>每轴超参数</b>：坐标下降可为<b>每个轴单独设步距</b>、单纯形可为<b>每个轴单独设初始 simplex 边长</b>（留空则用统一的比例）。</p>
+
+  <h3>④c 与 Agent 对话（左下角）</h3>
+  <p>左下角 <b>🤖 Agent 对话</b> 面板：点标题栏可展开/收起（收起后随时点回来）。连接『实时会话』后，在输入框给 Agent 发指令会写入会话，Agent（如 Hermes）用 <code>get_canvas</code> 读到后执行并把结果/说明推回来显示在这里。</p>
 
   <h3>④b 阻尼灵敏度求解（多进多出定值/标定）</h3>
   <p>已知<b>灵敏度 ∂y/∂x</b> 和各 y 的<b>目标值</b>时，加<b>阻尼灵敏度求解</b>节点：勾选要定值的 y 填目标、勾选要动的 x，再填灵敏度矩阵（行=y、列=x）。它用<b>阻尼最小二乘(SVD 正则伪逆)</b>解 Δx=阻尼·S⁺·(目标−当前)，比 pinv 数值更稳，迭代把多个 y 同时逼到目标；x/y 维度按勾选自动匹配。</p>
@@ -524,6 +547,7 @@ function inspectNode(n){
   }
   Object.entries(s.params||{}).forEach(([k,meta]) => {
     if(isSolve && (k==='targets'||k==='sensitivity')) return;      // handled by the solve editor
+    if(meta.type==='axis_steps'){ h += renderAxisSteps(n,k,meta); return; }  // per-axis table
     const lab = meta.label ? `${meta.label} <span style="color:var(--muted)">(${k})</span>` : k;
     const tip = meta.hint ? ` <span class="info" data-tip="${meta.hint}">i</span>` : '';
     h += `<label>${lab}${tip}</label><input value="${n.params[k]??meta.default??''}" onchange="setParam('${n.id}','${k}',this.value)">`;
@@ -549,7 +573,21 @@ function inspectEdge(ed){
 }
 window.saveEdgeCond=(id)=>{ const ed=edges.find(e=>e.id===id); if(ed){ ed.condition=document.getElementById('edgeCond').value.trim(); render(); } };
 window.toggleVar=(id,v,on)=>{const n=nodes.find(x=>x.id===id);const s=spec(n.algorithm);
-  if(s.single_var){n.variables=on?[v]:[];} else {n.variables=on?[...new Set([...n.variables,v])]:n.variables.filter(x=>x!==v);} render();};
+  if(s.single_var){n.variables=on?[v]:[];} else {n.variables=on?[...new Set([...n.variables,v])]:n.variables.filter(x=>x!==v);} render(); if(sel===id) inspectNode(n);};
+// per-axis hyperparameter table (坐标下降每轴步距 / 单纯形每轴初始 simplex)
+function ensureDictParam(n,k){ if(!n.params) n.params={}; if(typeof n.params[k]!=='object'||n.params[k]===null) n.params[k]={}; }
+function renderAxisSteps(n,k,meta){
+  ensureDictParam(n,k); const xs=n.variables, d=n.params[k]||{};
+  const tip = meta.hint ? ` <span class="info" data-tip="${meta.hint}">i</span>` : '';
+  let h=`<label>${meta.label||k}${tip}</label>`;
+  if(!xs.length){ h+=`<p class="hint">先在上方勾选变量。</p>`; return h; }
+  h+=`<div style="overflow-x:auto"><table class="sens"><tr>${xs.map(x=>`<th>${x}</th>`).join('')}</tr><tr>`+
+     xs.map(x=>`<td><input type="number" step="0.01" min="0" value="${d[x]!=null?d[x]:''}" placeholder="留空" oninput="setAxisStep('${n.id}','${k}','${x}',this.value)" title="${x} 的绝对步距/边长；留空=用上面的比例"></td>`).join('')+
+     `</tr></table></div>`;
+  return h;
+}
+window.setAxisStep=(id,k,x,v)=>{ const n=nodes.find(z=>z.id===id); ensureDictParam(n,k);
+  if(v===''||v==null) delete n.params[k][x]; else n.params[k][x]=+v; };
 window.setF=(id,f,v)=>{nodes.find(x=>x.id===id)[f]=v; render();};
 window.setMode=(id,v)=>{const n=nodes.find(x=>x.id===id); n.objectiveMode=v; render(); inspectNode(n);};
 function compWeights(n){ const w=n.objectiveWeights; if(!w) return null; const nz=Object.entries(w).filter(([k,v])=>+v); return nz.length?Object.fromEntries(nz.map(([k,v])=>[k,+v])):null; }
@@ -738,8 +776,8 @@ function renderChart(){
             Y<select id="c2y" onchange="c2dY=this.value; lastSurface=null; renderChart()">${optV}</select>
             色<select id="c2o" onchange="c2dObj=this.value; lastSurface=null; renderChart()">${optO}</select>`;
     const bench=document.getElementById('evBench').value;
-    if(benchSmooth[bench] && document.getElementById('evMode').value==='function' && c2dX!==c2dY)
-      ctl += `<button class="ghost" style="padding:3px 9px;font-size:11px" onclick="toggleSurface()" data-tip="纯函数场景：向后端采样该两轴的响应面，画成等高线背景（其余变量固定在当前解）。">${showSurface?'✓ ':''}响应面等高线</button>`;
+    if(benchSmooth[bench] && c2dX!==c2dY)
+      ctl += `<button class="ghost" style="padding:3px 9px;font-size:11px" onclick="toggleSurface()" data-tip="向后端采样该两轴的响应面(用底层函数,与噪声无关)，画成等高线背景（其余变量固定在当前解）；纯函数与模拟硬件场景都可用。">${showSurface?'✓ ':''}响应面等高线</button>`;
   }
   ctl += `<button class="ghost" style="padding:3px 9px;font-size:11px" onclick="downloadTrajectory()" data-tip="导出每次评估的 stage、全部自变量 x、因变量 y 为 CSV。">⭳ 下载轨迹</button></div>`;
   let body;
@@ -1280,35 +1318,51 @@ function toggleLiveSession(){
   liveES.addEventListener('update',onmsg);
   liveES.onerror=()=>liveStatus('连接中断（会自动重试）',false);
 }
-let lastAgentRev=-1;
+let lastAgentNote='', lastResultSig='', lastAutotuneSig='';
+function toggleAgentLog(){ document.getElementById('agentLog').classList.toggle('collapsed'); }
+function openAgentLog(){ document.getElementById('agentLog').classList.remove('collapsed'); }
 function agentLogPush(text, kind){
-  const box=document.getElementById('agentLogBody'); const panel=document.getElementById('agentLog');
-  if(!box||!panel||!text) return;
-  panel.classList.remove('hidden');
+  const box=document.getElementById('agentLogBody'); if(!box||!text) return;
+  openAgentLog();
   const row=document.createElement('div'); row.className='alRow'+(kind?(' '+kind):'');
-  row.innerHTML=`<span class="alTime">${new Date().toLocaleTimeString()}</span>${String(text).replace(/</g,'&lt;')}`;
+  const who = kind==='user'?'你 · ':(kind==='note'||kind==='result'?'Agent · ':'');
+  row.innerHTML=`<span class="alTime">${who}${new Date().toLocaleTimeString()}</span>${String(text).replace(/</g,'&lt;')}`;
   box.insertBefore(row, box.firstChild);
-  while(box.children.length>50) box.removeChild(box.lastChild);
+  while(box.children.length>60) box.removeChild(box.lastChild);
 }
 function clearAgentLog(){ const b=document.getElementById('agentLogBody'); if(b) b.innerHTML=''; }
+function sendAgentMessage(){
+  const inp=document.getElementById('agentInput'); const text=(inp.value||'').trim(); if(!text) return;
+  agentLogPush(text, 'user'); inp.value='';
+  const sid=(document.getElementById('wsSession').value||'default').trim();
+  const tok=(document.getElementById('wsToken').value||'').trim();
+  fetch(API+'/workspace/'+encodeURIComponent(sid),{method:'POST',
+    headers:Object.assign({'Content-Type':'application/json'}, tok?{'Authorization':'Bearer '+tok}:{}),
+    body:JSON.stringify({user_message:text})})
+    .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(d=>{ if(!liveES) agentLogPush('已存入会话「'+sid+'」，连接后 Agent 用 get_canvas 即可读到并执行。','sys'); })
+    .catch(e=>agentLogPush('发送失败：'+e+'（消息发到实时会话工作区，需要后端在运行）','sys'));
+}
 function applyLiveSnapshot(s){
   if(!s) return;
   liveStatus('已连接会话「'+(s.session||'')+'」· rev '+(s.revision||0)+(s.updated_at?(' · '+s.updated_at):''),true);
   if(s.bench){ const bs=document.getElementById('evBench'); if(bs&&[...bs.options].some(o=>o.value===s.bench)&&bs.value!==s.bench){ bs.value=s.bench; renderEvalExtras(); } }
   if(s.graph&&s.graph.nodes){ adoptGraph(s.graph); }
   if(s.autotune&&s.autotune.ranked){ tuneResult={ranked:s.autotune.ranked}; if(document.getElementById('tuneBody')) renderTuneResults(); }
-  // surface the agent's message / run result in the bottom-left panel (once per revision)
-  if((s.revision||0)!==lastAgentRev){
-    lastAgentRev=s.revision||0;
-    if(s.note) agentLogPush(s.note, 'note');
-    if(s.result && s.result.objectives){
+  // surface the agent's message / run result in the panel — per-item change detection
+  // (not revision-gated, so an unrelated revision bump never re-pushes an old note)
+  if(s.note && s.note!==lastAgentNote){ lastAgentNote=s.note; agentLogPush(s.note, 'note'); }
+  if(s.result && s.result.objectives){
+    const sig=JSON.stringify(s.result.objectives)+'@'+(s.revision||0);
+    if(sig!==lastResultSig){ lastResultSig=sig;
       const obj=Object.entries(s.result.objectives).map(([k,v])=>`${k}=${(+v).toFixed(4)}`).join(', ');
       const secs=s.result.sim_seconds!=null?`，测量耗时 ${(+s.result.sim_seconds).toFixed(1)}s`:'';
-      agentLogPush(`运行结果：${obj}（评估 ${s.result.n_evals!=null?s.result.n_evals:'?'} 次${secs}）`, 'result');
-    }
-    if(s.autotune && s.autotune.ranked && s.autotune.ranked.length){
-      const t=s.autotune.ranked[0]; agentLogPush(`自动调优最优：${t.label}（质量 ${(+t.quality).toFixed(3)}）`, 'result');
-    }
+      agentLogPush(`运行结果：${obj}（评估 ${s.result.n_evals!=null?s.result.n_evals:'?'} 次${secs}）`, 'result'); }
+  }
+  if(s.autotune && s.autotune.ranked && s.autotune.ranked.length){
+    const t=s.autotune.ranked[0]; const sig=t.label+'@'+(s.revision||0);
+    if(sig!==lastAutotuneSig){ lastAutotuneSig=sig;
+      agentLogPush(`自动调优最优：${t.label}（质量 ${(+t.quality).toFixed(3)}）`, 'result'); }
   }
   const note=s.note?('　'+s.note):'';
   document.getElementById('conn').textContent='Agent 已更新画布（rev '+(s.revision||0)+'）'+note;

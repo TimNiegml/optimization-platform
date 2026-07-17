@@ -277,12 +277,14 @@ def get_canvas(session: str = "default") -> dict:
     """读回某个实时会话的当前状态（含用户在画布上手改后的最新 graph / 场景 / 上次结果）。
 
     用于 agent ↔ 人双向协作：用户在画布上拖改后，agent 用这个拿到最新流程再继续。
+    返回里的 `messages` 是画布聊天记录（role=user 是用户在画布聊天框发来的指令、role=agent
+    是你之前 push 的 note）；读到新的 user 消息就按它执行，然后用 push_to_canvas 回复。
     """
     snap = WORKSPACE.snapshot(session)
     return {"session": session, "graph": snap.get("graph"), "bench": snap.get("bench"),
             "result": snap.get("result"), "autotune": snap.get("autotune"),
-            "note": snap.get("note", ""), "revision": snap.get("revision", 0),
-            "updated_at": snap.get("updated_at")}
+            "note": snap.get("note", ""), "messages": snap.get("messages", []),
+            "revision": snap.get("revision", 0), "updated_at": snap.get("updated_at")}
 
 
 # ============================ auto-tune ============================
