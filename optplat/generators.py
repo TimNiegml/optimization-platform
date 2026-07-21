@@ -150,7 +150,7 @@ class SurrogateFit(Generator):
     """
 
     def __init__(self, vocs, variables, objective, model="quadratic",
-                 n_samples=5, r2_gate=0.9):
+                 n_samples=5, r2_gate=0.9, span_frac=0.0):
         super().__init__(vocs, variables, objective)
         if len(variables) != 1:
             raise ValueError("SurrogateFit (MVP) supports exactly one variable")
@@ -158,6 +158,9 @@ class SurrogateFit(Generator):
         self.model = model
         self.n_samples = n_samples
         self.r2_gate = r2_gate
+        # span_frac == 0 → sample the full absolute range. > 0 → a RELATIVE window
+        # of that fraction, centred on the start point (no absolute origin needed).
+        self.span_frac = span_frac
         self._xs: list[float] = []
         self._ys: list[float] = []          # raw objective values
         self._design: list[float] = []      # planned sample abscissae
@@ -166,7 +169,12 @@ class SurrogateFit(Generator):
 
     def _build_design(self) -> None:
         v = self.vocs.variables[self.var]
-        lo, hi = v.low, v.high
+        if self.span_frac and self.span_frac > 0:
+            half = 0.5 * self.span_frac * (v.high - v.low)
+            c = self._base[self.var]
+            lo, hi = v.clip(c - half), v.clip(c + half)
+        else:
+            lo, hi = v.low, v.high
         self._design = [lo + (hi - lo) * i / (self.n_samples - 1)
                         for i in range(self.n_samples)]
 
@@ -515,7 +523,7 @@ class ParametricFit(Generator):
     """
 
     def __init__(self, vocs, variables, objective, model="quadratic",
-                 fixed=None, hints=None, n_samples=5, r2_gate=0.9):
+                 fixed=None, hints=None, n_samples=5, r2_gate=0.9, span_frac=0.0):
         super().__init__(vocs, variables, objective)
         if len(variables) != 1:
             raise ValueError("ParametricFit (MVP) supports exactly one variable")
@@ -525,6 +533,7 @@ class ParametricFit(Generator):
         self.hints = dict(hints or {})
         self.n_samples = n_samples
         self.r2_gate = r2_gate
+        self.span_frac = span_frac              # 0 = full range; >0 = window around start
         self._xs: list[float] = []
         self._ys: list[float] = []
         self._design: list[float] = []
@@ -532,7 +541,13 @@ class ParametricFit(Generator):
 
     def _build_design(self) -> None:
         v = self.vocs.variables[self.var]
-        self._design = [v.low + (v.high - v.low) * i / (self.n_samples - 1)
+        if self.span_frac and self.span_frac > 0:
+            half = 0.5 * self.span_frac * (v.high - v.low)
+            c = self._base[self.var]
+            lo, hi = v.clip(c - half), v.clip(c + half)
+        else:
+            lo, hi = v.low, v.high
+        self._design = [lo + (hi - lo) * i / (self.n_samples - 1)
                         for i in range(self.n_samples)]
 
     def ask(self) -> dict[str, float]:

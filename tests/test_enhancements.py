@@ -5,6 +5,7 @@
   * API: custom start_point + channel_groups
 """
 import math
+import os
 
 import pytest
 
@@ -17,9 +18,13 @@ from optplat.generators import (
     GridScan,
     NelderMead,
 )
+from optplat.generators import SurrogateFit
 from optplat.graph import GraphRunner
 from optplat.hardware import HardwareEvaluator, SimulatedMeter, SimulatedStage
+from optplat.userdev import load_device
 from optplat.workspace import WorkspaceStore
+
+_DEVICE = os.path.join(os.path.dirname(__file__), "..", "examples", "device_template.py")
 
 
 # ---------------- DampedSensitivity ----------------
@@ -122,6 +127,49 @@ def test_nelder_mead_per_axis_simplex():
     assert g._init_step["x2"] == 0.7
     assert g._init_step["x1"] == pytest.approx(
         0.1 * (vocs.variables["x1"].high - vocs.variables["x1"].low))
+
+
+def test_fit_span_frac_windows_around_start():
+    vocs = demo_vocs()
+    g = SurrogateFit(vocs, ["x1"], "y1", n_samples=5, span_frac=0.25)
+    g.set_base({"x1": 4.0, "x2": 0.0, "x3": 0.0})
+    xs = []
+    for _ in range(5):                                  # the 5 design (sampling) points
+        x = g.ask()["x1"]; xs.append(x); g.tell({"x1": x}, 0.5)
+    half = 0.5 * 0.25 * (vocs.variables["x1"].high - vocs.variables["x1"].low)
+    assert min(xs) >= 4.0 - half - 1e-9 and max(xs) <= 4.0 + half + 1e-9
+
+
+# ---------------- external device interface ----------------
+def test_device_autoreads_x_y_and_starts_from_current_pose():
+    dev = load_device(_DEVICE)
+    vocs = dev.vocs()
+    assert list(vocs.variables) == ["x1", "x2"]         # platform auto-reads n_x
+    assert list(vocs.objectives) == ["y1", "y2"]        # ... and n_y
+    assert vocs.objectives["y2"].mode.value == "target" and vocs.objectives["y2"].target == 0.0
+    assert dev.current_point() == {"x1": 5.0, "x2": -3.0}   # start = current axis pose
+    graph = {
+        "nodes": [
+            {"id": "s", "type": "start"},
+            {"id": "sc", "type": "algorithm", "data": {
+                "algorithm": "grid_scan", "variables": ["x1", "x2"], "objective": "y1",
+                "n_per_axis": 7, "span_frac": 0.6, "stop": {"target": "y1>0.2"}}},
+            {"id": "r", "type": "algorithm", "data": {
+                "algorithm": "nelder_mead", "variables": ["x1", "x2"], "objective": "y1"}},
+            {"id": "e", "type": "end"}],
+        "edges": [{"source": "s", "target": "sc"}, {"source": "sc", "target": "r"},
+                  {"source": "r", "target": "e"}]}
+    res = GraphRunner(vocs, dev.evaluator(), graph, start_point=dev.current_point()).run()
+    assert res["objectives"]["y1"] > 0.95               # found the coupling peak
+    assert abs(res["state"]["x1"] - 2.0) < 0.15 and abs(res["state"]["x2"] + 1.0) < 0.15
+
+
+def test_device_evaluator_selective_read():
+    dev = load_device(_DEVICE)
+    ev = dev.evaluator()
+    y = ev.evaluate({"x1": 2.0, "x2": -1.0}, channels=["y1"])
+    assert set(y) == {"y1"}                             # only y1 requested
+    assert ev.reads.get("y2", 0) == 0                   # y2.get() never called
 
 
 # ---------------- workspace canvas→agent chat ----------------

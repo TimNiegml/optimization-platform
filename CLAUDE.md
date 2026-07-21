@@ -1,7 +1,7 @@
 # CLAUDE.md — 项目上下文与继续指南
 
 > 这份文件是给 Claude Code 新会话的"接手说明"。读完它 + `ARCHITECTURE.md` 就能无缝继续。
-> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 80 项全过）。
+> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 84 项全过）。
 
 ---
 
@@ -43,6 +43,7 @@
 | 编排（块式） | `optplat/orchestrator.py` | flow / if / loop{until,max_rounds} |
 | 编排（图式，Dify） | `optplat/graph.py` | `GraphRunner` 直接跑 {nodes,edges}；分支=条件边，循环=回边(max_visits/max_steps 限幅)；`to_mermaid` |
 | 评估接入 | `optplat/evaluator.py` `optplat/hardware.py` | 函数版 + 硬件版(稳定时间/平均/**独立安全限位** clamp)；含仿真 stage/meter；按通道选择性读取+成本 |
+| 外部设备接入 | `optplat/userdev.py` + `examples/device_template.py` | 用户在外部 Python 定义 `AXES`(x: move/get) + `METERS`(y: get)，平台**自动读几个 x/几个 y**建 VOCS + Evaluator；起点=轴当前位置(`axis.get()`)。`run_device.py` 命令行跑、`OPTPLAT_DEVICE=xx.py` 让画布/REST/MCP 自动用它 |
 | 模型接口 | `optplat/models.py` | ModelProvider 注册式：`analytic`(解析 bench) / `dataset_idw`(用户数据 surrogate)，可插拔 |
 | 自动调优 | `optplat/autotune.py` | AutoTuner(L1)：候选生成(粗调×精调×拟合+参数/噪声变异)、多试验评估、质量/时长/稳定打分、帕累托 |
 | 持久化 | `optplat/store.py` | SQLite 归档 / 断点续跑(start_point) / 一键回滚(rollback_to_best) |
@@ -79,13 +80,13 @@
   - **梯度上升(PI闪电式)** `gradient_ascent`：有限差分测局部梯度、沿上升方向步进+步长自适应。
   - **拟合公式回显**：`SurrogateFit`/`FormulaMethod`/`ParametricFit` 暴露 `fit_info`（峰位/参数/R²），引擎收进 `result.fits`（用 finally 保证全局早停也记录），画布对应**节点卡片显示拟合公式**。
   - **按场景示例 + 方案库**：`载入示例` 按当前仿真场景放量身流程（多峰/多模用贝叶斯全局、相关谷用单纯形、偏斜/尖峰用梯度上升等）；`📁 方案库` 内置各场景示例，并可选**整个文件夹批量加载**保存过的方案（webkitdirectory / 多选文件）。
-- **测试**：`python -m pytest -q` → **80 项全过**（algorithms / graph / p1b / api / autotune / mcp）。
+- **测试**：`python -m pytest -q` → **84 项全过**（algorithms / graph / p1b / api / autotune / mcp）。
 
 算法库（11 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
 `nelder_mead` `gradient_ascent`(PI闪电式) `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula`
 `damped_sensitivity`(阻尼灵敏度求解/多进多出定值) `bayesian`。
 
-- **P2d 光调优增强**（Chromium 全流程验证，pytest 80 项全过）：
+- **P2d 光调优增强**（Chromium 全流程验证，pytest 84 项全过）：
   - **API host/port**：`main()` 默认 `0.0.0.0:8003`（可用 `OPTPLAT_HOST/OPTPLAT_PORT` 覆盖），画布/REST/MCP 一个进程。
   - **Agent 消息面板**：画布左下角 `#agentLog`——实时会话里 Agent 推来的 `note`/运行结果/自动调优最优会按修订号追加显示（`applyLiveSnapshot`）。
   - **自定义起始点**：`start_point` 早已在引擎/图，画布评估面板加『自定义起始点』表单，且**运行后可在 2D 轨迹图点击直接选起点(★)**（`pick2D`/`twoDMap`）；随方案保存/加载。
@@ -94,11 +95,16 @@
   - **仪器测量时间 并行/串行分组**：`Objective.group` + `EvaluatorConfig.channel_groups`；`evaluator.read_seconds(keys,costs,groups)`——同组**并行**(耗时取 max)、不同组/未分组**串行**(相加)，`HardwareEvaluator` 还按 `averages` 倍数计；画布通道表加『测量组』列并实时预估耗时（光功率+PDL 并行、光功率+中心波长 串行）。
   - **左右栏可拖宽/拖窄**：`#app` 网格列改 `--leftw/--rightw` CSS 变量，两条 `.resizer` 竖条拖动实时改宽（`initResizers`，含边界钳制 + 拖动后 `drawEdges` 重排连线）。
 
-- **P2e 光调优细化**（Chromium 验证，pytest 80 项全过）：
+- **P2e 光调优细化**（Chromium 验证，pytest 84 项全过）：
   - **相对扫描(无绝对坐标)**：`GridScan` 加 `span_frac`——0=全程绝对扫描；>0=以**起点**为中心、该比例的相对窗口(clip 进边界)。真实台架无绝对坐标，围绕当前位置局部扫更贴近实际；`grid_scan`/`line_scan` 暴露该参数。
   - **每轴超参数**：`CoordinateDescent(steps={x:绝对步距})` 每轴步距、`NelderMead(init_steps={x:边长})` 每轴初始 simplex（留空回退到统一比例 `step_frac`/`init_step_frac`）；registry 加参数类型 `axis_steps`，画布对应算法渲染**每轴表格**填写；`toggleVar` 改动变量时即时刷新面板列。
   - **画布↔Agent 对话框 + 收件箱**：左下角面板加输入框，发指令经 `POST /workspace/{sid}`(`user_message`) 写入会话 `messages`(role=user)。**MCP 是客户端(Agent)发起、服务器(平台)无法主动叫醒 Agent**，所以画布→Agent 非实时：消息进**收件箱**，Agent 靠新增的 MCP 工具 **`poll_messages(session)`** 拉取未读(读过标记 `read`，只消费一次)；`SKILL.md` 要求 Agent 每次交互开始/长任务中途先 `poll_messages`。Agent→画布 仍是 SSE 实时(浏览器挂常连)。面板改**折叠/展开**（点标题栏，收起后可还原，修掉旧版最小化不可恢复的 bug）；消息按内容签名去重(不再因无关修订号重复推 note)。
   - **响应面等高线修复**：2D 视图的等高线不再限定纯函数场景——`/surface` 采样底层函数(与噪声无关)，模拟硬件场景也可叠加等高线(灵敏度/带噪示例现在也能看地形)。
+
+- **P2f 外部设备接入 + 相对起点贯通**（pytest 84 项全过，Chromium 验证画布自动读设备 x/y）：
+  - **外部设备定义**（`optplat/userdev.py` + `examples/device_template.py`）：用户在**外部 Python** 写 `AXES`(每个 x 一个轴，含 `move(v)`/`get()`) + `METERS`(每个 y 一个测量，含 `get()`；可标 `mode/target/cost/group/device/param`)，或 `build()` 返回二者。`load_device(path)` → `DeviceSpec.vocs()`(平台**自动读出几个 x/几个 y**)、`.evaluator()`(move 轴→只读需要的 meter，含平均/安全/并行串行计时)、`.current_point()`(轴当前位置=优化**起点**，真实台架无绝对坐标→从当前位置起)。
+  - **接线**：`run_device.py path.py [graph.json]` 命令行直接跑(与后端解耦)；`OPTPLAT_DEVICE=path.py python -m optplat.api` 后画布/REST(`/vocs`/`/benches`/新增 `/device`)/MCP **自动用该设备**、起点默认取轴当前位置；`/surface` 对设备返回 400(无解析面)。
+  - **相对起点贯通全算法**：拟合类 `quadratic_fit`/`gaussian_fit`/`parametric_fit` 也加 `span_frac`(0=全程绝对；>0=以起点为中心的相对窗口)，连同 grid/line 的 `span_frac`、坐标下降/单纯形/梯度/公式/阻尼灵敏度**都从起点出发**——真实台架"从当前位置开始、无绝对坐标"。注意 `span_frac=1` 是以起点为中心±半量程，起点在中点时正好=全程(看起来没变)，要局部扫用小值。
 
 - **P3 Agent/AutoTuner（Phase A 已做）**：见 `AGENT_AUTOTUNE_DESIGN.md`。
   - **L1 AutoTuner**（`optplat/autotune.py`）：在"粗调(网格/线扫/**贝叶斯**)×精调(单纯形/坐标/梯度)×拟合"三相空间搜索，
@@ -122,7 +128,7 @@
     reference）上传 Hermes 即自动连 MCP 并会用；平台只做 schema 校验，不内置 LLM。
   - **L3 画布 Copilot（待做，可选）**：网页端自然语言输入框 → 平台内部 GLM5.1 出校验过的 IR(`draft_workflow`)，
     给不经 Hermes 的用户。工具面已备好。
-- **pytest 80 项全过**（algorithms/graph/p1b/api/autotune/mcp）。
+- **pytest 84 项全过**（algorithms/graph/p1b/api/autotune/mcp）。
 
 ## 5. 路线图（下一步候选，未做）
 
@@ -163,10 +169,15 @@ python -m optplat.api      # 后端 + 画布 → http://127.0.0.1:8003/   （/do
 python run_graph.py        # 命令行跑图 JSON（Dify 风格）
 python run_demo.py         # 命令行跑两阶段流程
 python demo_hardware.py    # 硬件+噪声/平均/安全+续跑+回滚
+python run_device.py examples/device_template.py   # 用外部定义的设备(轴 move/get + 测量 get)跑，平台自动读几个 x/y
+OPTPLAT_DEVICE=examples/device_template.py python -m optplat.api  # 让画布/REST/MCP 用你的真实设备（起点=轴当前位置）
 python run_mcp.py          # L2 MCP 服务器（stdio；--http 走 HTTP）→ 供 Agent 驱动，配置见 MCP_AGENT.md
 streamlit run app.py       # 表单式控制台
-python -m pytest -q        # 80 项测试
+python -m pytest -q        # 84 项测试
 ```
 
 接自己的优化函数：改 `optplat/demo.py` 的 `optical_bench(x)` 与 `demo_vocs()`。
+接自己的**真实设备/仪器**（推荐，解耦）：复制 `examples/device_template.py`，把 `Axis.move/get`、`Meter.get`
+换成你仪器的调用，声明 `AXES`(x) + `METERS`(y)；`python run_device.py 你的.py` 或 `OPTPLAT_DEVICE=你的.py python -m optplat.api`，
+平台自动读几个 x/几个 y 并驱动，起点取轴当前位置（无绝对坐标）。
 接自己的算法：实现 `Generator`(ask/tell) 后 `register_algorithm(AlgorithmSpec(...))`，即成为可拖拽节点。

@@ -35,8 +35,18 @@ from .hardware import HardwareEvaluator, SafetyLimits, SimulatedMeter, Simulated
 from .mcp_server import mcp
 from .orchestrator import Orchestrator
 from .registry import REGISTRY, algorithm_catalog
+from .userdev import load_device
 from .vocs import VOCS
 from .workspace import WORKSPACE
+
+# Optional EXTERNAL device: point the server at a user module that declares its
+# own axes (x) + meters (y) and the platform drives THOSE instead of the demo
+# bench — the canvas / REST / MCP then reflect the real x/y automatically.
+#   OPTPLAT_DEVICE=path/to/device.py python -m optplat.api
+DEVICE = None
+_dev_path = os.environ.get("OPTPLAT_DEVICE")
+if _dev_path:
+    DEVICE = load_device(_dev_path)
 
 # The MCP server is mounted at /mcp (streamable-HTTP) so ONE process serves the
 # canvas, the REST API AND the agent-facing MCP endpoint, all sharing the same
@@ -106,7 +116,12 @@ class RunPipelineRequest(RunRequest):
 
 
 def _build_vocs(v: Optional[dict], cfg: Optional[EvaluatorConfig] = None) -> VOCS:
-    vocs = VOCS(**v) if v else demo_vocs()
+    if v:
+        vocs = VOCS(**v)
+    elif DEVICE is not None:
+        vocs = DEVICE.vocs()
+    else:
+        vocs = demo_vocs()
     if cfg and cfg.channel_costs:                 # per-channel read-cost override
         for name, cost in cfg.channel_costs.items():
             if name in vocs.objectives:
@@ -126,6 +141,8 @@ def _safety_limits(vocs: VOCS, cfg: EvaluatorConfig) -> Optional[SafetyLimits]:
 
 
 def _build_evaluator(vocs: VOCS, cfg: EvaluatorConfig):
+    if DEVICE is not None:                        # user's real/simulated instruments
+        return DEVICE.evaluator(averages=cfg.averages, safety=_safety_limits(vocs, cfg))
     func = bench_func(cfg.bench)
     costs = {n: o.cost for n, o in vocs.objectives.items()}
     groups = {n: g for n, g in (cfg.channel_groups or {}).items() if g not in (None, "")}
@@ -164,7 +181,15 @@ def catalog():
 
 @app.get("/benches")
 def benches():
-    """Selectable simulated evaluation scenarios for the canvas 场景 dropdown."""
+    """Selectable simulated evaluation scenarios for the canvas 场景 dropdown.
+    When an external device is loaded, there is no swappable bench — report the
+    single device scenario so the UI shows what it is driving."""
+    if DEVICE is not None:
+        info = DEVICE.info()
+        return {"benches": [{"name": "device",
+                             "label": f"外部设备（{info['n_axes']}×x / {info['n_meters']}×y）",
+                             "desc": f"来自 {info['source']}；起点=轴当前位置。",
+                             "smooth": False}], "device": True}
     return {"benches": [{"name": n, "label": b["label"], "desc": b["desc"],
                          "smooth": b.get("smooth", False)}
                         for n, b in BENCHES.items()]}
@@ -187,6 +212,9 @@ def surface(req: SurfaceRequest):
     """Sample a bench's response surface on a 2-D grid over (xvar, yvar), holding
     the other variables fixed — so the canvas can draw a true response-surface
     contour for the continuous (纯函数) benches."""
+    if DEVICE is not None:                         # a real device has no analytic surface
+        raise HTTPException(status_code=400,
+                            detail="external device has no analytic response surface")
     try:
         v = demo_vocs()
         func = bench_func(req.bench)
@@ -211,7 +239,7 @@ def surface(req: SurfaceRequest):
 
 @app.get("/vocs")
 def vocs():
-    v = demo_vocs()
+    v = DEVICE.vocs() if DEVICE is not None else demo_vocs()
     return {
         "variables": {n: {"low": var.low, "high": var.high} for n, var in v.variables.items()},
         "objectives": {n: {"mode": o.mode.value, "cost": o.cost,
@@ -220,13 +248,21 @@ def vocs():
     }
 
 
+def _start_point(req_start: Optional[dict]) -> Optional[dict]:
+    # explicit request start wins; else for a real device use its CURRENT axis
+    # positions (no absolute origin — start from where the hardware already is).
+    if req_start:
+        return req_start
+    return DEVICE.current_point() if DEVICE is not None else None
+
+
 @app.post("/run/graph")
 def run_graph(req: RunGraphRequest):
     try:
         vocs = _build_vocs(req.vocs, req.evaluator)
         ev = _build_evaluator(vocs, req.evaluator)
         res = GraphRunner(vocs, ev, req.graph, eval_budget=req.eval_budget,
-                          start_point=req.start_point).run()
+                          start_point=_start_point(req.start_point)).run()
         return _result(res)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
@@ -238,10 +274,18 @@ def run_pipeline(req: RunPipelineRequest):
         vocs = _build_vocs(req.vocs, req.evaluator)
         ev = _build_evaluator(vocs, req.evaluator)
         res = Orchestrator(vocs, ev, req.pipeline, eval_budget=req.eval_budget,
-                           start_point=req.start_point).run()
+                           start_point=_start_point(req.start_point)).run()
         return _result(res)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
+@app.get("/device")
+def device_info():
+    """External-device info (n axes / n meters / current pose) when the server was
+    started with OPTPLAT_DEVICE, else {device: None}. The canvas uses /vocs to
+    auto-build the right number of x/y; this endpoint is for a status badge."""
+    return {"device": DEVICE.info() if DEVICE is not None else None}
 
 
 @app.get("/autotune/space")
