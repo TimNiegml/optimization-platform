@@ -101,6 +101,12 @@ class TuneSpec(BaseModel):
     quality_obj: Optional[str] = None                # default = landscape_obj
     weights: dict = Field(default_factory=lambda: {"quality": 1.0, "time": 0.5, "stability": 1.0})
     noise_levels: list[float] = Field(default_factory=lambda: [0.0, 0.02])
+    # Start each trial from a RANDOM operating point (seeded, reproducible) instead
+    # of the domain centre — a fairer robustness estimate and closer to a cold real
+    # start. `start_domain` bounds where that random point is drawn from, per
+    # variable {x: [low, high]}; unspecified variables use their full VOCS range.
+    random_start: bool = True
+    start_domain: Optional[dict[str, list[float]]] = None
     n_trials: int = 2
     max_candidates: int = 18
     eval_budget: int = 2000
@@ -114,6 +120,13 @@ class TuneSpec(BaseModel):
     # per-algorithm 变异档位 override: {algo: [ {param: value, ...}, ... ]}.
     # Absent algorithms fall back to default_variation() from the param schema.
     variation: Optional[dict[str, list[dict]]] = None
+    # LLM-proposed SEARCH RANGES, from a trace diagnosis (see trace_digest):
+    #   {"*": {"step_frac": {"low":0.01,"high":0.05,"n":4}},   # "*" = all algorithms
+    #    "grid_scan": {"span_frac": {"low":0.1,"high":0.5,"n":3}}}
+    # Expanded into concrete variants, so the LLM narrows WHERE to look (using the
+    # measured peak width) while the search still decides the actual value.
+    # Ranges only apply to params the algorithm actually declares.
+    search_space: Optional[dict[str, dict[str, dict]]] = None
 
 
 def _label(algo: str) -> str:
@@ -121,10 +134,68 @@ def _label(algo: str) -> str:
     return (spec.label if spec and spec.label else algo)
 
 
+def _expand_range(meta: dict, rng: dict) -> list:
+    """Turn {"low":a,"high":b,"n":k} into k evenly spaced candidate values,
+    respecting the parameter's declared type and schema bounds."""
+    try:
+        low, high = float(rng["low"]), float(rng["high"])
+    except (KeyError, TypeError, ValueError):
+        return []
+    n = max(1, min(int(rng.get("n", 3)), 8))
+    if "min" in meta:                      # never step outside the declared schema
+        low = max(low, float(meta["min"]))
+    if "max" in meta:
+        high = min(high, float(meta["max"]))
+    if high < low:
+        low, high = high, low
+    vals = [low] if n == 1 else [low + (high - low) * i / (n - 1) for i in range(n)]
+    if meta.get("type") == "int":
+        vals = sorted({int(round(v)) for v in vals})
+    else:
+        vals = sorted({round(v, 6) for v in vals})
+    return vals
+
+
+def search_space_variants(spec: TuneSpec, algo: str) -> list[dict]:
+    """Variants generated from the LLM-proposed search ranges for `algo`.
+    Ranges under the "*" key apply to every algorithm that declares that param."""
+    if not spec.search_space:
+        return []
+    params = (REGISTRY[algo].params if algo in REGISTRY else {}) or {}
+    ranges: dict[str, dict] = {}
+    ranges.update(spec.search_space.get("*", {}) or {})
+    ranges.update(spec.search_space.get(algo, {}) or {})
+    out: list[dict] = []
+    for pname, rng in ranges.items():
+        if pname not in params or not isinstance(rng, dict):
+            continue                        # ignore params this algorithm doesn't have
+        for v in _expand_range(params[pname], rng):
+            out.append({pname: v})
+    return out
+
+
 def _variants(spec: TuneSpec, algo: str) -> list[dict]:
+    extra = search_space_variants(spec, algo)
     if spec.variation and algo in spec.variation:
-        return spec.variation[algo] or [{}]
-    return default_variation(algo) if spec.param_variation else [{}]
+        base = spec.variation[algo] or [{}]
+    elif spec.param_variation:
+        base = default_variation(algo)
+    else:
+        base = [{}]
+    if not extra:
+        return base
+    # LLM-proposed ranges REPLACE the blind min/max extremes for those params,
+    # but keep the plain default variant so the baseline is still represented.
+    touched = {k for v in extra for k in v}
+    kept = [v for v in base if not (set(v) & touched)]
+    merged = ([{}] if {} not in kept else []) + kept + extra
+    seen, uniq = set(), []
+    for v in merged:
+        key = tuple(sorted(v.items()))
+        if key not in seen:
+            seen.add(key)
+            uniq.append(v)
+    return uniq
 
 
 def _phase_options(spec: TuneSpec, phase: str, allow: Optional[list[str]], nvars: int):
@@ -215,6 +286,21 @@ def _reached(target: Optional[str], res: dict) -> Optional[bool]:
         return False
 
 
+def _random_start(vocs: VOCS, spec: TuneSpec, seed: int) -> dict[str, float]:
+    """A seeded random operating point inside the (optionally narrowed) domain."""
+    import random
+    rng = random.Random(seed)
+    dom = spec.start_domain or {}
+    pt = {}
+    for name, var in vocs.variables.items():
+        lo, hi = var.low, var.high
+        d = dom.get(name)
+        if d and len(d) == 2:
+            lo, hi = float(d[0]), float(d[1])
+        pt[name] = rng.uniform(lo, hi)
+    return pt
+
+
 def _make_evaluator(vocs: VOCS, model_fn, costs, noise: float, seed: int):
     if noise > 0:
         stage = SimulatedStage(vocs.initial_point())
@@ -229,9 +315,11 @@ def evaluate_candidate(spec: TuneSpec, vocs: VOCS, model_fn, costs, graph: dict)
     for noise in spec.noise_levels:
         for t in range(spec.n_trials):
             seed = spec.seed + t * 7 + int(noise * 1000)
+            sp = _random_start(vocs, spec, seed) if spec.random_start else None
             try:
                 ev = _make_evaluator(vocs, model_fn, costs, noise, seed)
-                res = GraphRunner(vocs, ev, graph, eval_budget=spec.eval_budget).run()
+                res = GraphRunner(vocs, ev, graph, eval_budget=spec.eval_budget,
+                                  start_point=sp).run()
             except Exception:
                 qs.append(0.0); ts.append(0.0); succ.append(0.0)     # broken candidate scores 0
                 continue

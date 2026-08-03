@@ -46,6 +46,8 @@ class Objective(BaseModel):
     cost: float = 0.0                    # seconds to read this channel once
     device: Optional[str] = None         # e.g. "光功率计"
     param: Optional[str] = None          # e.g. "power" / "指向角"
+    group: Optional[str] = None          # measurement group: same group = 并行测量
+                                         # (time = max), different groups = 串行 (sum)
 
     def direction(self) -> int:
         """+1 if larger score is better, -1 if smaller is better.

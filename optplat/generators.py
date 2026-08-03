@@ -42,6 +42,12 @@ class Generator:
         self.best_x: Optional[dict[str, float]] = None
         self.best_score: float = float("-inf")
 
+    # Optional richer feedback: if a generator defines observe(), the engine also
+    # hands it the FULL measured objective dict (not just the scalar score) after
+    # every evaluation. Multi-output solvers (e.g. 阻尼灵敏度求解) need the whole y
+    # vector; scalar-score algorithms simply don't implement this.
+    # def observe(self, x: dict[str, float], y: dict[str, float]) -> None: ...
+
     def set_base(self, point: dict[str, float]) -> None:
         """Seed the starting operating point (only our subset is read)."""
         self._base = {v: point[v] for v in self.variables}
@@ -67,12 +73,16 @@ class CoordinateDescent(Generator):
     Robust, derivative-free, and a faithful 'coordinate gradient' for the MVP.
     """
 
-    def __init__(self, vocs, variables, objective, init_step_frac=0.25, tol_frac=1e-3):
+    def __init__(self, vocs, variables, objective, init_step_frac=0.25, tol_frac=1e-3,
+                 steps=None):
         super().__init__(vocs, variables, objective)
-        self._step = {
-            v: init_step_frac * (vocs.variables[v].high - vocs.variables[v].low)
-            for v in variables
-        }
+        steps = steps or {}
+        # per-axis step: an explicit ABSOLUTE value per axis overrides the fraction
+        # of that axis' range (so each motor can get its own probe distance).
+        self._step = {}
+        for v in variables:
+            rng = vocs.variables[v].high - vocs.variables[v].low
+            self._step[v] = float(steps[v]) if v in steps else init_step_frac * rng
         self._tol = {
             v: tol_frac * (vocs.variables[v].high - vocs.variables[v].low)
             for v in variables
@@ -140,7 +150,7 @@ class SurrogateFit(Generator):
     """
 
     def __init__(self, vocs, variables, objective, model="quadratic",
-                 n_samples=5, r2_gate=0.9):
+                 n_samples=5, r2_gate=0.9, span_frac=0.0):
         super().__init__(vocs, variables, objective)
         if len(variables) != 1:
             raise ValueError("SurrogateFit (MVP) supports exactly one variable")
@@ -148,6 +158,9 @@ class SurrogateFit(Generator):
         self.model = model
         self.n_samples = n_samples
         self.r2_gate = r2_gate
+        # span_frac == 0 → sample the full absolute range. > 0 → a RELATIVE window
+        # of that fraction, centred on the start point (no absolute origin needed).
+        self.span_frac = span_frac
         self._xs: list[float] = []
         self._ys: list[float] = []          # raw objective values
         self._design: list[float] = []      # planned sample abscissae
@@ -156,7 +169,12 @@ class SurrogateFit(Generator):
 
     def _build_design(self) -> None:
         v = self.vocs.variables[self.var]
-        lo, hi = v.low, v.high
+        if self.span_frac and self.span_frac > 0:
+            half = 0.5 * self.span_frac * (v.high - v.low)
+            c = self._base[self.var]
+            lo, hi = v.clip(c - half), v.clip(c + half)
+        else:
+            lo, hi = v.low, v.high
         self._design = [lo + (hi - lo) * i / (self.n_samples - 1)
                         for i in range(self.n_samples)]
 
@@ -238,9 +256,15 @@ class GridScan(Generator):
     "y1 > first_light"), otherwise it stops when the grid is exhausted.
     """
 
-    def __init__(self, vocs, variables, objective, n_per_axis=7):
+    def __init__(self, vocs, variables, objective, n_per_axis=7, span_frac=0.0):
         super().__init__(vocs, variables, objective)
         self.n_per_axis = n_per_axis
+        # span_frac == 0 → absolute full-range raster (the default). span_frac > 0 →
+        # a RELATIVE window of that fraction of each axis' range, centred on the
+        # current operating point (start point). Physically there is no absolute
+        # stage origin, so a local scan around where we already are is what a real
+        # alignment does; the window is clipped into the variable bounds.
+        self.span_frac = span_frac
         self._grid: list[dict[str, float]] = []
 
     def _build_grid(self) -> None:
@@ -250,7 +274,13 @@ class GridScan(Generator):
         for v in self.variables:
             var = self.vocs.variables[v]
             n = self.n_per_axis
-            axes.append([var.low + (var.high - var.low) * i / (n - 1) for i in range(n)])
+            if self.span_frac and self.span_frac > 0:          # relative window around base
+                half = 0.5 * self.span_frac * (var.high - var.low)
+                c = self._base[v]
+                lo, hi = var.clip(c - half), var.clip(c + half)
+            else:                                              # absolute full range
+                lo, hi = var.low, var.high
+            axes.append([lo + (hi - lo) * i / (n - 1) for i in range(n)])
         self._grid = [dict(zip(self.variables, combo)) for combo in itertools.product(*axes)]
 
     def ask(self) -> dict[str, float]:
@@ -276,13 +306,16 @@ class NelderMead(Generator):
     """
 
     def __init__(self, vocs, variables, objective,
-                 init_step_frac=0.1, tol_frac=1e-3, max_evals=400):
+                 init_step_frac=0.1, tol_frac=1e-3, max_evals=400, init_steps=None):
         super().__init__(vocs, variables, objective)
         self.dim = len(variables)
-        self._init_step = {
-            v: init_step_frac * (vocs.variables[v].high - vocs.variables[v].low)
-            for v in variables
-        }
+        init_steps = init_steps or {}
+        # initial simplex edge per axis: an explicit ABSOLUTE value per axis overrides
+        # the fraction of that axis' range (each axis can seed its own simplex size).
+        self._init_step = {}
+        for v in variables:
+            rng = vocs.variables[v].high - vocs.variables[v].low
+            self._init_step[v] = float(init_steps[v]) if v in init_steps else init_step_frac * rng
         self._tol = tol_frac * min(
             vocs.variables[v].high - vocs.variables[v].low for v in variables
         )
@@ -490,7 +523,7 @@ class ParametricFit(Generator):
     """
 
     def __init__(self, vocs, variables, objective, model="quadratic",
-                 fixed=None, hints=None, n_samples=5, r2_gate=0.9):
+                 fixed=None, hints=None, n_samples=5, r2_gate=0.9, span_frac=0.0):
         super().__init__(vocs, variables, objective)
         if len(variables) != 1:
             raise ValueError("ParametricFit (MVP) supports exactly one variable")
@@ -500,6 +533,7 @@ class ParametricFit(Generator):
         self.hints = dict(hints or {})
         self.n_samples = n_samples
         self.r2_gate = r2_gate
+        self.span_frac = span_frac              # 0 = full range; >0 = window around start
         self._xs: list[float] = []
         self._ys: list[float] = []
         self._design: list[float] = []
@@ -507,7 +541,13 @@ class ParametricFit(Generator):
 
     def _build_design(self) -> None:
         v = self.vocs.variables[self.var]
-        self._design = [v.low + (v.high - v.low) * i / (self.n_samples - 1)
+        if self.span_frac and self.span_frac > 0:
+            half = 0.5 * self.span_frac * (v.high - v.low)
+            c = self._base[self.var]
+            lo, hi = v.clip(c - half), v.clip(c + half)
+        else:
+            lo, hi = v.low, v.high
+        self._design = [lo + (hi - lo) * i / (self.n_samples - 1)
                         for i in range(self.n_samples)]
 
     def ask(self) -> dict[str, float]:
@@ -663,3 +703,118 @@ class GradientAscent(Generator):
             self.lr *= 0.5; self._line_tries += 1
             if self.lr < self.tol or self._line_tries >= self.max_line:
                 self.done = True
+
+
+class DampedSensitivity(Generator):
+    """阻尼灵敏度求解: multi-in / multi-out target solving via damped least squares.
+
+    You know the sensitivity (Jacobian) S = ∂y/∂x of a set of measured outputs y
+    (n_y of them) w.r.t. a set of actuators x (n_x of them), and a target value for
+    each y. Each round measures y, forms the residual Δy = y_target − y_meas, and
+    steps the actuators by
+
+        Δx = damping · S⁺_λ · Δy ,      x ← clip(x + Δx)
+
+    where S⁺_λ is a **regularised (Tikhonov / damped-SVD) pseudo-inverse** rather
+    than a raw `pinv`: via the SVD S = U diag(σ) Vᵀ,
+
+        S⁺_λ Δy = Σ_i  σ_i / (σ_i² + λ) · (u_iᵀ Δy) · v_i .
+
+    This is the numerically-stable form used in beam-steering / adaptive-optics
+    controllers — it stays bounded when S is singular, ill-conditioned, tall, wide
+    or rank-deficient (a plain pinv blows up on the small singular values). The
+    `damping` ratio (0<d≤1) additionally under-relaxes the step so a locally-linear
+    model tracks a genuinely non-linear plant without overshoot.
+
+    Dimensions are free: the node picks which x it drives and which y it targets;
+    `sensitivity` and `targets` just have to match those. Iterates until the
+    residual norm falls below `tol` or `max_solves` steps are taken.
+    """
+
+    def __init__(self, vocs, variables, objective, sensitivity=None, targets=None,
+                 damping=0.5, reg=1e-6, tol=1e-4, max_solves=40):
+        super().__init__(vocs, variables, objective)
+        # target outputs: explicit {y: value}, else every TARGET-mode VOCS objective
+        if targets:
+            self.targets = {k: float(v) for k, v in targets.items()}
+        else:
+            self.targets = {n: float(o.target) for n, o in vocs.objectives.items()
+                            if o.target is not None}
+        if not self.targets:
+            raise ValueError("DampedSensitivity needs targets (y→目标值) — none given "
+                             "and no TARGET-mode objectives in VOCS")
+        self.objs = list(self.targets)                 # row order of S
+        self.damping = float(damping)
+        self.reg = float(reg)
+        self.tol = float(tol)
+        self.max_solves = int(max_solves)
+        self._S = self._as_matrix(sensitivity)         # n_y × n_x
+        self._next: Optional[dict[str, float]] = None
+        self._solves = 0
+
+    def channels(self) -> set:
+        """Objective channels this solver must read every step (all its targets)."""
+        return set(self.objs)
+
+    def _as_matrix(self, sens) -> list[list[float]]:
+        """Accept a nested dict {y:{x:val}} OR a plain 2-D list, ordered to
+        (self.objs × self.variables). Missing entries default to 0."""
+        rows = []
+        if isinstance(sens, dict):
+            for o in self.objs:
+                row = sens.get(o, {}) or {}
+                rows.append([float(row.get(v, 0.0)) for v in self.variables])
+        elif sens:                                     # list-of-lists / rows
+            for i, o in enumerate(self.objs):
+                r = list(sens[i]) if i < len(sens) else []
+                rows.append([float(r[j]) if j < len(r) else 0.0
+                             for j in range(len(self.variables))])
+        else:
+            raise ValueError("DampedSensitivity needs a `sensitivity` matrix (∂y/∂x)")
+        return rows
+
+    def set_base(self, point: dict[str, float]) -> None:
+        super().set_base(point)
+        self._next = dict(self._base)
+
+    def ask(self) -> dict[str, float]:
+        if self._next is None:
+            self._next = dict(self._base)
+        return dict(self._next)
+
+    def _solve(self, resid) -> list[float]:
+        """Δx = damped-SVD pseudo-inverse of S applied to the residual Δy."""
+        import numpy as np
+        S = np.asarray(self._S, float)
+        dy = np.asarray(resid, float)
+        u, s, vt = np.linalg.svd(S, full_matrices=False)
+        # damped inverse singular values: σ/(σ²+λ) — bounded even as σ→0
+        d = s / (s * s + self.reg)
+        dx = vt.T @ (d * (u.T @ dy))
+        return [float(v) for v in dx]
+
+    def observe(self, x: dict[str, float], y: dict[str, float]) -> None:
+        import numpy as np
+        self._solves += 1
+        resid = [self.targets[o] - float(y.get(o, 0.0)) for o in self.objs]
+        err = float(np.linalg.norm(resid))
+        score = -err                                   # smaller residual = better
+        if score > self.best_score:
+            self.best_score = score
+            self.best_x = {v: x[v] for v in self.variables}
+        self.fit_info = ("阻尼灵敏度求解：残差‖Δy‖=%.3g，目标 %s（阻尼 d=%.2g, λ=%.1g）"
+                         % (err, ", ".join(f"{o}→{self.targets[o]:.4g}" for o in self.objs),
+                            self.damping, self.reg))
+        if err < self.tol or self._solves >= self.max_solves:
+            self.done = True
+            return
+        dx = self._solve(resid)
+        nxt = {}
+        for i, v in enumerate(self.variables):
+            nxt[v] = self.vocs.variables[v].clip(x[v] + self.damping * dx[i])
+        self._next = nxt
+
+    def tell(self, x: dict[str, float], score: float) -> None:
+        # best-x / stopping are handled in observe() with the full y vector; the
+        # scalar score path is intentionally a no-op here.
+        return

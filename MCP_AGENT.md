@@ -28,7 +28,7 @@ python -m pytest -q                       # 应 62 项全过（含 MCP 测试）
 # ★ A) 统一服务（推荐，尤其要「Agent 改动→画布自动刷新」时）
 python -m optplat.api
 #   一个进程同时提供：画布(/)  +  REST  +  MCP(/mcp, streamable-HTTP)  +  实时工作区(/workspace)
-#   → http://127.0.0.1:8000/mcp 给 Agent，http://127.0.0.1:8000/ 给用户看画布
+#   → http://127.0.0.1:8003/mcp 给 Agent，http://127.0.0.1:8003/ 给用户看画布
 
 # B) 纯 stdio —— Agent 和平台同机、无需画布联动（Claude Desktop / Cursor）
 python run_mcp.py                 # 等价 python -m optplat.mcp_server

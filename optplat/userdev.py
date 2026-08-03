@@ -1,0 +1,206 @@
+"""External device definition — plug YOUR real (or simulated) instruments in.
+
+The platform stays generic: it never hard-codes how many inputs/outputs you have
+or how to read/move them. YOU describe your setup in a small Python module that
+declares **axes** (movable inputs x) and **meters** (measured outputs y). The
+platform imports it, auto-discovers how many x / y there are, builds the VOCS,
+and drives optimisation purely through this tiny contract:
+
+    axis.move(value)   # command an axis to a position
+    axis.get()         # read the axis' CURRENT position  → the optimisation START
+                       #   point comes from here (real stages have no absolute origin,
+                       #   so we start from wherever the hardware already is)
+    meter.get()        # read one measurement
+
+That is the whole coupling surface — position get/move per x, value get per y.
+Algorithms, safety limits, cost/timing, the canvas and the MCP agent all keep
+working unchanged; they only ever see the VOCS + an Evaluator.
+
+Your module exposes either:
+  * module-level ``AXES`` and ``METERS`` lists, or
+  * a ``build()`` function returning ``(axes, meters)``.
+
+An axis object needs: ``name``, ``low``, ``high``, ``move(value)``, ``get()``
+(optional: ``resolution``). A meter object needs: ``name``, ``get()`` (optional:
+``mode`` in {maximize,minimize,target}, ``target``, ``cost`` seconds, ``group``
+for parallel/serial timing, ``device``, ``param``). Duck typing — subclass the
+``Axis``/``Meter`` helpers here or bring your own. See
+``examples/device_template.py`` for a copy-paste starting point.
+
+Load with ``load_device("path/to/your_device.py")`` (CLI: ``run_device.py``), or
+point the server at it: ``OPTPLAT_DEVICE=path python -m optplat.api`` — then the
+canvas / REST / MCP all reflect your real x / y automatically.
+"""
+from __future__ import annotations
+
+import importlib.util
+import os
+from typing import Optional
+
+from .evaluator import read_seconds
+from .hardware import SafetyLimits
+from .vocs import VOCS, Objective, ObjectiveMode, Variable
+
+
+# ---- optional helper base classes (bring your own if you prefer) ----
+class Axis:
+    """A movable input. Override move()/get() to talk to a real motor stage."""
+
+    def __init__(self, name: str, low: float, high: float,
+                 pos: Optional[float] = None, resolution: Optional[float] = None):
+        self.name = name
+        self.low = low
+        self.high = high
+        self.resolution = resolution
+        self._pos = pos if pos is not None else 0.5 * (low + high)
+
+    def move(self, value: float) -> None:
+        self._pos = value
+
+    def get(self) -> float:
+        return self._pos
+
+
+class Meter:
+    """A measured output. `read_fn` returns one reading (override get() for real HW)."""
+
+    def __init__(self, name: str, read_fn=None, mode: str = "maximize",
+                 target: Optional[float] = None, cost: float = 0.0,
+                 group: Optional[str] = None, device: Optional[str] = None,
+                 param: Optional[str] = None):
+        self.name = name
+        self._read_fn = read_fn
+        self.mode = mode
+        self.target = target
+        self.cost = cost
+        self.group = group
+        self.device = device
+        self.param = param
+
+    def get(self) -> float:
+        if self._read_fn is None:
+            raise NotImplementedError(f"meter {self.name}: provide read_fn or override get()")
+        return float(self._read_fn())
+
+
+# ---- evaluator backed by the user's axes + meters ----
+class DeviceEvaluator:
+    """Drives the user device: move axes, then read ONLY the requested meters.
+
+    Same duck-typed API as Evaluator/HardwareEvaluator (evaluate(x, stage,
+    channels) -> dict), so every algorithm / orchestrator / graph runs on it
+    unchanged. Honours selective reads (a stage needing y1 alone never calls
+    y2.get()), averaging, safety clamping, and the parallel/serial cost model.
+    """
+
+    def __init__(self, axes, meters, averages: int = 1,
+                 safety: Optional[SafetyLimits] = None, settle_time: float = 0.0,
+                 costs: Optional[dict] = None, groups: Optional[dict] = None):
+        self._axes = {a.name: a for a in axes}
+        self._meters = {m.name: m for m in meters}
+        self._order = [m.name for m in meters]
+        self.averages = max(1, averages)
+        self.safety = safety
+        self.settle_time = settle_time
+        self.costs = costs or {}
+        self.groups = groups or {}
+        self.history: list[dict] = []
+        self.reads: dict[str, int] = {}
+        self.sim_seconds: float = 0.0
+
+    def evaluate(self, x: dict, stage: str = "", channels=None) -> dict:
+        import time
+        target = self.safety.enforce(x) if self.safety else x
+        for name, val in target.items():
+            if name in self._axes:
+                self._axes[name].move(val)
+        if self.settle_time:
+            time.sleep(self.settle_time)
+        keys = self._order if channels is None else [k for k in channels if k in self._meters]
+        acc = {k: 0.0 for k in keys}
+        for _ in range(self.averages):
+            for k in keys:
+                acc[k] += float(self._meters[k].get())        # only read what's needed
+        y = {k: acc[k] / self.averages for k in keys}
+        for k in y:
+            self.reads[k] = self.reads.get(k, 0) + 1
+        self.sim_seconds += self.averages * read_seconds(y.keys(), self.costs, self.groups)
+        self.history.append({"stage": stage, **target, **y})
+        return y
+
+
+class DeviceSpec:
+    """Parsed user device: builds the VOCS and an evaluator, reports current pose."""
+
+    def __init__(self, axes, meters, source: str = ""):
+        if not axes or not meters:
+            raise ValueError("device must define at least one axis (x) and one meter (y)")
+        self.axes = list(axes)
+        self.meters = list(meters)
+        self.source = source
+
+    def vocs(self) -> VOCS:
+        variables = {a.name: Variable(low=float(a.low), high=float(a.high),
+                                      resolution=getattr(a, "resolution", None))
+                     for a in self.axes}
+        objectives = {}
+        for m in self.meters:
+            objectives[m.name] = Objective(
+                mode=ObjectiveMode(getattr(m, "mode", "maximize") or "maximize"),
+                target=getattr(m, "target", None),
+                cost=float(getattr(m, "cost", 0.0) or 0.0),
+                group=getattr(m, "group", None),
+                device=getattr(m, "device", None),
+                param=getattr(m, "param", None))
+        return VOCS(variables=variables, objectives=objectives)
+
+    def current_point(self) -> dict:
+        """Where the axes are right now — the natural optimisation start point
+        (real hardware has no absolute origin: you start from where you are)."""
+        return {a.name: float(a.get()) for a in self.axes}
+
+    def costs(self) -> dict:
+        return {m.name: float(getattr(m, "cost", 0.0) or 0.0) for m in self.meters}
+
+    def groups(self) -> dict:
+        return {m.name: g for m in self.meters if (g := getattr(m, "group", None))}
+
+    def evaluator(self, averages: int = 1, safety: Optional[SafetyLimits] = None,
+                  settle_time: float = 0.0) -> DeviceEvaluator:
+        return DeviceEvaluator(self.axes, self.meters, averages=averages, safety=safety,
+                               settle_time=settle_time, costs=self.costs(), groups=self.groups())
+
+    def info(self) -> dict:
+        return {"source": self.source,
+                "n_axes": len(self.axes), "n_meters": len(self.meters),
+                "axes": [{"name": a.name, "low": float(a.low), "high": float(a.high),
+                          "pos": float(a.get())} for a in self.axes],
+                "meters": [{"name": m.name, "mode": getattr(m, "mode", "maximize"),
+                            "target": getattr(m, "target", None),
+                            "cost": float(getattr(m, "cost", 0.0) or 0.0),
+                            "group": getattr(m, "group", None)} for m in self.meters]}
+
+
+# ---- loading ----
+def _axes_meters(mod):
+    if hasattr(mod, "build"):
+        axes, meters = mod.build()
+    else:
+        axes = getattr(mod, "AXES", None)
+        meters = getattr(mod, "METERS", None)
+    if not axes or not meters:
+        raise ValueError("device module must define AXES and METERS lists "
+                         "(or a build() returning them)")
+    return list(axes), list(meters)
+
+
+def load_device(path: str) -> DeviceSpec:
+    """Import a user device module from a file path and parse it into a DeviceSpec."""
+    path = os.path.abspath(os.path.expanduser(path))
+    spec = importlib.util.spec_from_file_location("optplat_userdevice", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load device module from {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)                       # runs the user's file
+    axes, meters = _axes_meters(mod)
+    return DeviceSpec(axes, meters, source=path)

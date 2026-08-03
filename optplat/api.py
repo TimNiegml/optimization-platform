@@ -35,8 +35,18 @@ from .hardware import HardwareEvaluator, SafetyLimits, SimulatedMeter, Simulated
 from .mcp_server import mcp
 from .orchestrator import Orchestrator
 from .registry import REGISTRY, algorithm_catalog
+from .userdev import load_device
 from .vocs import VOCS
 from .workspace import WORKSPACE
+
+# Optional EXTERNAL device: point the server at a user module that declares its
+# own axes (x) + meters (y) and the platform drives THOSE instead of the demo
+# bench — the canvas / REST / MCP then reflect the real x/y automatically.
+#   OPTPLAT_DEVICE=path/to/device.py python -m optplat.api
+DEVICE = None
+_dev_path = os.environ.get("OPTPLAT_DEVICE")
+if _dev_path:
+    DEVICE = load_device(_dev_path)
 
 # The MCP server is mounted at /mcp (streamable-HTTP) so ONE process serves the
 # canvas, the REST API AND the agent-facing MCP endpoint, all sharing the same
@@ -85,6 +95,9 @@ class EvaluatorConfig(BaseModel):
     safety_limits: Optional[dict[str, list[float]]] = None
     # optional per-channel read-cost override (seconds): {"y1": 1.0, "y2": 2.0}
     channel_costs: Optional[dict[str, float]] = None
+    # optional per-channel measurement group: {"y1": "g1", "y2": "g1", "y3": "g2"}.
+    # Same group = measured in parallel (time = max); different groups = serial (sum).
+    channel_groups: Optional[dict[str, str]] = None
 
 
 class RunRequest(BaseModel):
@@ -103,7 +116,12 @@ class RunPipelineRequest(RunRequest):
 
 
 def _build_vocs(v: Optional[dict], cfg: Optional[EvaluatorConfig] = None) -> VOCS:
-    vocs = VOCS(**v) if v else demo_vocs()
+    if v:
+        vocs = VOCS(**v)
+    elif DEVICE is not None:
+        vocs = DEVICE.vocs()
+    else:
+        vocs = demo_vocs()
     if cfg and cfg.channel_costs:                 # per-channel read-cost override
         for name, cost in cfg.channel_costs.items():
             if name in vocs.objectives:
@@ -123,14 +141,18 @@ def _safety_limits(vocs: VOCS, cfg: EvaluatorConfig) -> Optional[SafetyLimits]:
 
 
 def _build_evaluator(vocs: VOCS, cfg: EvaluatorConfig):
+    if DEVICE is not None:                        # user's real/simulated instruments
+        return DEVICE.evaluator(averages=cfg.averages, safety=_safety_limits(vocs, cfg))
     func = bench_func(cfg.bench)
     costs = {n: o.cost for n, o in vocs.objectives.items()}
+    groups = {n: g for n, g in (cfg.channel_groups or {}).items() if g not in (None, "")}
     if cfg.mode == "hardware_sim":
         stage = SimulatedStage(vocs.initial_point())
         meter = SimulatedMeter(stage, func, noise=cfg.noise, seed=0)
         return HardwareEvaluator(stage, meter, averages=cfg.averages,
-                                 safety=_safety_limits(vocs, cfg), costs=costs)
-    return Evaluator(func, costs=costs)
+                                 safety=_safety_limits(vocs, cfg), costs=costs,
+                                 groups=groups)
+    return Evaluator(func, costs=costs, groups=groups)
 
 
 def _result(res: dict) -> dict[str, Any]:
@@ -159,7 +181,15 @@ def catalog():
 
 @app.get("/benches")
 def benches():
-    """Selectable simulated evaluation scenarios for the canvas 场景 dropdown."""
+    """Selectable simulated evaluation scenarios for the canvas 场景 dropdown.
+    When an external device is loaded, there is no swappable bench — report the
+    single device scenario so the UI shows what it is driving."""
+    if DEVICE is not None:
+        info = DEVICE.info()
+        return {"benches": [{"name": "device",
+                             "label": f"外部设备（{info['n_axes']}×x / {info['n_meters']}×y）",
+                             "desc": f"来自 {info['source']}；起点=轴当前位置。",
+                             "smooth": False}], "device": True}
     return {"benches": [{"name": n, "label": b["label"], "desc": b["desc"],
                          "smooth": b.get("smooth", False)}
                         for n, b in BENCHES.items()]}
@@ -182,6 +212,9 @@ def surface(req: SurfaceRequest):
     """Sample a bench's response surface on a 2-D grid over (xvar, yvar), holding
     the other variables fixed — so the canvas can draw a true response-surface
     contour for the continuous (纯函数) benches."""
+    if DEVICE is not None:                         # a real device has no analytic surface
+        raise HTTPException(status_code=400,
+                            detail="external device has no analytic response surface")
     try:
         v = demo_vocs()
         func = bench_func(req.bench)
@@ -206,13 +239,21 @@ def surface(req: SurfaceRequest):
 
 @app.get("/vocs")
 def vocs():
-    v = demo_vocs()
+    v = DEVICE.vocs() if DEVICE is not None else demo_vocs()
     return {
         "variables": {n: {"low": var.low, "high": var.high} for n, var in v.variables.items()},
         "objectives": {n: {"mode": o.mode.value, "cost": o.cost,
-                           "device": o.device, "param": o.param}
+                           "device": o.device, "param": o.param, "group": o.group}
                        for n, o in v.objectives.items()},
     }
+
+
+def _start_point(req_start: Optional[dict]) -> Optional[dict]:
+    # explicit request start wins; else for a real device use its CURRENT axis
+    # positions (no absolute origin — start from where the hardware already is).
+    if req_start:
+        return req_start
+    return DEVICE.current_point() if DEVICE is not None else None
 
 
 @app.post("/run/graph")
@@ -221,7 +262,7 @@ def run_graph(req: RunGraphRequest):
         vocs = _build_vocs(req.vocs, req.evaluator)
         ev = _build_evaluator(vocs, req.evaluator)
         res = GraphRunner(vocs, ev, req.graph, eval_budget=req.eval_budget,
-                          start_point=req.start_point).run()
+                          start_point=_start_point(req.start_point)).run()
         return _result(res)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
@@ -233,10 +274,18 @@ def run_pipeline(req: RunPipelineRequest):
         vocs = _build_vocs(req.vocs, req.evaluator)
         ev = _build_evaluator(vocs, req.evaluator)
         res = Orchestrator(vocs, ev, req.pipeline, eval_budget=req.eval_budget,
-                           start_point=req.start_point).run()
+                           start_point=_start_point(req.start_point)).run()
         return _result(res)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
+@app.get("/device")
+def device_info():
+    """External-device info (n axes / n meters / current pose) when the server was
+    started with OPTPLAT_DEVICE, else {device: None}. The canvas uses /vocs to
+    auto-build the right number of x/y; this endpoint is for a status badge."""
+    return {"device": DEVICE.info() if DEVICE is not None else None}
 
 
 @app.get("/autotune/space")
@@ -253,6 +302,59 @@ def autotune_space():
     return {"phases": out}
 
 
+class AuditRequest(BaseModel):
+    graph: dict
+    label: str = "candidate"
+
+
+@app.get("/benchsuites")
+def benchsuites():
+    """DEV / FROZEN problem suites + their content fingerprints."""
+    from .benchsuite import get_suite
+    return {"suites": [get_suite("dev").summary(), get_suite("frozen").summary()]}
+
+
+@app.post("/audit")
+def audit(req: AuditRequest):
+    """Deterministic audit: score a workflow on DEV + FROZEN, report the
+    generalization gap and acceptance flags (evidence for a judging agent)."""
+    from .audit import audit_solution
+    try:
+        return audit_solution(req.graph, label=req.label)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
+class DiagnoseRequest(BaseModel):
+    graph: dict
+    bench: str = "single_peak"
+    noise: float = 0.0
+    averages: int = 1
+    n_runs: int = 3
+    objective: str = "y1"
+    start_point: Optional[dict[str, float]] = None
+    eval_budget: int = 2000
+
+
+@app.post("/diagnose")
+def diagnose(req: DiagnoseRequest):
+    """Run a workflow n times and return the trace digest: stage attribution,
+    reproducible failure modes, measured peak widths, suggested search ranges."""
+    from .runner import run_workflow as _rw
+    from .trace_digest import digest, digest_many
+    try:
+        n = max(1, min(int(req.n_runs), 8))
+        results = [_rw(req.graph, bench=req.bench, noise=req.noise,
+                       averages=req.averages, eval_budget=req.eval_budget,
+                       start_point=req.start_point, seed=i, keep_history=True)
+                   for i in range(n)]
+        v = _build_vocs(None, None)
+        return digest_many(results, v, req.objective) if n > 1 \
+            else digest(results[0], v, req.objective)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
 @app.post("/autotune")
 def autotune(spec: TuneSpec):
     """AutoTuner (L1): search workflow candidates, rank by quality/time/stability."""
@@ -267,6 +369,7 @@ class WorkspacePatch(BaseModel):
     graph: Optional[dict] = None
     bench: Optional[str] = None
     note: Optional[str] = None
+    user_message: Optional[str] = None      # canvas chat → agent (appended to log)
 
 
 @app.get("/workspace/{sid}")
@@ -279,7 +382,8 @@ def workspace_get(sid: str):
 @app.post("/workspace/{sid}")
 def workspace_patch(sid: str, patch: WorkspacePatch):
     """Canvas → workspace: the user's own edits, so an agent can get_canvas them back."""
-    return WORKSPACE.update(sid, graph=patch.graph, bench=patch.bench, note=patch.note)
+    return WORKSPACE.update(sid, graph=patch.graph, bench=patch.bench, note=patch.note,
+                            user_message=patch.user_message)
 
 
 @app.get("/workspace/{sid}/stream")
@@ -315,7 +419,11 @@ def index():
 
 def main():
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # 0.0.0.0 so the canvas/API/MCP are reachable from other hosts on the LAN;
+    # override with OPTPLAT_HOST / OPTPLAT_PORT if needed.
+    host = os.environ.get("OPTPLAT_HOST", "0.0.0.0")
+    port = int(os.environ.get("OPTPLAT_PORT", "8003"))
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":

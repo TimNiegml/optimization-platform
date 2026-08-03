@@ -99,6 +99,7 @@ class StageEngine:
         skip the rest (and their cost)."""
         need = {step["objective"]}
         need |= set(step.get("objective_weights") or {})       # composite objective refs
+        need |= set(step.get("targets") or {})                 # multi-out solver targets
         need |= self._objs_in(step.get("keep"))
         need |= self._objs_in(step.get("stop", {}).get("target"))
         need |= self._objs_in(self.global_until)
@@ -154,6 +155,8 @@ class StageEngine:
         gen = self.make_generator(step)
         gen.set_base(self.state)
         channels = self._needed_channels(step)
+        if hasattr(gen, "channels"):                   # solver declares extra reads
+            channels |= (set(gen.channels()) & set(self.vocs.objectives))
         goal = (f"加权组合{step['objective_weights']}" if step.get("objective_weights") else obj_name)
         self.events.append(
             f"▶ stage '{name}': {step['algorithm']} on {step['variables']} → {goal}"
@@ -164,6 +167,8 @@ class StageEngine:
                 sub_x = gen.ask()
                 x = {**self.state, **sub_x}
                 y = self.evaluate(x, name, channels)
+                if hasattr(gen, "observe"):            # full y vector for multi-out solvers
+                    gen.observe(sub_x, y)
                 score = scorer(y)
                 feasible = self._cond_local(keep, x, y) if keep else True
                 eff_score = score if feasible else score - 1e9    # penalty method

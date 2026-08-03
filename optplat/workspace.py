@@ -26,7 +26,7 @@ class WorkspaceStore:
     def _blank(self, sid: str) -> dict[str, Any]:
         return {"session": sid, "graph": None, "bench": "single_peak",
                 "result": None, "autotune": None, "note": "",
-                "revision": 0, "updated_at": None}
+                "messages": [], "revision": 0, "updated_at": None}
 
     def snapshot(self, sid: str) -> dict[str, Any]:
         with self._lock:
@@ -37,15 +37,44 @@ class WorkspaceStore:
             return (self._data.get(sid) or {}).get("revision", 0)
 
     def update(self, sid: str, **fields: Any) -> dict[str, Any]:
-        """Merge `fields` into the session workspace, bump revision, stamp time."""
+        """Merge `fields` into the session workspace, bump revision, stamp time.
+
+        A `user_message` field is special: it is APPENDED to the `messages` chat
+        log (role=user) rather than overwriting a field, so a user's canvas chat
+        reaches the agent via get_canvas / the SSE snapshot. An agent's `note`
+        similarly gets mirrored into the log (role=agent)."""
         with self._lock:
             cur = self._data.get(sid) or self._blank(sid)
+            msg = fields.pop("user_message", None)
+            cur.setdefault("messages", [])
+            if msg:
+                cur["messages"].append({"role": "user", "text": str(msg),
+                                        "ts": time.strftime("%H:%M:%S"), "read": False})
+            if fields.get("note"):
+                cur["messages"].append({"role": "agent", "text": str(fields["note"]),
+                                        "ts": time.strftime("%H:%M:%S")})
+            cur["messages"] = cur["messages"][-100:]      # cap the log
             cur.update({k: v for k, v in fields.items() if v is not None})
             cur["revision"] = cur.get("revision", 0) + 1
             cur["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             cur["session"] = sid
             self._data[sid] = cur
             return dict(cur)
+
+    def poll_user_messages(self, sid: str, mark_read: bool = True) -> list[dict]:
+        """The agent's inbox: user chat messages it has not consumed yet. Since MCP
+        is client-initiated (the platform can't wake the agent), the agent drains
+        this by polling; `mark_read` flips them read so each is delivered once."""
+        with self._lock:
+            cur = self._data.get(sid)
+            if not cur:
+                return []
+            unread = [m for m in cur.get("messages", [])
+                      if m.get("role") == "user" and not m.get("read")]
+            if mark_read:
+                for m in unread:
+                    m["read"] = True
+            return [dict(m) for m in unread]
 
     def sessions(self) -> list[str]:
         with self._lock:
