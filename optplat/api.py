@@ -7,6 +7,8 @@ Endpoints:
   GET  /catalog             algorithm palette + param schemas (for the canvas)
   GET  /backends            evaluator backends (bench sim / hardware / zemax / …)
   GET  /vocs                default demo VOCS (variables / objectives)
+  POST /zemax/inspect       read a .zmx -> surfaces / pickable variables / MFE rows
+  POST /zemax/binding       the user's picks -> binding + VOCS JSON
   POST /run/graph           run a {nodes, edges} graph JSON  -> result
   POST /run/pipeline        run a block pipeline JSON         -> result
   GET  /                    the drag-drop canvas (static web/index.html)
@@ -34,6 +36,19 @@ from .vocs import VOCS
 app = FastAPI(title="Optimization Platform API", version="0.1")
 
 _WEB = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
+
+
+class InspectRequest(BaseModel):
+    """Open a design in OpticStudio and report what could become a variable."""
+    connection: dict                       # ZemaxConnection fields
+    surfaces: Optional[list[int]] = None   # limit to these surface numbers
+    include_thickness: bool = True
+    include_order: bool = False
+
+
+class BindingRequest(InspectRequest):
+    selections: list[dict]                 # what the user picked in the UI
+    merit: Optional[dict] = None
 
 
 class RunRequest(BaseModel):
@@ -95,6 +110,59 @@ def vocs():
         "variables": {n: {"low": var.low, "high": var.high} for n, var in v.variables.items()},
         "objectives": {n: {"mode": o.mode.value} for n, o in v.objectives.items()},
     }
+
+
+def _with_zemax_session(connection: dict, fn):
+    """Open a short-lived OpticStudio session for one inspection request."""
+    from .zemax import ZemaxBinding, ZemaxConnection, ZemaxEvaluator
+    conn = ZemaxConnection(**connection)
+    ev = ZemaxEvaluator(ZemaxBinding(), conn)
+    try:
+        ev.bind()
+        return fn(ev.client)
+    finally:
+        ev.close()
+
+
+@app.post("/zemax/inspect")
+def zemax_inspect(req: InspectRequest):
+    """Read the open/opened .zmx: surfaces, pickable variables, MFE rows.
+
+    This is what lets a user *pick* `S3 · align in · Tilt About X` instead of
+    knowing that it is surface 3, PARM 3. Followers already authored in the
+    design (pickup solves) come back attached to the choice they follow.
+    """
+    from .zemax_inspect import inspect_system, knob_choices, operand_choices
+    try:
+        def work(client):
+            snap = inspect_system(client, surfaces=req.surfaces)
+            choices = knob_choices(snap, include_thickness=req.include_thickness,
+                                   include_order=req.include_order)
+            return {
+                "system": snap.model_dump(exclude={"operands"}),
+                "choices": [{**c.model_dump(), "id": c.id()} for c in choices],
+                "operands": operand_choices(snap),
+            }
+        return _with_zemax_session(req.connection, work)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
+@app.post("/zemax/binding")
+def zemax_binding(req: BindingRequest):
+    """Turn the user's picks into the binding JSON the `zemax` backend consumes."""
+    from .zemax import MeritSpec
+    from .zemax_inspect import build_binding, inspect_system
+    try:
+        def work(client):
+            snap = inspect_system(client, surfaces=req.surfaces)
+            binding = build_binding(snap, req.selections,
+                                    MeritSpec(**req.merit) if req.merit else None)
+            return {"binding": binding.model_dump(),
+                    "vocs": binding.build_vocs().model_dump()}
+        return _with_zemax_session(req.connection, work)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
 
 
 @app.post("/run/graph")

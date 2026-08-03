@@ -7,8 +7,14 @@ names and argument shapes as the real server
 (https://github.com/zym1998year/OpticStudioMCPServer):
 
     zemax_connect  zemax_status  zemax_open_file
+    zemax_get_system  zemax_get_surface  zemax_get_surface_solves
     zemax_set_surface  zemax_set_surface_parameter  zemax_set_surface_solve
     zemax_get_merit_function
+
+    python -m optplat.zemax_sim --pickups   # design ships with tilt-and-return
+                                            # Pickup solves already authored,
+                                            # so follower auto-detection has
+                                            # something to discover
 
 Behind them is a toy "design": a Coordinate Break whose decenter/tilt drive an
 RMS spot size, plus a second Coordinate Break that is supposed to mirror it
@@ -34,15 +40,44 @@ MASTER_CB = 3          # the driven Coordinate Break
 RETURN_CB = 5          # the one that must follow it (scale -1)
 
 
+# A small but realistic lens table: aperture stop, a lens, a Coordinate Break
+# pair (align in / align return) around the sensor mount, then the image plane.
+LENS_TABLE = [
+    {"number": 0, "surfaceType": "Standard", "comment": "OBJECT",
+     "radius": 0.0, "thickness": 0.0, "material": None, "semiDiameter": 0.0},
+    {"number": 1, "surfaceType": "Standard", "comment": "aperture stop",
+     "radius": 0.0, "thickness": 10.0, "material": None, "semiDiameter": 5.0,
+     "isStop": True},
+    {"number": 2, "surfaceType": "Standard", "comment": "lens front",
+     "radius": 25.0, "thickness": 3.0, "material": "N-BK7", "semiDiameter": 6.0},
+    {"number": 3, "surfaceType": "CoordinateBreak", "comment": "align in",
+     "radius": 0.0, "thickness": 0.0, "material": None, "semiDiameter": 0.0},
+    {"number": 4, "surfaceType": "Standard", "comment": "sensor mount",
+     "radius": 0.0, "thickness": 5.0, "material": None, "semiDiameter": 6.0},
+    {"number": 5, "surfaceType": "CoordinateBreak", "comment": "align return",
+     "radius": 0.0, "thickness": 0.0, "material": None, "semiDiameter": 0.0},
+    {"number": 6, "surfaceType": "Standard", "comment": "IMAGE",
+     "radius": 0.0, "thickness": 0.0, "material": None, "semiDiameter": 6.0},
+]
+
+
 class FakeSystem:
-    def __init__(self) -> None:
+    def __init__(self, with_pickups: bool = False) -> None:
         self.connected = False
         self.mode = "standalone"
         self.file: str | None = None
         self.params: dict[int, dict[int, float]] = {}
-        self.surfaces: dict[int, dict[str, float]] = {}
+        self.surfaces: dict[int, dict[str, float]] = {
+            row["number"]: {k: v for k, v in row.items()
+                            if k in ("radius", "thickness", "semi_diameter")}
+            for row in LENS_TABLE
+        }
         # (surface, param) -> (src_surface, src_param, scale, offset)
         self.pickups: dict[tuple[int, int], tuple[int, int, float, float]] = {}
+        self.updates = 0                    # how often the system was recomputed
+        if with_pickups:                    # tilt/decenter-and-return, as authored
+            for n in (1, 2, 3, 4, 5):
+                self.pickups[(RETURN_CB, n)] = (MASTER_CB, n, -1.0, 0.0)
 
     # ---- lens data ----
     def param(self, surface: int, number: int) -> float:
@@ -66,6 +101,7 @@ class FakeSystem:
         return math.sqrt(err + 2.0 * mism) + 0.010
 
     def merit_function(self) -> dict[str, Any]:
+        self.updates += 1                   # CalculateMeritFunction() updates the system
         spot = self.rms_spot()
         thickness = self.surfaces.get(MASTER_CB, {}).get("thickness", 0.0)
         operands = [
@@ -84,6 +120,53 @@ SYS = FakeSystem()
 
 
 # ---- tools ------------------------------------------------------------------
+def _surface_row(number: int) -> dict:
+    row = next((dict(r) for r in LENS_TABLE if r["number"] == number), None)
+    if row is None:
+        raise KeyError(f"no surface {number}")
+    live = SYS.surfaces.get(number, {})
+    for key, arg in (("thickness", "thickness"), ("radius", "radius"),
+                     ("semi_diameter", "semiDiameter"), ("conic", "conic")):
+        if key in live:
+            row[arg] = live[key]
+    row.setdefault("conic", 0.0)
+    row.setdefault("isStop", False)
+    return row
+
+
+def t_get_system(a: dict) -> dict:
+    SYS.updates += 1                    # reading through ZOS-API refreshes the system
+    out: dict[str, Any] = {
+        "success": True, "filePath": SYS.file, "title": "fake design",
+        "numberOfSurfaces": len(LENS_TABLE), "units": "mm",
+        "aperture": {"type": "EntrancePupilDiameter", "value": 10.0},
+        "numberOfConfigurations": 1, "currentConfiguration": 1,
+    }
+    if a.get("includeSurfaces", True):
+        out["surfaces"] = [_surface_row(r["number"]) for r in LENS_TABLE]
+    if a.get("includeFields", True):
+        out["fields"] = [{"number": 1, "x": 0.0, "y": 0.0, "weight": 1.0}]
+    if a.get("includeWavelengths", True):
+        out["wavelengths"] = [{"number": 1, "value": 0.55, "weight": 1.0, "isPrimary": True}]
+    return out
+
+
+def t_get_surface(a: dict) -> dict:
+    return {"success": True, **_surface_row(int(a["surfaceNumber"]))}
+
+
+def t_get_surface_solves(a: dict) -> dict:
+    surface = int(a["surfaceNumber"])
+    params = {}
+    for (surf, num), (src_s, src_p, scale, offset) in SYS.pickups.items():
+        if surf == surface:
+            params[str(num)] = {"solveType": "SurfacePickup", "pickupSurface": src_s,
+                                "pickupColumn": src_p, "scaleFactor": scale,
+                                "offset": offset}
+    return {"success": True, "surfaceNumber": surface, "parameters": params}
+
+
+
 def t_connect(a: dict) -> dict:
     SYS.connected = True
     SYS.mode = a.get("mode", "standalone")
@@ -91,7 +174,10 @@ def t_connect(a: dict) -> dict:
 
 
 def t_status(a: dict) -> dict:
-    return {"success": True, "isConnected": SYS.connected, "file": SYS.file}
+    # `updates` is not a real OpticStudio field; the tests use it to prove the
+    # system was actually recomputed after the lens data was written.
+    return {"success": True, "isConnected": SYS.connected, "file": SYS.file,
+            "updates": SYS.updates}
 
 
 def t_open_file(a: dict) -> dict:
@@ -149,6 +235,9 @@ TOOLS = {
     "zemax_connect": t_connect,
     "zemax_status": t_status,
     "zemax_open_file": t_open_file,
+    "zemax_get_system": t_get_system,
+    "zemax_get_surface": t_get_surface,
+    "zemax_get_surface_solves": t_get_surface_solves,
     "zemax_set_surface": t_set_surface,
     "zemax_set_surface_parameter": t_set_surface_parameter,
     "zemax_set_surface_solve": t_set_surface_solve,
@@ -179,6 +268,8 @@ def _handle(msg: dict) -> dict | None:
 
 
 def main() -> None:
+    if "--pickups" in sys.argv:
+        SYS.__init__(with_pickups=True)      # design authored with tilt-and-return
     for line in sys.stdin:
         line = line.strip()
         if not line:

@@ -17,22 +17,41 @@ from optplat.vocs import VOCS, Objective, ObjectiveMode, Variable
 from optplat.zemax import (
     CompositeEvaluator,
     Follower,
+    FollowerDesync,
     MeritSpec,
     OperandRef,
+    RefreshSpec,
     ZemaxBinding,
     ZemaxConnection,
     ZemaxEvaluator,
     ZemaxKnob,
     param_number,
 )
+from optplat.zemax_inspect import (
+    build_binding,
+    detect_followers,
+    inspect_system,
+    knob_choices,
+    operand_choices,
+)
 
 FAKE_SERVER = [sys.executable, "-m", "optplat.zemax_sim"]
+# same fake design, but with the tilt-and-return pickup solves already authored
+FAKE_SERVER_WITH_PICKUPS = FAKE_SERVER + ["--pickups"]
 MASTER, RETURN = 3, 5          # surfaces in the fake design
 
 
 @pytest.fixture
 def client():
     c = McpStdioClient(FAKE_SERVER, timeout=30).start()
+    yield c
+    c.close()
+
+
+@pytest.fixture
+def authored_client():
+    """A design whose return Coordinate Break already picks up from the master."""
+    c = McpStdioClient(FAKE_SERVER_WITH_PICKUPS, timeout=30).start()
     yield c
     c.close()
 
@@ -199,6 +218,121 @@ def test_zemax_backend_requires_binding():
     with pytest.raises(ValueError, match="binding"):
         build_evaluator(VOCS(), EvaluatorConfig(mode="zemax",
                                                 connection={"command": FAKE_SERVER}))
+
+
+# ---- discovery: read the design, then pick surfaces/variables ---------------
+def test_inspect_reads_the_lens_data_editor(client):
+    snap = inspect_system(client)
+    assert snap.units == "mm" and snap.n_surfaces == 7
+    cb = [s for s in snap.surfaces if s.is_coordinate_break]
+    assert [s.number for s in cb] == [MASTER, RETURN]
+    assert snap.surface(MASTER).comment == "align in"
+    assert snap.surface(2).material == "N-BK7"
+    assert snap.surface(1).is_stop is True
+    assert [op["type"] for op in operand_choices(snap)] == ["DMFS", "RSCE", "TTHI"]
+
+
+def test_knob_choices_are_pickable_labelled_and_carry_current_values(client):
+    client.call_tool("zemax_set_surface_parameter",
+                     {"surfaceNumber": MASTER, "batchSet": "3:0.25"})
+    choices = {c.id(): c for c in knob_choices(inspect_system(client))}
+
+    tilt = choices[f"s{MASTER}.tilt_x"]
+    assert tilt.label == "S3 · align in · Tilt About X"
+    assert tilt.param_number == 3 and tilt.unit == "deg"
+    assert tilt.current == pytest.approx(0.25)              # reads the design's value
+    assert choices[f"s{MASTER}.decenter_x"].unit == "mm"    # follows the design units
+    assert f"s{MASTER}.order" not in choices                # discrete, off by default
+    assert f"s2.thickness" in choices                       # non-CB surfaces too
+
+    knob = tilt.to_knob(low=-1.0, high=1.0)
+    assert knob.surface == MASTER and knob.resolved_param() == 3
+
+
+def test_followers_are_discovered_from_the_designs_pickup_solves(authored_client):
+    """A tilt-and-return pair authored in OpticStudio needs no configuration."""
+    snap = inspect_system(authored_client)
+    followers = detect_followers(snap, MASTER, 3)
+    assert len(followers) == 1
+    f = followers[0]
+    assert f.surface == RETURN and f.param == "tilt_x"
+    assert f.scale == pytest.approx(-1.0) and f.mode == "pickup"
+
+    choice = next(c for c in knob_choices(snap) if c.id() == f"s{MASTER}.decenter_y")
+    assert [x.surface for x in choice.followers] == [RETURN]
+
+
+def test_build_binding_from_picks_and_run_it(authored_client):
+    snap = inspect_system(authored_client)
+    binding = build_binding(snap, [
+        {"name": "dec_x", "surface": MASTER, "param": "decenter_x", "low": -1, "high": 1},
+        {"name": "tilt_x", "surface": MASTER, "param": "tilt_x", "low": -1, "high": 1},
+    ], merit=MeritSpec(total="merit", operands={"rms_spot": OperandRef(type="RSCE")}))
+
+    # followers came from the design, not from the caller
+    assert [f.surface for f in binding.knobs["tilt_x"].followers] == [RETURN]
+    vocs = binding.build_vocs()
+    assert set(vocs.variables) == {"dec_x", "tilt_x"}
+
+    ev = ZemaxEvaluator(binding, ZemaxConnection(command=FAKE_SERVER_WITH_PICKUPS),
+                        client=authored_client)
+    y = ev.evaluate({"dec_x": 0.12, "tilt_x": 0.30})
+    assert set(y) == {"merit", "rms_spot"}
+    # the design's own pickup moved the return surface; the platform verified it
+    assert ev.last_followers[f"s{RETURN}.p1"] == pytest.approx(-0.12)
+    assert ev.last_followers[f"s{RETURN}.p3"] == pytest.approx(-0.30)
+
+
+def test_explicit_selection_overrides_discovered_followers(authored_client):
+    snap = inspect_system(authored_client)
+    binding = build_binding(snap, [
+        {"name": "tilt_x", "surface": MASTER, "param": "tilt_x",
+         "low": -1, "high": 1, "followers": []},          # drive the master alone
+    ])
+    assert binding.knobs["tilt_x"].followers == []
+
+
+# ---- refresh: x changed -> followers / system / pupil are brought up to date --
+def test_system_and_pupil_are_refreshed_after_writing_x(client):
+    binding = cb_binding()
+    binding.refresh = RefreshSpec(system=True, pupil=True)
+    ev = make_eval(client, binding=binding)
+
+    before = client.call_tool("zemax_status", {})["updates"]
+    ev.evaluate({"dec_x": 0.1, "dec_y": 0.0, "tilt_x": 0.0, "tilt_y": 0.0})
+    after = client.call_tool("zemax_status", {})["updates"]
+
+    assert after > before                       # the system was recomputed
+    assert ev.last_pupil["value"] == pytest.approx(10.0)     # pupil state captured
+    assert ev.last_system["units"] == "mm"
+
+
+def test_refresh_can_be_turned_off(client):
+    binding = cb_binding()
+    binding.refresh = RefreshSpec(system=False, pupil=False, followers=False)
+    ev = make_eval(client, binding=binding)
+    ev.evaluate({"dec_x": 0.1, "dec_y": 0.0, "tilt_x": 0.0, "tilt_y": 0.0})
+    assert ev.last_followers == {} and ev.last_system == {}
+
+
+@pytest.mark.parametrize("mode", ["write", "pickup"])
+def test_follower_values_are_verified_and_recorded(client, mode):
+    ev = make_eval(client, binding=cb_binding(follow_mode=mode))
+    ev.evaluate({"dec_x": 0.4, "dec_y": -0.1, "tilt_x": 0.2, "tilt_y": 0.05})
+    assert ev.last_followers[f"s{RETURN}.p1"] == pytest.approx(-0.4)
+    assert ev.last_followers[f"s{RETURN}.p3"] == pytest.approx(-0.2)
+    # follower values land in the platform's own history, next to x and y
+    assert ev.history[-1][f"s{RETURN}.p1"] == pytest.approx(-0.4)
+
+
+def test_a_follower_that_stops_tracking_is_an_error_not_bad_data(client):
+    """Wrong pickup column / solve deleted in the .zmx -> fail loudly."""
+    binding = cb_binding(follow_mode="pickup")
+    # point the pickup at a cell that is not the master's, as a wrong column would
+    binding.knobs["tilt_x"].followers[0].pickup_column = 6
+    ev = make_eval(client, binding=binding)
+    with pytest.raises(FollowerDesync, match="did not follow"):
+        ev.evaluate({"dec_x": 0.0, "dec_y": 0.0, "tilt_x": 0.5, "tilt_y": 0.0})
 
 
 def test_composite_runs_model_and_device_together(client):

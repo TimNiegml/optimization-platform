@@ -14,8 +14,9 @@ streamlit run app.py          # 表单式交互控制台（选工作流/算法/�
 python run_demo.py            # 两阶段：找光 → Nelder-Mead 精调 → 公式法均衡
 python run_graph.py           # 节点+连线图 JSON（Dify 风格）直接执行 + mermaid 预览
 python demo_hardware.py       # 硬件接入 + 噪声/平均/安全 + 断点续跑 + 一键回滚
-python run_zemax.py           # Zemax OpticStudio：Coordinate Break ↔ Merit Function（见 ZEMAX.md）
-python -m pytest -q           # 回归测试（算法 + 块/图/API + 硬件/归档 + Zemax，38 项）
+python run_zemax.py           # Zemax OpticStudio：读设计 → 选面/参数 → 优化（见 ZEMAX.md）
+python -m optplat.zemax_inspect  # 列出某个 .zmx 里可选的自变量与评价函数行
+python -m pytest -q           # 回归测试（算法 + 块/图/API + 硬件/归档 + Zemax，53 项）
 ```
 
 ## 典型流程（两阶段，已支持）

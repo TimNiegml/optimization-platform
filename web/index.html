@@ -53,10 +53,28 @@
     <div id="palList"></div>
     <h2 style="margin-top:14px">评估</h2>
     <label>方式</label>
-    <select id="evMode"><option value="function">纯函数</option><option value="hardware_sim">模拟硬件</option></select>
+    <select id="evMode" onchange="onEvMode()">
+      <option value="function">纯函数</option>
+      <option value="hardware_sim">模拟硬件</option>
+      <option value="zemax">Zemax OpticStudio</option>
+    </select>
     <label>噪声 σ</label><input id="evNoise" type="number" value="0" step="0.005">
     <label>平均次数</label><input id="evAvg" type="number" value="1" min="1">
     <label><input type="checkbox" id="evSafety" style="width:auto"> 安全限位</label>
+
+    <div id="zemaxBox" style="display:none">
+      <h2 style="margin-top:14px">Zemax 系统</h2>
+      <label>MCP 服务器</label>
+      <input id="zxCmd" placeholder="OpticStudioMCPServer.exe 路径">
+      <label>.zmx 文件（留空＝用已打开的）</label><input id="zxFile" placeholder="C:\designs\lens.zmx">
+      <label>连接方式</label>
+      <select id="zxMode"><option value="extension">连已开的界面</option><option value="standalone">无界面新实例</option></select>
+      <button class="ghost" style="width:100%;margin-top:6px" onclick="zxInspect()">读取系统</button>
+      <p class="hint" id="zxInfo">读取后勾选要作为自变量的面/参数。伴随面（Pickup 跟随）会自动带上。</p>
+      <div id="zxChoices"></div>
+      <div id="zxMerit"></div>
+      <label style="margin-top:6px"><input type="checkbox" id="zxRefreshPupil" style="width:auto"> 同时刷新光瞳</label>
+    </div>
   </aside>
 
   <div id="canvasWrap">
@@ -197,6 +215,107 @@ window.toggleVar=(id,v,on)=>{const n=nodes.find(x=>x.id===id);const s=spec(n.alg
 window.setF=(id,f,v)=>{nodes.find(x=>x.id===id)[f]=v; render();};
 window.setParam=(id,k,v)=>{const n=nodes.find(x=>x.id===id); const num=Number(v); n.params[k]=(v!==''&&!isNaN(num))?num:v;};
 
+/* ---- Zemax：读系统 → 勾选面/参数 → 生成自变量绑定 ---- */
+let zxSnap = null, zxPicks = {}, zxObjective = null;
+
+function onEvMode(){
+  document.getElementById('zemaxBox').style.display =
+    document.getElementById('evMode').value === 'zemax' ? 'block' : 'none';
+}
+
+function zxConnection(){
+  const cmd = document.getElementById('zxCmd').value.trim();
+  const file = document.getElementById('zxFile').value.trim();
+  const conn = {command: cmd ? [cmd] : [], mode: document.getElementById('zxMode').value};
+  if(file) conn.file = file;
+  return conn;
+}
+
+async function zxInspect(){
+  const info = document.getElementById('zxInfo');
+  info.textContent = '读取中…';
+  try {
+    const r = await fetch(API+'/zemax/inspect', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({connection: zxConnection()})});
+    const d = await r.json();
+    if(!r.ok){ info.innerHTML = `<span style="color:#f66">${d.detail||'读取失败'}</span>`; return; }
+    zxSnap = d; zxPicks = {};
+    info.textContent = `${d.system.n_surfaces} 个面 · ${d.system.units} · ${d.operands.length} 行评价函数`;
+    renderZxChoices();
+  } catch(e){ info.innerHTML = `<span style="color:#f66">${e}</span>`; }
+}
+
+function renderZxChoices(){
+  const bySurface = {};
+  zxSnap.choices.forEach(c => (bySurface[c.surface] = bySurface[c.surface] || []).push(c));
+  let h = '';
+  Object.keys(bySurface).sort((a,b)=>a-b).forEach(s => {
+    const surf = zxSnap.system.surfaces.find(x => x.number == s) || {};
+    h += `<div style="margin-top:8px"><b>面 ${s}</b> <span class="hint">${surf.surface_type||''} ${surf.comment||''}</span></div>`;
+    bySurface[s].forEach(c => {
+      const f = c.followers.length ? ` <span class="hint">跟随 → 面 ${c.followers.map(x=>x.surface).join(',')}</span>` : '';
+      h += `<label style="display:block"><input type="checkbox" style="width:auto"
+             onchange="zxPick('${c.id}',this.checked)"> ${c.label.split('·').pop().trim()}
+             <span class="hint">(${c.unit||'-'}，当前 ${c.current})</span>${f}</label>
+            <span id="rng_${c.id}"></span>`;
+    });
+  });
+  h += `<h2 style="margin-top:14px">目标（评价函数）</h2>
+        <select id="zxObj" onchange="zxObjective=this.value">
+          <option value="total">总评价函数值</option>` +
+       zxSnap.operands.map(o=>`<option value="${o.row}">${o.label}</option>`).join('') +
+       `</select>`;
+  document.getElementById('zxChoices').innerHTML = h;
+}
+
+window.zxPick = (id, on) => {
+  const c = zxSnap.choices.find(x => x.id === id);
+  const box = document.getElementById('rng_'+id);
+  if(!on){ delete zxPicks[id]; box.innerHTML=''; return; }
+  const span = Math.max(Math.abs(c.current) * 2, 1);
+  zxPicks[id] = {low: c.current - span, high: c.current + span};
+  box.innerHTML = `<span class="hint">范围</span>
+    <input type="number" step="0.01" value="${zxPicks[id].low}" style="width:46%"
+           onchange="zxRange('${id}','low',this.value)">
+    <input type="number" step="0.01" value="${zxPicks[id].high}" style="width:46%"
+           onchange="zxRange('${id}','high',this.value)">`;
+  zxSyncVocs();
+};
+window.zxRange = (id, k, v) => { zxPicks[id][k] = +v; zxSyncVocs(); };
+
+/** 勾选的面/参数即刻成为画布上可选的自变量/目标（算法节点直接用） */
+function zxSyncVocs(){
+  const ev = zxEvaluator();
+  const variables = {}, objectives = {};
+  Object.entries(ev.binding.knobs).forEach(([n, k]) => variables[n] = {low:k.low, high:k.high});
+  if(ev.binding.merit.total) objectives[ev.binding.merit.total] = {mode:'minimize'};
+  Object.keys(ev.binding.merit.operands || {}).forEach(n => objectives[n] = {mode:'minimize'});
+  vocs = {variables, objectives};
+  render();
+  if(sel) { const n = nodes.find(x=>x.id===sel); if(n) inspectNode(n); }
+}
+
+/** 勾选结果 → evaluator 配置（binding 就是平台的 IR，跟画布 JSON 一起存） */
+function zxEvaluator(){
+  const knobs = {}, names = [];
+  Object.entries(zxPicks).forEach(([id, rng]) => {
+    const c = zxSnap.choices.find(x => x.id === id);
+    const name = (c.param || c.kind) + '_s' + c.surface;
+    names.push(name);
+    knobs[name] = {surface: c.surface, kind: c.kind, param: c.param,
+                   low: rng.low, high: rng.high, followers: c.followers};
+  });
+  const sel = document.getElementById('zxObj');
+  const row = sel ? sel.value : 'total';
+  const merit = row === 'total' ? {total:'merit', operands:{}}
+                                : {total:'merit', operands:{merit_row:{row:+row}}};
+  return {mode:'zemax', connection: zxConnection(),
+          binding: {knobs, merit, refresh: {system:true, followers:true,
+                    pupil: document.getElementById('zxRefreshPupil').checked}},
+          safety: document.getElementById('evSafety').checked};
+}
+
 function toGraph(){
   const gnodes = nodes.map(n => {
     const data = {algorithm:n.algorithm, variables:n.variables, objective:n.objective, ...n.params};
@@ -212,9 +331,16 @@ function toGraph(){
 
 async function run(){
   const btn=document.getElementById('runBtn'); btn.disabled=true; btn.textContent='运行中…';
-  const body = {graph:toGraph(), evaluator:{mode:document.getElementById('evMode').value,
-    noise:+document.getElementById('evNoise').value, averages:+document.getElementById('evAvg').value,
-    safety:document.getElementById('evSafety').checked}};
+  const mode = document.getElementById('evMode').value;
+  const body = {graph:toGraph()};
+  if(mode === 'zemax'){
+    body.evaluator = zxEvaluator();
+    body.vocs = vocs;                       // 变量/目标由勾选的面+评价函数生成
+  } else {
+    body.evaluator = {mode, noise:+document.getElementById('evNoise').value,
+      averages:+document.getElementById('evAvg').value,
+      safety:document.getElementById('evSafety').checked};
+  }
   try {
     const r = await fetch(API+'/run/graph',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d = await r.json();

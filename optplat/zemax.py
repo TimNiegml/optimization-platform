@@ -67,6 +67,13 @@ _SET_SURFACE_ARG = {
     "conic": "conic",
     "semi_diameter": "semiDiameter",
 }
+# how zemax_set_surface_solve names the same cells
+_SOLVE_PROPERTY = {
+    "thickness": "thickness",
+    "radius": "radius",
+    "conic": "conic",
+    "semi_diameter": "semiDiameter",
+}
 
 Kind = Literal["param", "thickness", "radius", "conic", "semi_diameter"]
 
@@ -146,6 +153,34 @@ class MeritSpec(BaseModel):
     include_values: bool = True                             # recalculate on read
 
 
+class FollowerDesync(RuntimeError):
+    """A follower cell did not track its master — the design is not what the IR says."""
+
+
+class RefreshSpec(BaseModel):
+    """What must be brought up to date after x is written, before y is read.
+
+    Writing a Coordinate Break parameter invalidates everything downstream of it:
+    the follower surfaces, the ray trace, and (in ray-aimed designs) the pupil.
+    Reading the merit function is itself the authoritative recompute — OpticStudio
+    calculates the merit function against a freshly updated system — so ordering
+    alone guarantees y matches x. These flags cover what ordering does not:
+
+      system     one explicit system read after the writes, so pickup solves and
+                 any dependent lens data are applied before anything is read back.
+      pupil      also snapshot aperture/pupil state (ray-aiming designs, where the
+                 pupil is solved rather than fixed); kept on `last_pupil`.
+      followers  read the follower cells back *after* the recompute and check they
+                 actually tracked. This is what catches a wrong pickup column or a
+                 solve someone removed in the .zmx — silently optimising a design
+                 whose return surface stopped following is the expensive failure.
+    """
+    system: bool = True
+    pupil: bool = False
+    followers: bool = True
+    tolerance: float = 1e-6
+
+
 class ZemaxConnection(BaseModel):
     """How to reach the OpticStudio MCP server."""
     command: list[str]                            # e.g. ["C:/…/OpticStudioMCPServer.exe"]
@@ -162,6 +197,7 @@ class ZemaxBinding(BaseModel):
     """The complete, declarative x/y mapping — part of the IR, canvas-editable."""
     knobs: dict[str, ZemaxKnob] = Field(default_factory=dict)
     merit: MeritSpec = Field(default_factory=MeritSpec)
+    refresh: RefreshSpec = Field(default_factory=RefreshSpec)
 
     def build_vocs(self, objectives: Optional[dict[str, Objective]] = None) -> VOCS:
         """Derive a VOCS from the binding (knobs with low/high + merit objectives)."""
@@ -199,6 +235,9 @@ class ZemaxEvaluator:
         self.safety = safety
         self.store = store
         self.history: list[dict] = []
+        self.last_system: dict = {}           # last system snapshot (refresh.system)
+        self.last_pupil: dict = {}            # aperture/pupil state (refresh.pupil)
+        self.last_followers: dict[str, float] = {}   # measured follower cells
         self._client = client                 # injectable (tests / shared session)
         self._owns_client = client is None
         self._bound = False
@@ -237,18 +276,22 @@ class ZemaxEvaluator:
             for f in knob.followers:
                 if f.mode != "pickup":
                     continue
-                if f.kind != "param" or knob.kind != "param":
-                    raise ValueError(f"pickup follower for '{name}' is only supported "
-                                     f"between PARM cells; use mode='write'")
-                master_param = knob.resolved_param()
-                follower_param = param_number(f.param) if f.param is not None else master_param
+                if f.kind != knob.kind:
+                    raise ValueError(f"pickup follower for '{name}' must address the same "
+                                     f"kind of cell as its master; use mode='write'")
+                if f.kind == "param":
+                    master_column = knob.resolved_param()
+                    number = param_number(f.param) if f.param is not None else master_column
+                    prop = f"param{number}"
+                else:
+                    master_column, prop = None, _SOLVE_PROPERTY[f.kind]
                 self.client.call_tool("zemax_set_surface_solve", {
                     "surfaceNumber": f.surface,
-                    "property": f"param{follower_param}",
+                    "property": prop,
                     "solveType": "Pickup",
                     "pickupSurface": knob.surface,
-                    "pickupColumn": f.pickup_column if f.pickup_column is not None
-                                    else master_param,
+                    "pickupColumn": (f.pickup_column if f.pickup_column is not None
+                                     else master_column),
                     "scaleFactor": f.scale,
                     "offset": f.offset,
                 })
@@ -292,6 +335,80 @@ class ZemaxEvaluator:
                                         {"surfaceNumber": surface, **args})
             _check(res, f"set surface {surface} {args}")
 
+    def _expected_followers(self, x: dict[str, float]) -> dict[int, dict[tuple, float]]:
+        """What every follower cell should read once the system has refreshed.
+
+        Keyed surface -> {("param", n) | ("field", "thickness"): value}.
+        """
+        expected: dict[int, dict[tuple, float]] = {}
+        for name, knob in self.binding.knobs.items():
+            if name not in x:
+                continue
+            master = knob.to_zemax(x[name])
+            for f in knob.followers:
+                value = f.scale * master + f.offset
+                if f.kind == "param":
+                    number = (param_number(f.param) if f.param is not None
+                              else knob.resolved_param())
+                    key: tuple = ("param", number)
+                else:
+                    key = ("field", f.kind)
+                expected.setdefault(f.surface, {})[key] = value
+        return expected
+
+    def _refresh_system(self) -> None:
+        """Force one system read after the writes, so solves/pupil are applied."""
+        spec = self.binding.refresh
+        if not (spec.system or spec.pupil):
+            return
+        raw = self.client.call_tool("zemax_get_system", {
+            "includeSurfaces": False, "includeFields": False, "includeWavelengths": False})
+        _check(raw, "refresh system")
+        self.last_system = raw if isinstance(raw, dict) else {}
+        if spec.pupil:
+            self.last_pupil = _get(self.last_system, "aperture", {}) or {}
+
+    def _verify_followers(self, x: dict[str, float]) -> dict[str, float]:
+        """Read the follower cells back and confirm they tracked the master.
+
+        Runs *after* the merit-function read, because that read is what forces
+        OpticStudio to recompute — a pickup solve queried before it would still
+        report the previous operating point.
+        """
+        expected = self._expected_followers(x)
+        if not (self.binding.refresh.followers and expected):
+            return {}
+        tol = self.binding.refresh.tolerance
+        measured: dict[str, float] = {}
+        for surface, cells in expected.items():
+            actual: dict[tuple, float] = {}
+            if any(k[0] == "param" for k in cells):
+                res = self.client.call_tool("zemax_set_surface_parameter",
+                                            {"surfaceNumber": surface})
+                _check(res, f"read back surface {surface} parameters")
+                actual.update({("param", int(_get(p, "number", 0))):
+                               float(_get(p, "value", 0.0) or 0.0)
+                               for p in _get(res, "parameters", []) or []})
+            if any(k[0] == "field" for k in cells):
+                res = self.client.call_tool("zemax_get_surface", {"surfaceNumber": surface})
+                _check(res, f"read back surface {surface}")
+                for _, field in (k for k in cells if k[0] == "field"):
+                    actual[("field", field)] = float(
+                        _get(res, _SET_SURFACE_ARG[field], 0.0) or 0.0)
+
+            for key, want in cells.items():
+                got = actual.get(key)
+                label = f"PARM {key[1]}" if key[0] == "param" else key[1]
+                if got is None or abs(got - want) > tol:
+                    raise FollowerDesync(
+                        f"surface {surface} {label} did not follow: "
+                        f"expected {want!r}, read {got!r}. A pickup solve may be "
+                        f"missing, or `pickup_column` may be wrong for this "
+                        f"OpticStudio build (try mode='write').")
+                measured[f"s{surface}." + (f"p{key[1]}" if key[0] == "param" else key[1])] = got
+        self.last_followers = measured
+        return measured
+
     def _read(self) -> dict[str, float]:
         spec = self.binding.merit
         res = self.client.call_tool("zemax_get_merit_function",
@@ -314,11 +431,14 @@ class ZemaxEvaluator:
     def evaluate(self, x: dict[str, float], stage: str = "") -> dict[str, float]:
         self.bind()
         target = self.safety.enforce(x) if self.safety else x
-        self._apply(target)
-        y = self._read()
-        self.history.append({"stage": stage, **target, **y})
+        self._apply(target)                  # x -> Lens Data Editor (+ write followers)
+        self._refresh_system()               # apply solves / refresh pupil
+        y = self._read()                     # Merit Function = the definitive recompute
+        followers = self._verify_followers(target)   # did the 伴随变量 really track?
+        record = {**target, **followers}
+        self.history.append({"stage": stage, **record, **y})
         if self.store is not None:
-            self.store.append(stage, target, y)
+            self.store.append(stage, record, y)
         return y
 
 
