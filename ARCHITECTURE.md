@@ -51,6 +51,7 @@ flowchart TB
       direction LR
       FN["Python 函数适配器"]
       HW["硬件适配器 PyVISA/PyMeasure·MIT<br/>稳定时间/平均/迟滞 + 独立安全限位"]
+      ZMX["Zemax OpticStudio 适配器<br/>MCP stdio → Coordinate Break PARM / Merit Function"]
       HOOK["非标逻辑 Hook<br/>pre_move / post_measure / on_stage_end"]
     end
 
@@ -149,6 +150,15 @@ register_algorithm(AlgorithmSpec(
   内置**稳定时间**、**多次平均**（抗噪）、**独立安全限位**（默认 clamp 到安全区，`strict=True` 则拒绝并抛错——
   任何算法/编排 bug 都无法命令越界运动）。附带 `SimulatedStage/SimulatedMeter`（可注入噪声）无硬件即可跑测。
 - 真实后端：PyVISA/PyMeasure(MIT) 写个 move/read 薄类即可；非标逻辑通过 Hook 注入，不改平台代码。
+- ✅ **Evaluator 已插件化**（`optplat/backends.py`）：和算法一样按名注册，IR JSON 里
+  `"evaluator": {"mode": ...}` 一行切换。内置 `function` / `hardware_sim` / `zemax` / `composite`。
+- ✅ **Zemax OpticStudio backend**（`optplat/zemax.py` + `optplat/mcp_client.py`，详见 `ZEMAX.md`）：
+  x 写进 Lens Data Editor（Coordinate Break 的 Decenter/Tilt PARM、Thickness…，**跟随面自动同步**，
+  write 或 OpticStudio Pickup solve 两种实现），y 从 Merit Function Editor 读（总评价值 / 按行或按操作数类型取）。
+  经 OpticStudioMCPServer(MIT) 的 MCP stdio；MCP 客户端是**纯标准库**，零新依赖；
+  `optplat/zemax_sim.py` 假服务器让整条链路在无 Zemax 环境下也能测。
+- ✅ `CompositeEvaluator`：同一次评估同时驱动设计模型与真实仪器（模型在环 + 硬件在环），y 合并。
+  安全限位对两者是同一段代码，不存在"仿真时关掉、上机忘了开"。
 - P1c 加异步/批量接口（贝叶斯 batch 采样与多通道并行需要）。
 
 ### 2.5 用户面（三个编辑器）+ GLM5.1 定位

@@ -5,6 +5,7 @@
 Endpoints:
   GET  /health              liveness
   GET  /catalog             algorithm palette + param schemas (for the canvas)
+  GET  /backends            evaluator backends (bench sim / hardware / zemax / …)
   GET  /vocs                default demo VOCS (variables / objectives)
   POST /run/graph           run a {nodes, edges} graph JSON  -> result
   POST /run/pipeline        run a block pipeline JSON         -> result
@@ -23,10 +24,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .demo import demo_vocs, optical_bench
-from .evaluator import Evaluator
+from .backends import EvaluatorConfig, backend_catalog, build_evaluator
+from .demo import demo_vocs
 from .graph import GraphRunner
-from .hardware import HardwareEvaluator, SafetyLimits, SimulatedMeter, SimulatedStage
 from .orchestrator import Orchestrator
 from .registry import algorithm_catalog
 from .vocs import VOCS
@@ -34,13 +34,6 @@ from .vocs import VOCS
 app = FastAPI(title="Optimization Platform API", version="0.1")
 
 _WEB = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
-
-
-class EvaluatorConfig(BaseModel):
-    mode: str = "function"          # "function" | "hardware_sim"
-    noise: float = 0.0
-    averages: int = 1
-    safety: bool = False
 
 
 class RunRequest(BaseModel):
@@ -63,13 +56,9 @@ def _build_vocs(v: Optional[dict]) -> VOCS:
 
 
 def _build_evaluator(vocs: VOCS, cfg: EvaluatorConfig):
-    if cfg.mode == "hardware_sim":
-        stage = SimulatedStage(vocs.initial_point())
-        meter = SimulatedMeter(stage, optical_bench, noise=cfg.noise, seed=0)
-        safety = SafetyLimits({n: (v.low, v.high) for n, v in vocs.variables.items()}) \
-            if cfg.safety else None
-        return HardwareEvaluator(stage, meter, averages=cfg.averages, safety=safety)
-    return Evaluator(optical_bench)
+    """Evaluator backends are plug-ins (see backends.py): function / hardware_sim /
+    zemax / composite, plus anything a deployment registers."""
+    return build_evaluator(vocs, cfg)
 
 
 def _result(res: dict) -> dict[str, Any]:
@@ -90,7 +79,13 @@ def health():
 
 @app.get("/catalog")
 def catalog():
-    return {"algorithms": algorithm_catalog()}
+    return {"algorithms": algorithm_catalog(), "backends": backend_catalog()}
+
+
+@app.get("/backends")
+def backends():
+    """Evaluator backends the canvas can offer (bench sim, hardware, Zemax…)."""
+    return {"backends": backend_catalog()}
 
 
 @app.get("/vocs")

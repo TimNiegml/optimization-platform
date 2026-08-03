@@ -43,6 +43,8 @@
 | 编排（块式） | `optplat/orchestrator.py` | flow / if / loop{until,max_rounds} |
 | 编排（图式，Dify） | `optplat/graph.py` | `GraphRunner` 直接跑 {nodes,edges}；分支=条件边，循环=回边(max_visits/max_steps 限幅)；`to_mermaid` |
 | 评估接入 | `optplat/evaluator.py` `optplat/hardware.py` | 函数版 + 硬件版(稳定时间/平均/**独立安全限位** clamp)；含仿真 stage/meter |
+| 评估 backend 插件 | `optplat/backends.py` | `function`/`hardware_sim`/`zemax`/`composite`，IR 一行切换；可注册客户专属仪器 |
+| Zemax 接入 | `optplat/zemax.py` `optplat/mcp_client.py` `optplat/zemax_sim.py` | x→Coordinate Break PARM/Thickness(**跟随面同步**)，y←Merit Function；MCP stdio 客户端**纯标准库**；假服务器供离线测试。见 `ZEMAX.md` |
 | 持久化 | `optplat/store.py` | SQLite 归档 / 断点续跑(start_point) / 一键回滚(rollback_to_best) |
 | 后端 API | `optplat/api.py` | FastAPI：`/catalog` `/vocs` `/run/graph` `/run/pipeline` `/`(画布) |
 | 托拉拽画布 | `web/index.html` | **纯 vanilla JS+SVG，无 CDN，离线可用**；产 {nodes,edges} JSON |
@@ -57,7 +59,10 @@
   （含修复：全局 `until` 中途触发时同步操作点，保证 state 与 objectives 一致。）
 - **P1c 图运行时 + 插件**：node+edge 图 IR + `GraphRunner`（分支/受限循环）；算法插件 registry；graph→mermaid。
 - **P2 服务化 + 画布**：FastAPI 后端；vanilla JS 托拉拽画布（served at `/`）。
-- **测试**：`python -m pytest -q` → **23 项全过**（algorithms / graph / p1b / api）。
+- **P2b Zemax 接入 + Evaluator 插件化**：`ZemaxEvaluator`（Coordinate Break 自变量、跟随面 write/pickup、
+  Merit Function 因变量）；stdlib MCP stdio 客户端；`backends.py` 让 Evaluator 像算法一样可注册、IR 可选；
+  `CompositeEvaluator` 支持模型+设备混跑；`GET /backends`。详见 `ZEMAX.md`。
+- **测试**：`python -m pytest -q` → **38 项全过**（algorithms / graph / p1b / api / zemax）。
 
 算法库（8 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
 `nelder_mead` `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula` `bayesian`。
@@ -73,6 +78,8 @@
 
 ## 6. 待办 / 待用户反馈的点（重要）
 
+- **Zemax 真机联调未做**：离线链路（假 MCP 服务器）全绿，但面号 / PARM 号 / MFE 行号必须按客户实际 `.zmx` 核对；
+  `pickup` 模式的 `pickupColumn` 编号随 OpticStudio 版本变化，拿不准就用默认 `write` 模式。
 - **画布交互未经浏览器可视化验证**：仅确认 JS 通过 `node --check`、`GET /` 返回 200、示例 JSON 能跑通。
   拖拽手感/连线视觉/编辑面板是否好用，**等用户打开 `http://127.0.0.1:8000/` 后反馈**再修。
 - 用户会继续提需求（真实目标函数形态、WDL 均衡具体判据、仪器型号、界面细节）——按需迭代。
@@ -101,8 +108,9 @@ python -m optplat.api      # 后端 + 画布 → http://127.0.0.1:8000/   （/do
 python run_graph.py        # 命令行跑图 JSON（Dify 风格）
 python run_demo.py         # 命令行跑两阶段流程
 python demo_hardware.py    # 硬件+噪声/平均/安全+续跑+回滚
+python run_zemax.py        # Zemax：Coordinate Break ↔ Merit Function（无 Zemax 时自动用假服务器）
 streamlit run app.py       # 表单式控制台
-python -m pytest -q        # 23 项测试
+python -m pytest -q        # 38 项测试
 ```
 
 接自己的优化函数：改 `optplat/demo.py` 的 `optical_bench(x)` 与 `demo_vocs()`。
