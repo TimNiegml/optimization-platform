@@ -21,10 +21,14 @@ from typing import Any, Optional
 from mcp.server.fastmcp import FastMCP
 
 from . import solutions as sol
+from .audit import audit_solution as _audit_solution
+from .audit import compare_solutions as _compare_solutions
 from .autotune import TuneSpec, run_autotune
+from .benchsuite import get_suite
 from .demo import BENCHES, demo_vocs
 from .registry import REGISTRY, algorithm_catalog
 from .runner import run_workflow as _run_workflow
+from .trace_digest import digest, digest_many
 from .workspace import WORKSPACE
 
 mcp = FastMCP(
@@ -358,6 +362,78 @@ def explain_result(result: dict) -> str:
     if result.get("fits"):
         parts.append("拟合：" + "；".join(f"{k}: {v}" for k, v in result["fits"].items()) + "。")
     return " ".join(parts)
+
+
+# ============================ 审计 / 诊断（评判 agent 用）============================
+@mcp.tool()
+def diagnose_run(graph: dict, bench: str = "single_peak", noise: float = 0.0,
+                 averages: int = 1, n_runs: int = 3, objective: str = "y1",
+                 start_point: Optional[dict] = None,
+                 eval_budget: int = 2000) -> dict:
+    """跑一条流程若干次并把 trace 压成**可读的诊断报告**（含建议搜索区间）。
+
+    这是你（Agent）『看 trace 改算法』的入口。返回：
+      stage_attribution  每个阶段花了多少评估、贡献了多少增益（揪出"贵而无用"的阶段）
+      issues             失效模式：振荡/停滞/卡边界/平坦区空扫/拟合被拒，每条都带触发证据
+                         **只信 reliable=true 的**（多数运行都复现），单次出现的多半是噪声
+      length_scales      从 trace 实测的每个自变量『峰宽』——决定步距的物理量
+      suggested_search_space  由峰宽推出的**搜索区间**，直接可喂给 autotune 的 search_space
+
+    用法：读 issues 判断病灶 → 核对 length_scales 是否合理 → 把
+    suggested_search_space（可按你的判断收窄）传给 autotune(search_space=...)。
+    注意：你负责判断"哪个旋钮错了、往哪个方向调"，**具体数值交给 autotune 搜**，不要自己拍数字。
+    """
+    n = max(1, min(int(n_runs), 8))
+    results = []
+    for i in range(n):
+        results.append(_run_workflow(graph, bench=bench, noise=noise, averages=averages,
+                                     eval_budget=eval_budget, start_point=start_point,
+                                     keep_history=True, seed=i))
+    v = demo_vocs()
+    return digest_many(results, v, objective) if n > 1 else digest(results[0], v, objective)
+
+
+@mcp.tool()
+def list_benchmark_suites() -> dict:
+    """列出题库：dev（可见，用于调优/诊断）与 frozen（冻结验收题库）。
+
+    frozen 是**现实锚**：设计算法时不可针对它调参，只用于最终验收。返回的
+    fingerprint 是题库内容哈希——审计报告里会带上，可复核题库未被改动过。
+    """
+    return {"suites": [get_suite("dev").summary(), get_suite("frozen").summary()],
+            "rule": ("dev 可自由调优；frozen 只做验收。若发现有人针对 frozen 调参，"
+                     "该结果作废——泛化间隙就是为检测这件事而存在。")}
+
+
+@mcp.tool()
+def audit_solution(graph: dict, label: str = "candidate") -> dict:
+    """【评判用】在 dev + frozen 两套题库上审计一条方案，返回确定性证据。
+
+    你（评判 Agent）基于本报告下结论，但**不能改动分数**——打分是确定性计算，
+    这样循环才不会退化成"想办法说服裁判"。重点看：
+      acceptance            PASS/FAIL（硬性检查：冻结达标率、运行报错）
+      frozen.*              冻结题库上的真实表现（唯一有效的性能依据）
+      generalization_gap    DEV 与 FROZEN 的差距。间隙大有两种成因，需要区分：
+                            ①方案被针对可见题目调过；②冻结题库本身更难。
+                            若只有该方案间隙大 → 更像①；若所有方案都大 → 更像②
+      flags                 每条都带 detail（触发它的具体数字）与 meaning
+      provenance            两套题库的 fingerprint，可复核未被篡改
+
+    请在结论里明确写：通过/不通过、依据哪几个数字、以及若不通过该改什么。
+    """
+    return _audit_solution(graph, label=label)
+
+
+@mcp.tool()
+def compare_solutions(candidates: list[dict], top_k: int = 5) -> dict:
+    """【评判用】审计并排名多条方案。candidates=[{label, graph}, ...]
+
+    排名**只依据 FROZEN 表现**（达标率→质量→耗时），DEV 分数不参与排名，
+    只用来计算泛化间隙。返回 ranking（含每条的 flags）与 best。
+    """
+    out = _compare_solutions(candidates)
+    out["reports"] = out["reports"][: max(1, int(top_k))]
+    return out
 
 
 def main() -> None:

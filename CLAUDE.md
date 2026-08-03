@@ -1,7 +1,7 @@
 # CLAUDE.md — 项目上下文与继续指南
 
 > 这份文件是给 Claude Code 新会话的"接手说明"。读完它 + `ARCHITECTURE.md` 就能无缝继续。
-> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 84 项全过）。
+> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 98 项全过）。
 
 ---
 
@@ -45,10 +45,13 @@
 | 评估接入 | `optplat/evaluator.py` `optplat/hardware.py` | 函数版 + 硬件版(稳定时间/平均/**独立安全限位** clamp)；含仿真 stage/meter；按通道选择性读取+成本 |
 | 外部设备接入 | `optplat/userdev.py` + `examples/device_template.py` | 用户在外部 Python 定义 `AXES`(x: move/get) + `METERS`(y: get)，平台**自动读几个 x/几个 y**建 VOCS + Evaluator；起点=轴当前位置(`axis.get()`)。`run_device.py` 命令行跑、`OPTPLAT_DEVICE=xx.py` 让画布/REST/MCP 自动用它 |
 | 模型接口 | `optplat/models.py` | ModelProvider 注册式：`analytic`(解析 bench) / `dataset_idw`(用户数据 surrogate)，可插拔 |
-| 自动调优 | `optplat/autotune.py` | AutoTuner(L1)：候选生成(粗调×精调×拟合+参数/噪声变异)、多试验评估、质量/时长/稳定打分、帕累托 |
+| 自动调优 | `optplat/autotune.py` | AutoTuner(L1)：候选生成(粗调×精调×拟合+参数/噪声变异)、多试验评估、质量/时长/稳定打分、帕累托；`search_space` 接收 LLM 从 trace 推出的搜索区间 |
+| 轨迹诊断 | `optplat/trace_digest.py` | 把 trace 压成 LLM 可读诊断：阶段成本/增益归因、失效模式(振荡/停滞/卡边界/平坦区/拟合被拒)、**实测峰宽→建议搜索区间**；`digest_many` 跨种子只保留**可复现**的问题(防轶事) |
+| 题库 | `optplat/benchsuite.py` | DEV(可见,调优用) + FROZEN(冻结,仅验收)；`fingerprint()` 内容哈希，题库被改动可检测 |
+| 审计 | `optplat/audit.py` | 在 DEV/FROZEN 上确定性打分 → **泛化间隙**(检测"针对可见题目调参")、验收 flags；排名**只依据 FROZEN** |
 | 持久化 | `optplat/store.py` | SQLite 归档 / 断点续跑(start_point) / 一键回滚(rollback_to_best) |
 | 后端 API | `optplat/api.py` | FastAPI：`/catalog` `/vocs` `/run/graph` `/run/pipeline` `/`(画布) |
-| L2 MCP 服务器 | `optplat/mcp_server.py` | 把平台暴露成 16 个 MCP 工具供 Agent 驱动；配套 `optplat/solutions.py`(方案库) + `optplat/runner.py`(跑流程)；见 `MCP_AGENT.md` |
+| L2 MCP 服务器 | `optplat/mcp_server.py` | 把平台暴露成 20 个 MCP 工具供 Agent 驱动；配套 `optplat/solutions.py`(方案库) + `optplat/runner.py`(跑流程)；见 `MCP_AGENT.md` |
 | 实时工作区 | `optplat/workspace.py` | Agent↔画布共享状态(按 session)；MCP 挂进 FastAPI(`/mcp`) + `/workspace` SSE → Agent 改动画布自动刷新 |
 | Hermes skill | `skills/optplat/` | `SKILL.md`+`connect.json`+`reference/`：上传 Hermes 即自动连 MCP、学会用法(NL→IR 起草/推画布/跑对比调优) |
 | 托拉拽画布 | `web/index.html` | **纯 vanilla JS+SVG，无 CDN，离线可用**；产 {nodes,edges} JSON |
@@ -80,7 +83,7 @@
   - **梯度上升(PI闪电式)** `gradient_ascent`：有限差分测局部梯度、沿上升方向步进+步长自适应。
   - **拟合公式回显**：`SurrogateFit`/`FormulaMethod`/`ParametricFit` 暴露 `fit_info`（峰位/参数/R²），引擎收进 `result.fits`（用 finally 保证全局早停也记录），画布对应**节点卡片显示拟合公式**。
   - **按场景示例 + 方案库**：`载入示例` 按当前仿真场景放量身流程（多峰/多模用贝叶斯全局、相关谷用单纯形、偏斜/尖峰用梯度上升等）；`📁 方案库` 内置各场景示例，并可选**整个文件夹批量加载**保存过的方案（webkitdirectory / 多选文件）。
-- **测试**：`python -m pytest -q` → **84 项全过**（algorithms / graph / p1b / api / autotune / mcp）。
+- **测试**：`python -m pytest -q` → **98 项全过**（algorithms / graph / p1b / api / autotune / mcp）。
 
 算法库（11 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
 `nelder_mead` `gradient_ascent`(PI闪电式) `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula`
@@ -105,6 +108,23 @@
   - **外部设备定义**（`optplat/userdev.py` + `examples/device_template.py`）：用户在**外部 Python** 写 `AXES`(每个 x 一个轴，含 `move(v)`/`get()`) + `METERS`(每个 y 一个测量，含 `get()`；可标 `mode/target/cost/group/device/param`)，或 `build()` 返回二者。`load_device(path)` → `DeviceSpec.vocs()`(平台**自动读出几个 x/几个 y**)、`.evaluator()`(move 轴→只读需要的 meter，含平均/安全/并行串行计时)、`.current_point()`(轴当前位置=优化**起点**，真实台架无绝对坐标→从当前位置起)。
   - **接线**：`run_device.py path.py [graph.json]` 命令行直接跑(与后端解耦)；`OPTPLAT_DEVICE=path.py python -m optplat.api` 后画布/REST(`/vocs`/`/benches`/新增 `/device`)/MCP **自动用该设备**、起点默认取轴当前位置；`/surface` 对设备返回 400(无解析面)。
   - **相对起点贯通全算法**：拟合类 `quadratic_fit`/`gaussian_fit`/`parametric_fit` 也加 `span_frac`(0=全程绝对；>0=以起点为中心的相对窗口)，连同 grid/line 的 `span_frac`、坐标下降/单纯形/梯度/公式/阻尼灵敏度**都从起点出发**——真实台架"从当前位置开始、无绝对坐标"。注意 `span_frac=1` 是以起点为中心±半量程，起点在中点时正好=全程(看起来没变)，要局部扫用小值。
+
+- **P2g 审计架构（诊断-验证闭环，pytest 98 项全过）**：为"LLM 看 trace 改算法 + agent 评判性能"提供的**确定性地基**。
+  设计铁律：**打分永远是确定性的，LLM/Agent 只读证据下结论、不能改分数**——否则循环会退化成"优化如何说服裁判"。
+  - **轨迹诊断**（`trace_digest.py`）：`digest()` 把一次 run 压成——阶段成本/增益归因(揪"贵而无用"的阶段)、
+    失效模式(振荡/停滞/卡边界/平坦区空扫/拟合被拒，每条带触发证据)、**每轴实测峰宽(length_scales)**、
+    由峰宽推出的 **suggested_search_space**。`digest_many()` 跨种子聚合，给每个问题标 `confidence`/`reliable`
+    ——**只有多数运行都复现的才可据以改算法**(实测：oscillation 5/5 可靠、stagnation 1/5 是噪声)。
+  - **LLM 决定搜索区间**（`TuneSpec.search_space`）：`{"*":{"step_frac":{low,high,n}}, "grid_scan":{...}}`，
+    替换掉原来盲搜 schema min/max 极值的做法；**越界会被 schema 夹回**(提议 1~999 → 夹到 3~21)，LLM 改不了合法边界。
+  - **冻结题库**（`benchsuite.py`）：DEV(4题,可见) + FROZEN(7题,含 Rosenbrock/Rastrigin/Ackley/强噪，仅验收)；
+    `fingerprint()` 内容哈希写进每份审计报告，题库被篡改可检测。两套题目 id 不相交、FROZEN 覆盖 DEV 没有的地形。
+  - **审计 + 泛化间隙**（`audit.py`）：`audit_solution` 在两套题库上确定性打分，`gap = DEV质量 − FROZEN质量`；
+    间隙大**有两种成因需区分**(①针对可见题目调参 ②FROZEN 本身更难)，flag 里写明了如何辨别。
+    `compare_solutions` **排名只依据 FROZEN**(达标率→质量→耗时)，DEV 分数仅用于算间隙。崩溃的方案计 0 分而非中断审计。
+  - **接口**：MCP 加 `diagnose_run`/`list_benchmark_suites`/`audit_solution`/`compare_solutions`(共 20 工具)；
+    REST 加 `/diagnose` `/audit` `/benchsuites`；`runner.run_workflow` 加 `seed`/`keep_history`(诊断需要 history)。
+    `SKILL.md` 补『看 trace 改算法』的强制链路：诊断→只信 reliable→收窄区间交给 autotune 搜→frozen 验收。
 
 - **P3 Agent/AutoTuner（Phase A 已做）**：见 `AGENT_AUTOTUNE_DESIGN.md`。
   - **L1 AutoTuner**（`optplat/autotune.py`）：在"粗调(网格/线扫/**贝叶斯**)×精调(单纯形/坐标/梯度)×拟合"三相空间搜索，
@@ -173,7 +193,7 @@ python run_device.py examples/device_template.py   # 用外部定义的设备(�
 OPTPLAT_DEVICE=examples/device_template.py python -m optplat.api  # 让画布/REST/MCP 用你的真实设备（起点=轴当前位置）
 python run_mcp.py          # L2 MCP 服务器（stdio；--http 走 HTTP）→ 供 Agent 驱动，配置见 MCP_AGENT.md
 streamlit run app.py       # 表单式控制台
-python -m pytest -q        # 84 项测试
+python -m pytest -q        # 98 项测试
 ```
 
 接自己的优化函数：改 `optplat/demo.py` 的 `optical_bench(x)` 与 `demo_vocs()`。

@@ -74,6 +74,29 @@ run_workflow(g, bench="multi_peak", session=<用户会话>)
 - 自动调优：报 top 候选的 质量/时长/稳定/utility，标出帕累托最优；建议用户采用哪条并解释权衡。
   想让用户在画布上直接看/跑某候选，就 `push_to_canvas(候选.graph, session=...)`。
 
+## 3b. 看 trace 改算法 / 审计（诊断-验证闭环）
+
+改算法**必须**走这条链，不要凭感觉拍参数：
+
+1. **诊断**：`diagnose_run(graph, bench, noise, n_runs=3+)` → 得到
+   - `stage_attribution`：哪个阶段花了评估却没贡献增益（"贵而无用"）
+   - `issues`：振荡/停滞/卡边界/平坦区空扫/拟合被拒，每条带触发证据
+     ⚠️ **只信 `reliable=true`**（多数运行都复现）。单次出现的多半是噪声——
+     据此改算法等于修一个不存在的 bug。
+   - `length_scales`：实测峰宽（决定步距的物理量）
+   - `suggested_search_space`：由峰宽推出的搜索区间
+2. **收窄搜索**：把 `suggested_search_space`（可按判断再收窄）传给
+   `autotune(search_space=...)`。**你负责判断"哪个旋钮错、往哪个方向"，
+   具体数值交给 autotune 搜**——不要自己拍 `step_frac=0.073` 这种数字。
+3. **验收**：`audit_solution(graph)` 在 dev + frozen 两套题库上打分。
+   - 只有 **frozen** 的表现算数；`dev` 分数仅用于算泛化间隙
+   - `acceptance=PASS/FAIL`、`flags` 各带具体数字
+   - **打分是确定性的，你不能改**。你的职责是基于报告下结论并说明依据。
+
+**题库纪律**：`frozen` 是现实锚，**设计/调参时不可针对它优化**，只做最终验收。
+泛化间隙就是为检测"偷偷针对可见题目调参"而存在的。若间隙大，先区分成因：
+只有该方案间隙大 → 多半是过拟合；所有方案都大 → 多半是题库难度差。
+
 ## 4. 纪律
 
 - 改动前后都用同一个 `session`，否则画布不会刷新。

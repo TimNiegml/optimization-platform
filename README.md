@@ -15,7 +15,7 @@ python run_graph.py           # 节点+连线图 JSON（Dify 风格）直接执�
 python demo_hardware.py       # 硬件接入 + 噪声/平均/安全 + 断点续跑 + 一键回滚
 python run_device.py examples/device_template.py   # ★ 用外部定义的设备(轴 move/get + 测量 get)跑；平台自动读几个 x/y
 python run_mcp.py             # ★ L2 MCP 服务器 → 让 Agent 直接驱动平台（配置见 MCP_AGENT.md）
-python -m pytest -q           # 回归测试（算法 + 块/图/API + 硬件/归档 + 自动调优 + MCP + 实时联动 + 外部设备，84 项）
+python -m pytest -q           # 回归测试（算法 + 块/图/API + 硬件/归档 + 自动调优 + MCP + 实时联动 + 外部设备 + 审计，98 项）
 ```
 
 ## 用 Agent 驱动（L2 · MCP）

@@ -302,6 +302,59 @@ def autotune_space():
     return {"phases": out}
 
 
+class AuditRequest(BaseModel):
+    graph: dict
+    label: str = "candidate"
+
+
+@app.get("/benchsuites")
+def benchsuites():
+    """DEV / FROZEN problem suites + their content fingerprints."""
+    from .benchsuite import get_suite
+    return {"suites": [get_suite("dev").summary(), get_suite("frozen").summary()]}
+
+
+@app.post("/audit")
+def audit(req: AuditRequest):
+    """Deterministic audit: score a workflow on DEV + FROZEN, report the
+    generalization gap and acceptance flags (evidence for a judging agent)."""
+    from .audit import audit_solution
+    try:
+        return audit_solution(req.graph, label=req.label)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
+class DiagnoseRequest(BaseModel):
+    graph: dict
+    bench: str = "single_peak"
+    noise: float = 0.0
+    averages: int = 1
+    n_runs: int = 3
+    objective: str = "y1"
+    start_point: Optional[dict[str, float]] = None
+    eval_budget: int = 2000
+
+
+@app.post("/diagnose")
+def diagnose(req: DiagnoseRequest):
+    """Run a workflow n times and return the trace digest: stage attribution,
+    reproducible failure modes, measured peak widths, suggested search ranges."""
+    from .runner import run_workflow as _rw
+    from .trace_digest import digest, digest_many
+    try:
+        n = max(1, min(int(req.n_runs), 8))
+        results = [_rw(req.graph, bench=req.bench, noise=req.noise,
+                       averages=req.averages, eval_budget=req.eval_budget,
+                       start_point=req.start_point, seed=i, keep_history=True)
+                   for i in range(n)]
+        v = _build_vocs(None, None)
+        return digest_many(results, v, req.objective) if n > 1 \
+            else digest(results[0], v, req.objective)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
 @app.post("/autotune")
 def autotune(spec: TuneSpec):
     """AutoTuner (L1): search workflow candidates, rank by quality/time/stability."""
