@@ -20,7 +20,7 @@ VOCS、把优化算法、安全限位、测量耗时、画布、Agent 全部套�
 """
 import math
 
-from optplat.userdev import Axis, Meter
+from optplat.userdev import Axis, Meter, Source
 
 # ---- 1) 定义轴（自变量 x）。真实台架里 move/get 换成电机调用 ----
 # 这里用带内部状态的模拟轴：move 记录位置，get 读回位置。
@@ -51,6 +51,25 @@ METERS = [
     Meter("y2", _read_balance, mode="target", target=0.0, cost=2.0, group="opt",
           device="偏振分析仪", param="balance"),
 ]
+
+
+# ---- 3) 一次读取拿到多个通道？用 Source（共享一次采集）----
+# 有的仪器一次触发就返回一整组读数（双通道功率计 read() → power1 + power2），
+# 如果给每个 y 单独写 read_fn，仪器会被触发两次（慢，且两个 y 来自不同次采集）。
+# Source 读一次、缓存，派生出来的 meter 都吃这次采集；平台在**每轮平均前**清缓存，
+# 所以 averages=8 仍然是 8 次真实采集、8 个独立噪声样本，只是不会再乘以通道数。
+# 同一 Source 的通道默认同组（并行计时），采集时间只算一次而不是逐通道相加。
+#
+# def _read_pm_both():
+#     p1, p2 = inst.read_both()          # 一次触发，返回两个功率
+#     return {"power1": p1, "power2": p2}
+#
+# pm = Source("pm", _read_pm_both, cost=1.0, device="双通道光功率计")
+# METERS = [
+#     pm.meter("y1", "power1", mode="maximize"),     # y1 取 power1
+#     pm.meter("y3", "power2", mode="target", target=0.0),   # y3 取 power2
+#     Meter("y2", _read_balance, mode="target", target=0.0, cost=2.0),  # 另一台仪器照旧
+# ]
 
 
 # 可选：也可以用 build() 返回 (AXES, METERS)，适合需要初始化/连接仪器的场景：

@@ -259,3 +259,58 @@ def test_api_start_point_and_groups():
     assert abs(d["objectives"]["y1"] - 2.0) < 1e-2
     # parallel group -> per-read time is max(1,2)=2, so sim_seconds is a multiple of 2
     assert d["sim_seconds"] > 0
+
+
+# ---------------- shared acquisition (one instrument read -> several y) --------
+def _pm_device(counter):
+    """A 2-channel power meter: ONE trigger yields power1 + power2."""
+    from optplat.userdev import Axis, DeviceSpec, Meter, Source
+
+    ax = Axis("x1", low=-1.0, high=1.0, pos=0.0)
+
+    def read_both():
+        counter.append(1)                       # count real instrument triggers
+        p = ax.get()
+        return {"power1": 1.0 - p * p, "power2": 0.5 * p}
+
+    pm = Source("pm", read_both, cost=1.0, device="双通道光功率计")
+    other = Meter("y2", lambda: 0.0, cost=2.0)
+    return DeviceSpec([ax], [pm.meter("y1", "power1"),
+                             pm.meter("y3", "power2", mode="target", target=0.0),
+                             other])
+
+
+def test_source_triggers_instrument_once_per_acquisition():
+    calls = []
+    ev = _pm_device(calls).evaluator()
+    y = ev.evaluate({"x1": 0.5}, channels=["y1", "y3"])
+    assert set(y) == {"y1", "y3"}
+    assert len(calls) == 1                      # both channels from ONE trigger
+    assert y["y1"] == pytest.approx(0.75) and y["y3"] == pytest.approx(0.25)
+
+
+def test_source_channels_share_one_acquisition_but_averaging_stays_independent():
+    calls = []
+    ev = _pm_device(calls).evaluator(averages=4)
+    ev.evaluate({"x1": 0.5}, channels=["y1", "y3"])
+    assert len(calls) == 4                      # 4 passes, not 4x2 and not 1
+
+
+def test_source_unused_channel_never_triggers_it():
+    calls = []
+    ev = _pm_device(calls).evaluator()
+    ev.evaluate({"x1": 0.5}, channels=["y2"])   # y2 is a different instrument
+    assert calls == []                          # the power meter is never read
+
+
+def test_source_channels_are_billed_once_not_per_channel():
+    dev = _pm_device([])
+    ev = dev.evaluator()
+    ev.evaluate({"x1": 0.0}, channels=["y1", "y3"])
+    both = ev.sim_seconds                       # same source => concurrent => max
+    ev2 = dev.evaluator()
+    ev2.evaluate({"x1": 0.0}, channels=["y1"])
+    assert both == pytest.approx(ev2.sim_seconds)   # 2 channels cost the same 1 read
+    ev3 = dev.evaluator()
+    ev3.evaluate({"x1": 0.0}, channels=["y1", "y2"])
+    assert ev3.sim_seconds == pytest.approx(3.0)    # different instruments => serial

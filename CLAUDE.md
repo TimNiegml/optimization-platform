@@ -43,7 +43,7 @@
 | 编排（块式） | `optplat/orchestrator.py` | flow / if / loop{until,max_rounds} |
 | 编排（图式，Dify） | `optplat/graph.py` | `GraphRunner` 直接跑 {nodes,edges}；分支=条件边，循环=回边(max_visits/max_steps 限幅)；`to_mermaid` |
 | 评估接入 | `optplat/evaluator.py` `optplat/hardware.py` | 函数版 + 硬件版(稳定时间/平均/**独立安全限位** clamp)；含仿真 stage/meter；按通道选择性读取+成本 |
-| 外部设备接入 | `optplat/userdev.py` + `examples/device_template.py` | 用户在外部 Python 定义 `AXES`(x: move/get) + `METERS`(y: get)，平台**自动读几个 x/几个 y**建 VOCS + Evaluator；起点=轴当前位置(`axis.get()`)。`run_device.py` 命令行跑、`OPTPLAT_DEVICE=xx.py` 让画布/REST/MCP 自动用它 |
+| 外部设备接入 | `optplat/userdev.py` + `examples/device_template.py` | 用户在外部 Python 定义 `AXES`(x: move/get) + `METERS`(y: get)，平台**自动读几个 x/几个 y**建 VOCS + Evaluator；起点=轴当前位置(`axis.get()`)。一次采集出多个通道用 `Source`(读一次缓存、派生 meter，见 §4 P2h)。`run_device.py` 命令行跑、`OPTPLAT_DEVICE=xx.py` 让画布/REST/MCP 自动用它 |
 | 模型接口 | `optplat/models.py` | ModelProvider 注册式：`analytic`(解析 bench) / `dataset_idw`(用户数据 surrogate)，可插拔 |
 | 自动调优 | `optplat/autotune.py` | AutoTuner(L1)：候选生成(粗调×精调×拟合+参数/噪声变异)、多试验评估、质量/时长/稳定打分、帕累托；`search_space` 接收 LLM 从 trace 推出的搜索区间 |
 | 轨迹诊断 | `optplat/trace_digest.py` | 把 trace 压成 LLM 可读诊断：阶段成本/增益归因、失效模式(振荡/停滞/卡边界/平坦区/拟合被拒)、**实测峰宽→建议搜索区间**；`digest_many` 跨种子只保留**可复现**的问题(防轶事) |
@@ -109,6 +109,15 @@
   - **接线**：`run_device.py path.py [graph.json]` 命令行直接跑(与后端解耦)；`OPTPLAT_DEVICE=path.py python -m optplat.api` 后画布/REST(`/vocs`/`/benches`/新增 `/device`)/MCP **自动用该设备**、起点默认取轴当前位置；`/surface` 对设备返回 400(无解析面)。
   - **相对起点贯通全算法**：拟合类 `quadratic_fit`/`gaussian_fit`/`parametric_fit` 也加 `span_frac`(0=全程绝对；>0=以起点为中心的相对窗口)，连同 grid/line 的 `span_frac`、坐标下降/单纯形/梯度/公式/阻尼灵敏度**都从起点出发**——真实台架"从当前位置开始、无绝对坐标"。注意 `span_frac=1` 是以起点为中心±半量程，起点在中点时正好=全程(看起来没变)，要局部扫用小值。
 
+- **P2h 共享采集 Source（一次读取出多个 y，pytest 102 项全过）**：一台仪器一次触发返回一组读数
+  （双通道功率计 `read()` → power1+power2，y1 要 power1、y3 要 power2）。若给每个 y 各写一个 `read_fn`，
+  仪器会被触发多次——慢，且两个 y 来自**不同次采集**（不同噪声/不同时刻，物理上不一致）。
+  `userdev.Source(name, read_fn, cost, group, device)`：`read()` 触发一次并缓存，`source.meter("y1","power1")`
+  派生的 meter 都吃这次采集。**缓存边界＝一次采集**：`DeviceEvaluator` 在**每轮平均前** `invalidate()`
+  （只清本步骤真正用到的 source），所以 `averages=8` 仍是 8 次真实采集/8 个独立噪声样本——
+  用户自己在设备文件里缓存做不到这点（会把 8 次平均退化成同一个数重复 8 次）。
+  同 Source 的通道默认同 `group`（并行计时）→ 采集时间算一次而非逐通道相加；选择性读取仍成立：
+  某步骤不需要该 source 的任何通道就**完全不触发**它。
 - **P2g 审计架构（诊断-验证闭环，pytest 98 项全过）**：为"LLM 看 trace 改算法 + agent 评判性能"提供的**确定性地基**。
   设计铁律：**打分永远是确定性的，LLM/Agent 只读证据下结论、不能改分数**——否则循环会退化成"优化如何说服裁判"。
   - **轨迹诊断**（`trace_digest.py`）：`digest()` 把一次 run 压成——阶段成本/增益归因(揪"贵而无用"的阶段)、
