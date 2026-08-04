@@ -1,7 +1,7 @@
 # CLAUDE.md — 项目上下文与继续指南
 
 > 这份文件是给 Claude Code 新会话的"接手说明"。读完它 + `ARCHITECTURE.md` 就能无缝继续。
-> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 23 项全过）。
+> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 53 项全过）。
 
 ---
 
@@ -43,9 +43,12 @@
 | 编排（块式） | `optplat/orchestrator.py` | flow / if / loop{until,max_rounds} |
 | 编排（图式，Dify） | `optplat/graph.py` | `GraphRunner` 直接跑 {nodes,edges}；分支=条件边，循环=回边(max_visits/max_steps 限幅)；`to_mermaid` |
 | 评估接入 | `optplat/evaluator.py` `optplat/hardware.py` | 函数版 + 硬件版(稳定时间/平均/**独立安全限位** clamp)；含仿真 stage/meter |
+| 评估 backend 插件 | `optplat/backends.py` | `function`/`hardware_sim`/`zemax`/`composite`，IR 一行切换；可注册客户专属仪器 |
+| Zemax 接入 | `optplat/zemax.py` `optplat/mcp_client.py` `optplat/zemax_sim.py` | x→Coordinate Break PARM/Thickness(**跟随面同步**)，y←Merit Function；MCP stdio 客户端**纯标准库**；假服务器供离线测试。见 `ZEMAX.md` |
+| Zemax 系统发现 | `optplat/zemax_inspect.py` | 读 `.zmx`→面/可选变量清单/MFE 行；**从设计的 Pickup solve 自动发现伴随变量**；选完直接生成 binding+VOCS |
 | 持久化 | `optplat/store.py` | SQLite 归档 / 断点续跑(start_point) / 一键回滚(rollback_to_best) |
-| 后端 API | `optplat/api.py` | FastAPI：`/catalog` `/vocs` `/run/graph` `/run/pipeline` `/`(画布) |
-| 托拉拽画布 | `web/index.html` | **纯 vanilla JS+SVG，无 CDN，离线可用**；产 {nodes,edges} JSON |
+| 后端 API | `optplat/api.py` | FastAPI：`/catalog` `/backends` `/vocs` `/run/graph` `/run/pipeline` `/zemax/inspect` `/zemax/binding` `/`(画布) |
+| 托拉拽画布 | `web/index.html` | **纯 vanilla JS+SVG，无 CDN，离线可用**；产 {nodes,edges} JSON；含 Zemax 面板（读系统→勾选面/参数→选 MFE 行） |
 | 表单 UI | `app.py` | Streamlit 交互控制台（早期 MVP 面） |
 | 仿真台/示例 | `optplat/demo.py` | `optical_bench` 模拟光耦合；`TWO_PHASE_*` 示例流程 |
 
@@ -57,7 +60,12 @@
   （含修复：全局 `until` 中途触发时同步操作点，保证 state 与 objectives 一致。）
 - **P1c 图运行时 + 插件**：node+edge 图 IR + `GraphRunner`（分支/受限循环）；算法插件 registry；graph→mermaid。
 - **P2 服务化 + 画布**：FastAPI 后端；vanilla JS 托拉拽画布（served at `/`）。
-- **测试**：`python -m pytest -q` → **23 项全过**（algorithms / graph / p1b / api）。
+- **P2b Zemax 接入 + Evaluator 插件化**：`ZemaxEvaluator`（Coordinate Break 自变量、跟随面 write/pickup、
+  Merit Function 因变量）；stdlib MCP stdio 客户端；`backends.py` 让 Evaluator 像算法一样可注册、IR 可选；
+  `CompositeEvaluator` 支持模型+设备混跑；`GET /backends`。详见 `ZEMAX.md`。
+- **P2c 选变量 + 刷新**：`/zemax/inspect` `/zemax/binding` + 画布 Zemax 面板（读系统→按面勾参数→选 MFE 行）；
+  `RefreshSpec`（system/pupil/followers）——写完 x 后刷新系统与光瞳，并**回读校验伴随面**，不跟随即 `FollowerDesync` 报错。
+- **测试**：`python -m pytest -q` → **53 项全过**（algorithms / graph / p1b / api / zemax）。
 
 算法库（8 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
 `nelder_mead` `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula` `bayesian`。
@@ -69,11 +77,16 @@
   `move(axis,value)`/`read()->dict`（按客户仪器型号写），其余不动。
 - **GLM5.1 Copilot**：自然语言→IR（用 Instructor/Guardrails 做 schema 护栏），IR→人话解释/跑后诊断。
 - **画布增强**：撤销/重排、保存/加载图 JSON、多目标帕累托可视化、`scan` mode 执行器（schema 已占位）。
+- **Zemax 深化**：把 spot/MTF/POP 等分析结果也作为 y（`_read()` 加一条）；MCE 多重构型；
+  非 Pickup 形式（ZPL/Extra Data）的联动关系。
 - **服务化增强**：多用户/任务队列、把 VOCS 与 Evaluator 也做成可注册插件（目前 API 默认用 demo 光耦合台）。
 
 ## 6. 待办 / 待用户反馈的点（重要）
 
-- **画布交互未经浏览器可视化验证**：仅确认 JS 通过 `node --check`、`GET /` 返回 200、示例 JSON 能跑通。
+- **Zemax 真机联调未做**：离线链路（假 MCP 服务器）全绿，但面号 / PARM 号 / MFE 行号必须按客户实际 `.zmx` 核对；
+  `pickup` 模式的 `pickupColumn` 编号随 OpticStudio 版本变化，拿不准就用默认 `write` 模式。
+- **画布交互未经浏览器可视化验证**（含新增的 Zemax 面板）：仅确认 JS 通过 `node --check`、`GET /` 返回 200、
+  `/zemax/inspect`→勾选→`/run/graph` 这条请求链在 API 测试里跑通。
   拖拽手感/连线视觉/编辑面板是否好用，**等用户打开 `http://127.0.0.1:8000/` 后反馈**再修。
 - 用户会继续提需求（真实目标函数形态、WDL 均衡具体判据、仪器型号、界面细节）——按需迭代。
 
@@ -87,7 +100,7 @@
 
 ## 8. 工作方式与约定
 
-- **分支**：`claude/optimization-algorithm-platform-2z285n`（在此开发、提交、推送；勿推别的分支）。
+- **分支**：`claude/opticstudio-mcp-params-p7jfm1`（在此开发、提交、推送；勿推别的分支）。
 - **每次改动**：跑 `python -m pytest -q` 确认不回归；新功能补测试；改依赖同步 `THIRD_PARTY_LICENSES.md` 并核实 license。
 - **提交信息**：清晰描述改了什么、为什么、验证结果。
 - **文档**：架构变化更新 `ARCHITECTURE.md`；使用方式更新 `DEMO.md`/`README.md`；重大意图/决策更新本文件。
@@ -101,8 +114,10 @@ python -m optplat.api      # 后端 + 画布 → http://127.0.0.1:8000/   （/do
 python run_graph.py        # 命令行跑图 JSON（Dify 风格）
 python run_demo.py         # 命令行跑两阶段流程
 python demo_hardware.py    # 硬件+噪声/平均/安全+续跑+回滚
+python run_zemax.py        # Zemax：读设计→选面/参数→优化（无 Zemax 时自动用假服务器）
+python -m optplat.zemax_inspect   # 只打印某个 .zmx 有哪些可选自变量/目标
 streamlit run app.py       # 表单式控制台
-python -m pytest -q        # 23 项测试
+python -m pytest -q        # 53 项测试
 ```
 
 接自己的优化函数：改 `optplat/demo.py` 的 `optical_bench(x)` 与 `demo_vocs()`。

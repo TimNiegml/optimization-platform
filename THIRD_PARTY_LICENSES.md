@@ -23,6 +23,16 @@ redistributed to customers without license contamination.
 The drag-drop canvas (`web/index.html`) is dependency-free vanilla JS + SVG —
 no CDN, no bundler, works offline (suits closed-source / air-gapped use).
 
+## External processes (not linked, not redistributed)
+
+| Component | License | How it is used |
+|-----------|---------|----------------|
+| [OpticStudioMCPServer](https://github.com/zym1998year/OpticStudioMCPServer) | MIT | Zemax backend. A **separate .NET process** the platform talks to over MCP stdio (`optplat/zemax.py`). No code is linked or vendored; the customer installs it alongside OpticStudio. |
+| Zemax OpticStudio + ZOS-API | commercial (Ansys) | The customer's own licensed installation. |
+
+The MCP client (`optplat/mcp_client.py`) is **stdlib-only** — talking MCP added
+no third-party dependency.
+
 ## Deliberately NOT used
 
 | Package | License | Why avoided |

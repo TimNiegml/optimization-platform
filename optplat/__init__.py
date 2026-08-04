@@ -26,8 +26,31 @@ from .hardware import (
 from .graph import GraphRunner, to_mermaid
 from .orchestrator import Orchestrator
 from .registry import AlgorithmSpec, algorithm_catalog, build_generator, register_algorithm
+from .backends import EvaluatorConfig, backend_catalog, build_evaluator, register_backend
 from .store import SQLiteStore, rollback_to_best
 from .vocs import VOCS, Objective, ObjectiveMode, Variable
+from .zemax import (
+    CB_PARAMS,
+    CompositeEvaluator,
+    Follower,
+    FollowerDesync,
+    MeritSpec,
+    OperandRef,
+    RefreshSpec,
+    ZemaxBinding,
+    ZemaxConnection,
+    ZemaxEvaluator,
+    ZemaxKnob,
+)
+from .zemax_inspect import (
+    KnobChoice,
+    SystemSnapshot,
+    build_binding,
+    detect_followers,
+    inspect_system,
+    knob_choices,
+    operand_choices,
+)
 
 __all__ = [
     "VOCS", "Variable", "Objective", "ObjectiveMode",
@@ -41,6 +64,14 @@ __all__ = [
     # graph runtime + plug-in registry
     "GraphRunner", "to_mermaid",
     "register_algorithm", "AlgorithmSpec", "algorithm_catalog", "build_generator",
+    # evaluator backends (function / hardware / zemax / composite)
+    "EvaluatorConfig", "build_evaluator", "register_backend", "backend_catalog",
+    "ZemaxEvaluator", "ZemaxBinding", "ZemaxConnection", "ZemaxKnob",
+    "Follower", "MeritSpec", "OperandRef", "CompositeEvaluator", "CB_PARAMS",
+    "RefreshSpec", "FollowerDesync",
+    # read a design -> pick surfaces/variables instead of hand-writing them
+    "inspect_system", "knob_choices", "operand_choices", "detect_followers",
+    "build_binding", "SystemSnapshot", "KnobChoice",
 ]
 
 # BayesianGenerator is imported lazily (see orchestrator) to keep optuna optional.
