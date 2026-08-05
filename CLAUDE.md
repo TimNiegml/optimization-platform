@@ -53,6 +53,7 @@
 | 后端 API | `optplat/api.py` | FastAPI：`/catalog` `/vocs` `/run/graph` `/run/pipeline` `/`(画布) |
 | L2 MCP 服务器 | `optplat/mcp_server.py` | 把平台暴露成 20 个 MCP 工具供 Agent 驱动；配套 `optplat/solutions.py`(方案库) + `optplat/runner.py`(跑流程)；见 `MCP_AGENT.md` |
 | 实时工作区 | `optplat/workspace.py` | Agent↔画布共享状态(按 session)；MCP 挂进 FastAPI(`/mcp`) + `/workspace` SSE → Agent 改动画布自动刷新 |
+| 硬件接入规范 skill | `skills/device-interface/` | 接入/更新硬件的**接口规范**：决策表(Meter/Source/老路径)、逐字段语义、四条不变量(别自己缓存/平均/clamp)、冒烟自检脚本、症状→原因对照。软链到 `.claude/skills/` 供本仓库会话自动触发；图文版 `docs/device-interface.html` |
 | Hermes skill | `skills/optplat/` | `SKILL.md`+`connect.json`+`reference/`：上传 Hermes 即自动连 MCP、学会用法(NL→IR 起草/推画布/跑对比调优) |
 | 托拉拽画布 | `web/index.html` | **纯 vanilla JS+SVG，无 CDN，离线可用**；产 {nodes,edges} JSON |
 | 表单 UI | `app.py` | Streamlit 交互控制台（早期 MVP 面） |
