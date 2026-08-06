@@ -1,205 +1,207 @@
-# 最终架构方案 · 光器件优化算法平台
+# 架构 · 光器件优化平台
 
-> 场景：光器件耦合 / 标定 / WDL 均衡等硬件在环优化。
-> 商业约束：闭源交付给客户，依赖必须全为 permissive license（MIT/BSD/Apache），零 GPL/SUL 传染。
-> 本文是全部架构讨论的最终收敛版，代码骨架已可运行（`python run_demo.py` / `streamlit run app.py`）。
-
----
-
-## 0. 三条不可动摇的架构公理
-
-1. **声明式 IR 是唯一真相（Single Source of Truth）**
-   问题定义（VOCS）+ 编排流水线（pipeline）= 一份带 JSON Schema 的声明式配置。
-   表单、托拉拽画布、GLM5.1 Copilot 都只是这份 IR 的"编辑器"；执行引擎只认 IR，永不认 UI。
-   → 三种入口可互相翻译、随时切换；配置天然可版本化、可复现、可归档。
-
-2. **算法层统一 ask/tell 接口，算法尽量用开源，编排必须自研**
-   `ask()` 给下一批候选点，`tell(x, score)` 回填结果——算法完全不知道 f 是仿真还是真实电机。
-   贝叶斯/多目标这类难写易错的算法从开源接（Optuna/skopt/Xopt/pymoo，全 permissive）；
-   编排状态机（if/loop/keep/守门/回退）是全平台唯一没有开源对应物的部分，也是差异化核心，自研且保持薄。
-
-3. **安全护栏独立于算法与编排，且不可关闭**
-   受限 DSL（非图灵完备）：loop 强制 `max_rounds`、stage 强制 `max_iter`、全局评估预算熔断；
-   条件表达式白名单求值（asteval），不执行任意代码；
-   硬件安全限位在 Evaluator 层独立实现，任何算法/编排都不能突破。
-   LLM 只生成"候选配置"，必须过 schema 校验 + 用户确认才执行，绝不直接触发硬件动作。
+> 场景：光器件耦合 / 标定 / WDL 均衡等**硬件在环**优化。
+> 约束：闭源交付客户，依赖全部 permissive（MIT/BSD/Apache），零 GPL/fair-code。
+> 本文是提纲。图文一页纸看 `docs/architecture.html`（主干图 + 扩展点地图），逐字段接口看
+> `skills/device-interface/`，Agent 用法看 `MCP_AGENT.md`，当前进度与决策看 `CLAUDE.md`。
 
 ---
 
-## 1. 分层总图
+## 0. 一句话
+
+**声明式 IR 是唯一真相；所有界面都只是它的编辑器；执行核只认 IR；算法、硬件、模型、评判都是可插拔件；安全与打分两条底线独立且不可绕过。**
 
 ```mermaid
 flowchart TB
-    subgraph UI["用户面（三个编辑器，不写算法代码）"]
+    subgraph EDIT["编辑器层 — 都只产/改同一份 IR，互相可替换"]
       direction LR
-      FORM["表单/模板向导<br/>rjsf · Apache"]
-      CANVAS["托拉拽画布<br/>React Flow · MIT"]
-      NL["GLM5.1 Copilot<br/>Instructor · MIT"]
+      CANVAS["托拉拽画布<br/>web/index.html"]
+      FORM["表单控制台<br/>app.py"]
+      AGENT["MCP Agent<br/>mcp_server.py"]
+      COPILOT["Copilot（未做）<br/>GLM5.1"]
     end
 
-    IR["★ 声明式 IR（JSON Schema 校验）★<br/>VOCS: 变量/目标(max·min·target·scan)/约束<br/>pipeline: stage · if · loop{until,max_rounds} · keep · fallback · 全局until"]
+    IR["<b>★ 声明式 IR ★</b><br/>VOCS：变量 / 目标(max·min·target·scan) / 约束<br/>流程：{nodes, edges} 图 &nbsp;或&nbsp; 嵌套块 flow"]
 
-    ORCH["编排层 Orchestrator（自研，受限状态机）<br/>顺序/分支/受限循环/阶段停机/keep约束/拟合守门回退/全局早停/预算熔断"]
-
-    subgraph GEN["算法层 Generator（统一 ask/tell）"]
-      direction LR
-      SELF["自研：坐标梯度 · 拟合定峰<br/>(二次/高斯, R²门+外推限幅, lmfit·BSD)"]
-      OSS["开源 wrapper：贝叶斯(skopt·BSD / Optuna·MIT)<br/>多目标(pymoo·Apache) · Xopt·Apache"]
+    subgraph RUN["执行层 — 只认 IR，不认 UI"]
+      ORCH["编排 GraphRunner / Orchestrator<br/>分支 · 受限循环 · 全局早停"]
+      ENG["执行核 StageEngine<br/>条件求值 · 通道裁剪 · 预算熔断"]
+      GEN["算法 Generator（ask/tell）<br/>11 种 · registry 可插拔"]
     end
 
-    subgraph EVAL["评估接入层 Evaluator"]
-      direction LR
-      FN["Python 函数适配器"]
-      HW["硬件适配器 PyVISA/PyMeasure·MIT<br/>稳定时间/平均/迟滞 + 独立安全限位"]
-      HOOK["非标逻辑 Hook<br/>pre_move / post_measure / on_stage_end"]
-    end
+    EVAL["评估层 Evaluator<br/>函数 / 模型 / 仿真硬件 / <b>真实设备</b><br/>安全 clamp · 平均 · 选择性读通道 · 计时"]
+    OBJ["被优化对象<br/>耦合台 · 标定台 · WDL 均衡"]
 
-    DATA["运行时与数据层<br/>全量归档(SQLite/parquet) · 断点续跑 · 一键回滚最优点 · 实时收敛曲线/帕累托前沿"]
+    JUDGE["评判层（确定性，LLM 不可改分）<br/>trace_digest 诊断 · benchsuite 题库 · audit 打分 · autotune 搜参"]
+    DATA["数据层<br/>store 归档/续跑/回滚 · workspace 实时会话"]
 
-    DEV["被优化对象：耦合台 / 标定台 / WDL 均衡（或仿真台）"]
-
-    UI <-->|双向：生成/渲染/解释| IR
-    IR --> ORCH
-    ORCH -->|按 stage 实例化| GEN
+    EDIT <-->|生成 / 渲染 / 解释| IR
+    IR --> ORCH --> ENG --> GEN
     GEN -->|ask: 下一组 x| EVAL
-    EVAL -->|tell: y·约束观测| GEN
-    EVAL --> DEV
-    ORCH --> DATA
-    EVAL --> DATA
-    DATA -->|曲线/轨迹/诊断| UI
+    EVAL -->|tell: y| GEN
+    EVAL --> OBJ
+    ENG --> DATA
+    DATA -->|trace| JUDGE
+    JUDGE -->|证据 / 建议区间| EDIT
 ```
 
-## 2. 各层最终决策
+---
 
-### 2.1 声明层 VOCS（已实现 `optplat/vocs.py`）
-- 变量：任意个数，范围 + 可选分辨率；目标：任意个数，四种 mode 统一
-  （maximize / minimize / **target**（转 `-|y-t|` 或代理模型反解）/ **scan**（退化为扫描生成器，产特性曲线））。
-- 约束两类：**硬约束**（提点时过滤，如安全区）与**软约束/keep**（违反则罚分+回退，如 `y1 > k`）。
-- Pydantic 建模 → 自动导出 JSON Schema，同一份 schema 驱动表单生成、LLM 输出校验、后端校验（三处一源）。
+## 1. 五条公理（改架构时先看这里）
 
-### 2.2 算法层 Generator（已实现 6 种 + wrapper 路线）
-- 统一 `ask()/tell()/done/failed/best_x`，与 Xopt 接口兼容——将来可直接挂它的 generator。
-- **已实现算法库**（`optplat/generators.py`，全部 ask/tell，仅依赖 numpy/scipy/lmfit）：
-
-  | algorithm | 类别 | 说明 |
-  |---|---|---|
-  | `grid_scan` / `line_scan` | 找光 (Phase 1) | 栅格/线扫描，配 stage `stop.target` 到阈值即停 |
-  | `coordinate_descent` | 局部优化 | compass search + 步长收缩 |
-  | `nelder_mead` | 局部优化 | 单纯形下降（reflect/expand/contract/shrink，ask/tell 驱动） |
-  | `quadratic_fit` / `gaussian_fit` | 标准拟合定峰 | 最小二乘（lmfit）全自由拟合，**R² 守门 + 外推限幅**，score 空间统一覆盖 max/min/target |
-  | `parametric_fit` (公式法/非标拟合) | 带先验的拟合 | 把**已知参数钉死**（顶点/σ/曲率），只解自由参数；支持**自定义模型表达式**（客户非标公式）；参数钉够即退化成"公式"。lmfit `vary=False` + `ExpressionModel` |
-  | `formula` | 解析特例 | 三点抛物线闭式解峰，**无回归**（= 参数全被点数定死的 parametric_fit 特例） |
-  | `bayesian` | 贝叶斯(OSS) | Optuna(MIT) TPE/GP，`n_calls` 内探索-利用，全局优化 |
-
-- **开源 wrapper（已接入 + 待接入）**：
-  - ✅ `bayesian` → **Optuna(MIT)** TPE/GP，`optplat/bayes.py`，惰性导入保持核心纯净；native ask/tell 1:1 映射。
-  - 待接：多目标帕累托→pymoo(Apache)；更多无梯度→Nevergrad(MIT)；成熟组合→Xopt(Apache)。每个 ≈ 几十行。
-- 客户自定义算法 = 实现同一基类，entry_points 注册为插件。
-
-### 2.3 编排层 Orchestrator（已实现 `optplat/orchestrator.py`，自研核心）
-- 模型：**受限状态机**（不是 DAG——优化需要回边循环；不是通用脚本——硬件不允许图灵完备）。
-- 算子集固定五个：`stage` / `if-then-else` / `loop{body, until, max_rounds}` / stage 级 `stop{max_iter, target}` / pipeline 级全局 `until`（任意时刻满足即整体早停）。
-- stage 语义：冻结其余变量，只把本 stage 的变量子集交给 generator；结束时把操作点移到最优可行点。
-- `keep` 约束：违反罚分（后续升级为贝叶斯的可行性感知采集函数）；`fallback`：拟合守门失败自动降级坐标梯度。
-- YAML 嵌套块 ↔ 画布控制节点是同一状态机的两种同构视图。
-
-### 2.3.1 两种 IR、一个执行核（块 / 图，Dify 风格）
-
-编排引擎是 **JSON 驱动**的，同一份 `StageEngine`（`optplat/engine.py`）被两种前端复用：
-
-| IR 形态 | driver | 适合 |
+| # | 公理 | 为什么不能破 |
 |---|---|---|
-| **嵌套块** `flow: [stage, if{then/else}, loop{body,until,max_rounds}]` | `Orchestrator` | 表单 / YAML / 手写 |
-| **节点+连线图** `{nodes, edges}` | `GraphRunner`（`optplat/graph.py`） | **托拉拽画布（React Flow）直接产出的 JSON** |
+| 1 | **IR 是唯一真相** | 表单/画布/Agent/Copilot 都只是编辑器。IR 可版本化、可复现、可归档、可互相翻译；一旦让某个 UI 持有独占状态，四个入口立刻分叉 |
+| 2 | **算法统一 ask/tell** | `ask()→下一组 x`、`tell(x, score)→回填`。算法永远不知道 f 是仿真、代理模型还是真实电机——这是"换算法/换硬件互不影响"的根 |
+| 3 | **编排自研且薄** | 通用算法有开源，**"迭代优化 + 硬件在环 + 受限循环"的编排没有**。这是差异化，也是唯一必须自己扛的复杂度，所以要保持薄：算子集固定，不做图灵完备 |
+| 4 | **安全护栏独立、不可关闭** | 限位在 Evaluator 层 clamp；loop 强制 `max_visits`/`max_rounds`；全局 `max_steps`/`eval_budget` 熔断；条件表达式走 asteval 白名单而非 `eval`。**任何算法或编排的 bug 都不能命令越界运动** |
+| 5 | **打分确定性，LLM 只读证据** | 审计/诊断产出证据，分数由固定题库确定性算出。若允许 LLM 影响评分，"优化算法"会退化成"优化如何说服裁判" |
 
-图直接当状态机跑，**无编译步骤，JSON 即可运行**：
-- **分支**：节点的出边按序判断，第一个 `condition` 为真的边胜出，否则走无条件默认边（= if/switch）。
-- **循环**：一条边指回先前节点即回环，`condition` 为真时继续循环；受 **节点 `max_visits` + 全局 `max_steps`** 双重限幅（无死循环）。
-- `to_mermaid(graph)` 可把图渲染出来（画布落地前的替身视图）。
+---
 
-这就是你要的"生成 JSON → 类 Dify → 运行"：画布只负责产 `{nodes,edges}` JSON，`GraphRunner` 直接执行。
+## 2. 分层：职责、契约、代价
 
-### 2.3.2 算法即插件（registry，"定好接口就能接上"）
+自上而下，每层只依赖下一层的**契约**，不依赖其实现。
 
-`optplat/registry.py` 是算法节点的插件契约。每个算法声明 **参数 schema + builder**，引擎从不 hard-code 算法名——只调 `build_generator()`。
+| 层 | 职责 | 对外契约 | 文件 | 换掉它的代价 |
+|---|---|---|---|---|
+| **编辑器** | 让人/Agent 表达意图 | 产出合法 IR | `web/index.html` · `app.py` · `mcp_server.py` | **低**。四个并存已验证；再加一个不动后端 |
+| **IR** | 唯一真相 | Pydantic schema | `vocs.py` + 图/块 JSON | **高**。改它牵动全部——加字段用**向后兼容的可选项** |
+| **编排** | 分支 / 受限循环 / 早停 | 吃 IR，驱动执行核 | `graph.py`(图) · `orchestrator.py`(块) | **中**。两种 IR 形态共用一个执行核，加第三种也只是新 driver |
+| **执行核** | 跑一个 stage：条件求值、通道裁剪、预算、记账 | `run_stage(step)` | `engine.py` | **高**。全平台唯一的执行路径，所有入口最终都落到它 |
+| **算法** | ask/tell 出候选点 | `Generator` 四件套 | `generators.py` · `bayes.py` · `registry.py` | **低**。注册即用，见 §3.1 |
+| **评估** | 给 x 得 y | `evaluate(x, stage, channels) -> {y}` | `evaluator.py` · `hardware.py` · `userdev.py` · `models.py` | **低**。函数/模型/仿真/真实设备四种实现同一契约 |
+| **评判** | 诊断、打分、搜参 | 读 trace，产确定性分数 | `trace_digest.py` · `benchsuite.py` · `audit.py` · `autotune.py` | **低**。旁路，不参与运行时 |
+| **数据** | 归档、续跑、回滚、实时同步 | `store` / `workspace` | `store.py` · `workspace.py` | **低**。SQLite 可换 |
 
-- **画布读取** `algorithm_catalog()` 自动生成节点面板 + 每个节点的配置表单。
-- **接自己的算法**：实现 `Generator`（`ask/tell/done/best_x` 四件套），`register_algorithm(AlgorithmSpec(...))` 注册，立刻成为可拖拽节点并能在任意图/流水线里运行——**引擎零改动**（已测：自定义 random_search 插件直接跑通）。
+**读法**：代价"低"的层是设计好的**可换件**；代价"高"的两层（IR、执行核）是承重墙——演进要往可换件上加，而不是把承重墙改宽。
+
+---
+
+## 3. 可演进性：八个扩展点
+
+这是本架构的核心资产。**加东西时先在这张表里找缝，找不到缝再谈改平台。**
+
+| 想加什么 | 往哪加 | 平台要改吗 | 已验证 |
+|---|---|---|---|
+| 新算法 | `register_algorithm(AlgorithmSpec(...))` | **零改动** | 自定义 `random_search` 插件直接跑通 |
+| 新硬件 / 换仪器 / 增减 x·y | 外部设备文件 `AXES` + `METERS` | **零改动** | `run_device.py` + `OPTPLAT_DEVICE` |
+| 一次采集出多个 y | `Source(...).meter(y, key)` | **零改动** | 双通道功率计，4 项测试 |
+| 新"给 x 出 y"的来源（代理模型/客户数据/GP/神经网络） | `register_model(kind, builder)` | **零改动** | `analytic` · `dataset_idw` |
+| 新界面 / 新入口 | 只要产合法 IR | **零改动** | 画布 · 表单 · MCP Agent 并存 |
+| 新目标模式（除 max/min/target/scan） | `ObjectiveMode` + `Objective.score()` | **改一处**（枚举 + 打分），算法自动跟随 | `target` 模式已贯通 |
+| 新编排算子（如 `goto`/`on_fail`） | `graph.py` 节点类型 + 执行核分派 | **改两处**，且必须自带限幅 | 分支/回边已有 |
+| 新评判维度 / 新题库 | `benchsuite` 加题、`trace_digest` 加失效模式 | **零改动**（题库有指纹校验） | DEV 4 题 + FROZEN 7 题 |
+
+### 3.1 加算法（最常用的缝）
 
 ```python
-class MyGen(Generator): ...            # ask()->下一组x, tell(x,score), done, best_x
+class MyGen(Generator): ...          # ask() -> 下一组 x；tell(x, score)；done；best_x
 register_algorithm(AlgorithmSpec(
-    name="my_algo", category="custom", single_var=False,
-    params={"gain": {"type": "float", "default": 1.0}},
+    name="my_algo", category="refine", single_var=False,
+    params={"gain": {"type": "float", "default": 1.0, "label": "增益"}},
     builder=lambda vocs, step: MyGen(vocs, step["variables"], step["objective"],
                                      gain=step.get("gain", 1.0))))
 ```
 
-### 2.3.3 托拉拽画布（前端，React Flow·MIT）——落地方式
+注册后**同时**获得：画布左栏可拖拽节点、由 `params` 自动生成的配置面板、可在任意图/流水线里运行、
+被自动调优纳入变异空间（按 `category` 归相）、被 MCP Agent 通过 `list_algorithms` 看见。
+**引擎从不 hard-code 算法名**——只调 `build_generator()`，这是"零改动"的机制来源。
 
-后端已就绪，前端是一层薄壳：
-1. 画布调后端 `algorithm_catalog()` 拿到算法清单+参数 schema → 渲染左侧节点面板与配置表单。
-2. 用户拖拽连线 → 前端序列化成 `{nodes, edges}` JSON（就是 `workflow_graph_example.json` 那种）。
-3. JSON POST 给后端 → `GraphRunner(...).run()` 执行 → 回传 events/收敛曲线/最优点。
-4. 保存/版本化/分享的就是这份 JSON。React Flow(MIT)、rjsf(Apache) 均 permissive。
+### 3.2 接硬件（第二常用）
 
-### 2.4 评估接入层 Evaluator（函数版 + 硬件版均已实现）
-- 契约：`evaluate(dict[x]) -> dict[y]`，自变量/因变量数目任意；全量历史自动归档。
-- ✅ `HardwareEvaluator`（`optplat/hardware.py`）：duck-typed `stage.move()` + `meter.read()`；
-  内置**稳定时间**、**多次平均**（抗噪）、**独立安全限位**（默认 clamp 到安全区，`strict=True` 则拒绝并抛错——
-  任何算法/编排 bug 都无法命令越界运动）。附带 `SimulatedStage/SimulatedMeter`（可注入噪声）无硬件即可跑测。
-- 真实后端：PyVISA/PyMeasure(MIT) 写个 move/read 薄类即可；非标逻辑通过 Hook 注入，不改平台代码。
-- P1c 加异步/批量接口（贝叶斯 batch 采样与多通道并行需要）。
+平台与仪器之间只有三个方法：`axis.move(v)` / `axis.get()` / `meter.get()`。
+写一个设备文件导出 `AXES` + `METERS`，`load_device()` 自动读出有几个 x、几个 y 并建好 VOCS 与 Evaluator。
+完整规范（决策表、四条不变量、冒烟自检、症状对照）见 **`skills/device-interface/`**，图文版 `docs/device-interface.html`。
 
-### 2.5 用户面（三个编辑器）+ GLM5.1 定位
-- **模板库优先**：「首光→定峰」「WDL 多通道均衡」「标定扫描」预置流程，客户选模板填 3~5 个旋钮
-  （拟合 R² 阈值、信赖域半径、采样图案、平均次数都做成模板默认值+高级项）。行业 know-how 沉淀在这，是付费点。
-- 表单由 JSON Schema 自动生成（rjsf）；画布用 React Flow(MIT)，节点↔IR 双向绑定；
-- GLM5.1 三个用法：**意图→IR**（Instructor 结构化输出，schema 不合规自动重试）、**IR→人话解释+体检**、**跑后诊断**（读归档数据给建议）。边界：LLM 永远只产候选配置，经"渲染→校验→用户确认"才执行。
+### 3.3 加"给 x 出 y"的来源
 
-### 2.6 运行时与数据层（✅ SQLite 持久化已实现）
-- ✅ `SQLiteStore`（`optplat/store.py`，纯 stdlib）：归档每次评估（run_id, seq, stage, point, objectives, ts）；
-  **断点续跑**（`Orchestrator(start_point=store.best(...))` 从归档最优点继续）；
-  **一键回滚**（`rollback_to_best()` 驱动电机回到历史最优点，异常/中止后用）。
-- 待做：实时收敛曲线已在 Streamlit；多目标帕累托前沿随 pymoo 接入；归档数据喂代理模型（target/建模类任务）。
+`models.py` 的 ModelProvider 与算法 registry 同构：`register_model(kind, builder)` 返回一个 `f(x) -> {y}`。
+客户采集的数据建成代理模型后，评估层、画布、自动调优全部照旧——**这是"先建模再优化"路线的接口**。
 
-## 3. License 红黑榜（已核实）
+---
 
-| 结论 | 组件 | License |
+## 4. 一次运行发生什么（把各层串起来）
+
+```
+IR(图) → GraphRunner 逐节点走
+  └─ 每个算法节点 → StageEngine.run_stage(step)
+       ├─ 算本步真正需要的通道 = 目标 ∪ keep ∪ stop ∪ until ∪ targets 引用的 y
+       ├─ 循环：generator.ask() → engine.evaluate(x, channels) → generator.tell(x, score)
+       │        └─ Evaluator：安全 clamp → move → settle → 每轮平均前失效 Source 缓存
+       │                      → 只读需要的通道 → 求平均 → 计时(同组并行/异组串行) → 归档
+       ├─ 守门：stop{max_iter,target} · keep 违反罚分 · 拟合 R² 不达标则回退
+       └─ 收尾：操作点移到最优可行点，记录 fit_info
+  ├─ 边上的 condition 决定分支；回边即循环，受 max_visits + max_steps 双限幅
+  └─ 全局 until 命中 → StopAll → 同步操作点后整体早停
+→ result{state, objectives, n_evals, events, history, fits, reads, sim_seconds}
+→ 画布画收敛/1D/2D 轨迹；store 归档；trace_digest 出诊断
+```
+
+**两个容易被忽略但很关键的设计**：
+
+1. **通道裁剪**（`_needed_channels`）——只优化 y1 的步骤根本不去读 y2。在真实台架上，一次测量是秒级成本，这直接决定总耗时。
+2. **缓存边界 = 一轮平均**——共享采集的缓存由平台掌握失效时机，所以 `averages=8` 仍是 8 次独立采集。用户自己缓存做不到这点。
+
+---
+
+## 5. 不变量（重构时的红线）
+
+- 执行路径**只有一条**：任何入口最终都走 `StageEngine`。不要为某个前端开旁路。
+- 安全限位、循环限幅、预算熔断**不提供关闭开关**，也不接受 IR 里的参数把它们调成无穷。
+- 条件表达式只走 asteval 白名单，**永不 `eval`**；LLM 产出的 IR 必须过 schema 校验才能执行。
+- 分数只由确定性题库产生；诊断可以给建议区间，但**越界会被 schema 夹回**。
+- IR 加字段一律**可选 + 有默认**，老方案 JSON 必须还能跑（画布的方案库里有存量文件）。
+- 新依赖先核 license，permissive 才用，并登记 `THIRD_PARTY_LICENSES.md`。
+
+---
+
+## 6. 演进路线（缝已经留好了，按需长）
+
+| 方向 | 落在哪层 | 已留的缝 | 代价 |
+|---|---|---|---|
+| **真实仪器批量接入** | 评估 | 设备文件契约 + 规范 skill | 每台仪器一个薄类 |
+| **多目标真帕累托** | 算法 | ask/tell 兼容；`register_algorithm` | 接 pymoo(Apache) ≈ 几十行 wrapper |
+| **异步/批量评估** | 评估 | 目前同步单点 | 需扩契约为 batch，**会动到执行核**——最贵的一项 |
+| **GLM5.1 Copilot（NL→IR）** | 编辑器 | `draft_workflow` 工具面已备；Hermes 路线已通 | 只加编辑器，后端不动 |
+| **`scan` 模式执行器** | 执行核 | `ObjectiveMode.SCAN` 已占位 | 加一个"不求最优、只产曲线"的执行分支 |
+| **客户数据建模闭环** | 评估 | `register_model` | 加 provider（GP/RBF/NN）即可 |
+| **多用户 / 任务队列** | 数据 + 服务 | FastAPI + workspace 按 session 隔离 | 需要真队列时再上，别提前做 |
+| **归档换后端** | 数据 | `store` 接口薄 | SQLite → parquet/PG |
+
+**优先级建议**：真实仪器接入 > 客户数据建模 > 多目标 > 异步批量。前两项是客户价值，第三项是能力补全，第四项是性能优化且最贵——**没被真实测量时间卡住之前不要做**。
+
+---
+
+## 7. 已知简化与升级路径（诚实清单）
+
+| 现状 | 何时该升级 | 升到哪 |
 |---|---|---|
-| 🔴 禁用 | Badger（编排+GUI 思路可参考，代码不可碰） | GPL-3.0 |
-| 🔴 禁用 | n8n（明文禁止嵌入产品/向客户提供） | Sustainable Use License |
-| 🟡 可用但不选 | Node-RED（license 干净，但消息流模型不匹配迭代优化+硬件在环，且 Node.js 与 Python 算法割裂） | Apache-2.0 |
-| ✅ 采用 | Xopt · pymoo · Streamlit · rjsf | Apache-2.0 |
-| ✅ 采用 | Optuna · Nevergrad · React Flow · Instructor · PyVISA · asteval · pydantic · pyyaml | MIT |
-| ✅ 采用 | scipy · numpy · lmfit · scikit-optimize · pandas | BSD-3 |
+| `keep` 违反用大罚分 | 约束经常在边界附近被触发时 | 贝叶斯 constrained acquisition / 回退最近可行点 |
+| 编排是树/图遍历执行器 | 需要跨节点 `goto`/`on_fail` 时 | 显式状态机表（transitions·MIT） |
+| Evaluator 同步单点 | 贝叶斯 batch 或多通道并行成为瓶颈时 | async/batch 契约（会动执行核） |
+| 多目标靠"分阶段 + keep"标量化 | 客户真要看前沿时 | pymoo NSGA-II |
+| `dataset_idw` 是最朴素的代理 | 数据量上来、精度不够时 | GP / RBF provider |
+| 画布无撤销/版本树 | 用户开始怕改坏方案时 | 方案 JSON 本就可版本化，加 UI 即可 |
 
-本仓库不放 LICENSE 文件：闭源产品，无 license = 保留所有权利。
+---
 
-## 4. 自研 vs 开源 最终分界
+## 8. License 底线
 
-**自研（护城河，约 20% 工作量）**：编排状态机 + 受限 DSL、拟合定峰家族、光器件模板库、GLM5.1 Copilot 集成、非标硬件适配器。
-**开源装配（约 80%）**：全部通用算法、拟合底层、表单/画布 UI 组件、LLM 结构化输出、仪器通信。
+| 结论 | 组件 |
+|---|---|
+| 🔴 禁用 | **Badger**(GPL-3.0，思路可参考代码不可碰) · **n8n**(Sustainable Use License，明文禁止嵌入交付) |
+| ✅ 采用 | Optuna · React Flow · Instructor · PyVISA · asteval · pydantic · pyyaml · MCP SDK（MIT）／scipy · numpy · lmfit · pandas · httpx（BSD）／Xopt · pymoo · Streamlit · FastAPI 生态（Apache/MIT） |
 
-## 5. 路线图
+本仓库不放 LICENSE 文件：闭源产品，无 license = 保留所有权利。新增依赖先核实、后登记。
 
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| **P0 · MVP** | VOCS + 坐标梯度 + 拟合定峰(R²门/限幅/回退) + if/loop/until 编排 + keep 约束 + Streamlit + YAML IR | ✅ 已完成并跑通 |
-| **P1a · 算法库** | 找光扫描(grid/line)、Nelder-Mead、公式法(三点解析)；两阶段"找光→优化"流程；回归测试 | ✅ 已完成（6 种算法，两阶段 62 次评估收敛，5 tests 通过） |
-| **P1b · 硬件+持久化** | Optuna 贝叶斯 wrapper(TPE/GP)、PyVISA/仿真硬件适配器 + 稳定时间/平均/独立安全限位、SQLite 归档/续跑/回滚 | ✅ 已完成（11 tests 通过；含 global-until 状态一致性修复） |
-| **P1c · 图运行时+插件** | node+edge 图 IR + `GraphRunner`（分支/受限循环，Dify 风格，JSON 直接执行）；算法插件 registry（自定义算法零改动接入）；graph→mermaid | ✅ 已完成（16 tests；含自定义算法插件、受限循环、分支测试） |
-| **P2 · 服务化** | FastAPI(MIT) 后端：`/catalog` `/vocs` `/run/graph` `/run/pipeline`（`optplat/api.py`） | ✅ 已完成（7 API 测试） |
-| **P2 · 画布前端** | 托拉拽画布（`web/index.html`，纯 vanilla JS+SVG，无 CDN，离线可用）：读 `/catalog` 建节点面板，拖拽连线产 `{nodes,edges}` JSON，POST `/run/graph`，出收敛曲线/轨迹 | ✅ 已完成（服务于 `/`；node --check 通过） |
-| **P1d · 多目标** | pymoo NSGA-II wrapper、异步/批量 Evaluator | 下一步 |
-| **P2 · 易用性** | JSON Schema 正式化 + rjsf 表单、场景模板库、GLM5.1 Copilot（意图→IR / IR→人话 / 跑后诊断） | |
-| **P3 · 平台化** | React Flow 画布（节点↔IR 双向）、FastAPI 服务化 + 多用户/任务队列、scan 模式与建模类任务闭环 | |
+---
 
-## 6. 已知简化与升级路径（诚实清单）
+## 9. 自研 vs 开源的分界（护城河在哪）
 
-- keep 约束目前是 `-1e9` 罚分 → 升级为可行性感知（贝叶斯 constrained acquisition / 回退到最近可行点）。
-- 编排是树遍历执行器（够用）→ 需要 `goto/on_fail` 跨节点跳转时升级为显式状态机表（`transitions`·MIT）。
-- Evaluator 同步单点 → P1c 加 async/batch（贝叶斯 batch / 多通道并行）。
-- ✅ 历史已落 SQLite（含续跑/回滚）；parquet 导出可选。
-- 多目标目前靠"分阶段+keep"标量化 → 真帕累托需求出现时接 pymoo（P1c）。
-- `scan` mode 已在 schema 中占位，执行器 P3 实现。
+**自研（≈20% 工作量，全部价值）**：编排状态机与受限 DSL、拟合定峰家族与守门回退、通道裁剪与共享采集的成本模型、
+光器件场景模板库、审计-诊断闭环、设备接入契约。
+
+**开源装配（≈80%）**：通用算法、拟合底层、Web 框架、结构化输出、仪器通信。
+
+判断新功能该自研还是接开源，用一个问题：**它是否与"硬件在环 + 迭代优化"强耦合**？是则自研，否则找 permissive 的现成件。

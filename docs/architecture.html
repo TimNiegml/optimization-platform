@@ -1,0 +1,375 @@
+<!doctype html><html><head><meta charset='utf-8'><style>*{box-sizing:border-box;margin:0;padding:0}</style></head><body><title>架构一页纸 · 光器件优化平台</title>
+
+<style>
+  :root {
+    --bg: #EDF0EE; --surface: #F8FAF9; --ink: #0F1A18; --muted: #566663; --rule: #C9D3D0;
+    --hot: #B8481A; --hot-tint: #F6E3DA; --cool: #0C6360; --cool-tint: #DFEBEA;
+    --wall: #1F3D5C; --wall-tint: #DCE6EF; --warn: #7A5A0E; --warn-tint: #F2EAD3;
+    --sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Menlo", "Cascadia Mono", "Consolas", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0A100F; --surface: #121B1A; --ink: #E1E9E6; --muted: #90A29E; --rule: #253330;
+      --hot: #EE8253; --hot-tint: #2A1810; --cool: #3FB2AA; --cool-tint: #0E2422;
+      --wall: #7FA9D0; --wall-tint: #16232F; --warn: #C8A24A; --warn-tint: #2A2312;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0A100F; --surface: #121B1A; --ink: #E1E9E6; --muted: #90A29E; --rule: #253330;
+    --hot: #EE8253; --hot-tint: #2A1810; --cool: #3FB2AA; --cool-tint: #0E2422;
+    --wall: #7FA9D0; --wall-tint: #16232F; --warn: #C8A24A; --warn-tint: #2A2312;
+  }
+  :root[data-theme="light"] {
+    --bg: #EDF0EE; --surface: #F8FAF9; --ink: #0F1A18; --muted: #566663; --rule: #C9D3D0;
+    --hot: #B8481A; --hot-tint: #F6E3DA; --cool: #0C6360; --cool-tint: #DFEBEA;
+    --wall: #1F3D5C; --wall-tint: #DCE6EF; --warn: #7A5A0E; --warn-tint: #F2EAD3;
+  }
+
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.75; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 56px 24px 96px; display: flex; flex-direction: column; gap: 40px; }
+
+  header { display: flex; flex-direction: column; gap: 14px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--cool); }
+  h1 { font-size: clamp(28px, 4.4vw, 40px); line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; margin: 0; }
+  .thesis {
+    font-size: 18px; line-height: 1.7; margin: 0; padding: 16px 20px;
+    border-left: 3px solid var(--hot); background: var(--surface); border-radius: 3px; max-width: 66ch;
+  }
+  .rule { height: 1px; background: var(--rule); border: 0; margin: 0; }
+
+  section { display: flex; flex-direction: column; gap: 18px; }
+  h2 { font-size: 21px; font-weight: 700; letter-spacing: -0.005em; margin: 0; display: flex; align-items: baseline; gap: 12px; }
+  h2 .num { font-family: var(--mono); font-size: 12px; color: var(--hot); letter-spacing: 0.1em; flex: none; }
+  p { margin: 0; max-width: 70ch; }
+  .muted { color: var(--muted); }
+  code { font-family: var(--mono); font-size: 0.88em; background: var(--cool-tint); color: var(--ink); padding: 0.1em 0.36em; border-radius: 3px; }
+
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: 22px 20px 16px; display: flex; flex-direction: column; gap: 14px; overflow-x: auto; }
+  figure svg { display: block; width: 100%; min-width: 560px; height: auto; }
+  figcaption { font-size: 13.5px; color: var(--muted); line-height: 1.7; border-top: 1px solid var(--rule); padding-top: 12px; max-width: 76ch; }
+  .sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px; vertical-align: baseline; margin-right: 4px; }
+  .sw-wall { background: var(--wall-tint); border: 2px solid var(--wall); }
+  .sw-swap { background: var(--cool-tint); border: 1.5px solid var(--cool); }
+
+  .box { fill: var(--surface); stroke: var(--rule); stroke-width: 1.5; }
+  .box-wall { fill: var(--wall-tint); stroke: var(--wall); stroke-width: 2.5; }
+  .box-cool { fill: var(--cool-tint); stroke: var(--cool); stroke-width: 1.5; }
+  .box-dash { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 5 4; }
+  .box-warn { fill: var(--warn-tint); stroke: var(--warn); stroke-width: 1.5; }
+  .box-hot { fill: var(--hot-tint); stroke: var(--hot); stroke-width: 1.5; }
+  .band { fill: none; stroke: var(--rule); stroke-width: 1; stroke-dasharray: 4 4; }
+  .t { fill: var(--ink); font-family: var(--sans); font-size: 14px; font-weight: 600; }
+  .tsm { fill: var(--ink); font-family: var(--sans); font-size: 12.5px; font-weight: 600; }
+  .ts { fill: var(--muted); font-family: var(--mono); font-size: 11px; }
+  .tl { fill: var(--muted); font-family: var(--mono); font-size: 11px; }
+  .t-wall { fill: var(--wall); font-family: var(--mono); font-size: 11.5px; font-weight: 700; }
+  .t-cool { fill: var(--cool); font-family: var(--mono); font-size: 11.5px; font-weight: 600; }
+  .t-hot { fill: var(--hot); font-family: var(--mono); font-size: 11.5px; font-weight: 600; }
+  .t-warn { fill: var(--warn); font-family: var(--mono); font-size: 11.5px; font-weight: 600; }
+  .ln { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+  .ln-wall { stroke: var(--wall); stroke-width: 2; fill: none; }
+  .ln-cool { stroke: var(--cool); stroke-width: 1.5; fill: none; }
+  .ln-thin { stroke: var(--rule); stroke-width: 1.5; fill: none; }
+  .mk-mut { fill: var(--muted); }
+  .mk-wall { fill: var(--wall); }
+  .mk-cool { fill: var(--cool); }
+
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; background: var(--surface); border: 1px solid var(--rule); }
+  th, td { text-align: left; padding: 9px 13px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td code { background: transparent; padding: 0; color: var(--cool); }
+  td:first-child { white-space: nowrap; font-weight: 600; }
+  .pill { font-family: var(--mono); font-size: 11px; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+  .p-wall { background: var(--wall-tint); color: var(--wall); }
+  .p-swap { background: var(--cool-tint); color: var(--cool); }
+
+  ol.ax { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; counter-reset: ax; }
+  ol.ax li { display: grid; grid-template-columns: 26px 1fr; gap: 12px; counter-increment: ax; }
+  ol.ax li::before { content: counter(ax); font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--hot); padding-top: 4px; }
+  ol.ax b { display: block; }
+  ol.ax span { color: var(--muted); font-size: 14.5px; }
+
+  .redline { border: 1px solid var(--rule); border-left: 3px solid var(--hot); background: var(--surface); border-radius: 3px; padding: 14px 20px; }
+  .redline ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 7px; font-size: 14.5px; }
+
+  .files { font-family: var(--mono); font-size: 13.5px; line-height: 1.9; color: var(--muted); }
+  .files b { color: var(--ink); font-weight: 600; }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">optplat · architecture</div>
+  <h1>架构一页纸</h1>
+  <p class="thesis"><strong>声明式 IR 是唯一真相；所有界面都只是它的编辑器；执行核只认 IR；算法、硬件、模型、评判都是可插拔件；安全与打分两条底线独立且不可绕过。</strong></p>
+  <p class="muted">全文见仓库 <code>ARCHITECTURE.md</code>。这页只讲两件事：<strong>主干长什么样</strong>，以及<strong>往哪儿长</strong>。</p>
+</header>
+
+<hr class="rule" />
+
+<section>
+  <h2><span class="num">FIG 1</span>主干：两堵承重墙，其余都是可换件</h2>
+
+  <figure>
+    <svg viewBox="0 0 900 660" role="img" aria-label="平台主干架构图：编辑器层产出声明式 IR，IR 驱动编排、执行核、算法与评估层，最终作用于被优化对象；数据层与评判层在侧旁记录并诊断。IR 与执行核是两堵承重墙，其余各层都是可替换件。">
+      <defs>
+        <marker id="b1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-mut" d="M 0 0 L 10 5 L 0 10 z" /></marker>
+        <marker id="b1w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-wall" d="M 0 0 L 10 5 L 0 10 z" /></marker>
+        <marker id="b1c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-cool" d="M 0 0 L 10 5 L 0 10 z" /></marker>
+      </defs>
+
+      <!-- editors band -->
+      <rect class="band" x="14" y="8" width="700" height="88" rx="4" />
+      <text class="t-cool" x="28" y="27">编辑器层 · 都只产同一份 IR，可增可换</text>
+      <rect class="box-cool" x="28" y="36" width="158" height="48" rx="3" />
+      <text class="tsm" x="107" y="58" text-anchor="middle">托拉拽画布</text>
+      <text class="ts" x="107" y="74" text-anchor="middle">web/index.html</text>
+      <rect class="box-cool" x="198" y="36" width="158" height="48" rx="3" />
+      <text class="tsm" x="277" y="58" text-anchor="middle">表单控制台</text>
+      <text class="ts" x="277" y="74" text-anchor="middle">app.py</text>
+      <rect class="box-cool" x="368" y="36" width="158" height="48" rx="3" />
+      <text class="tsm" x="447" y="58" text-anchor="middle">MCP Agent</text>
+      <text class="ts" x="447" y="74" text-anchor="middle">20 工具 · Hermes</text>
+      <rect class="box-dash" x="538" y="36" width="158" height="48" rx="3" />
+      <text class="tsm" x="617" y="58" text-anchor="middle">Copilot（未做）</text>
+      <text class="ts" x="617" y="74" text-anchor="middle">GLM5.1 · NL→IR</text>
+
+      <line class="ln-wall" x1="364" y1="96" x2="364" y2="120" marker-end="url(#b1w)" />
+      <text class="tl" x="376" y="112">生成 / 渲染 / 解释</text>
+
+      <!-- IR wall -->
+      <rect class="box-wall" x="120" y="120" width="488" height="72" rx="3" />
+      <text class="t" x="364" y="146" text-anchor="middle">★ 声明式 IR ★</text>
+      <text class="ts" x="364" y="165" text-anchor="middle">VOCS：变量 / 目标(max·min·target·scan) / 约束</text>
+      <text class="ts" x="364" y="181" text-anchor="middle">流程：{nodes, edges} 图 &#160;或&#160; 嵌套块 flow</text>
+      <text class="t-wall" x="112" y="152" text-anchor="end">承重墙</text>
+      <text class="t-wall" x="112" y="168" text-anchor="end">改动代价高</text>
+
+      <line class="ln-wall" x1="364" y1="192" x2="364" y2="218" marker-end="url(#b1w)" />
+
+      <!-- orchestration -->
+      <rect class="box" x="120" y="218" width="488" height="56" rx="3" />
+      <text class="tsm" x="364" y="240" text-anchor="middle">编排 GraphRunner（图） / Orchestrator（块）</text>
+      <text class="ts" x="364" y="258" text-anchor="middle">分支 = 条件边 · 循环 = 回边(max_visits) · 全局早停</text>
+
+      <line class="ln" x1="364" y1="274" x2="364" y2="298" marker-end="url(#b1)" />
+
+      <!-- engine wall -->
+      <rect class="box-wall" x="120" y="298" width="488" height="62" rx="3" />
+      <text class="t" x="364" y="322" text-anchor="middle">执行核 StageEngine</text>
+      <text class="ts" x="364" y="341" text-anchor="middle">条件求值(asteval 白名单) · 通道裁剪 · 预算熔断 · 记账</text>
+      <text class="t-wall" x="112" y="323" text-anchor="end">承重墙</text>
+      <text class="t-wall" x="112" y="339" text-anchor="end">唯一执行路径</text>
+
+      <line class="ln" x1="364" y1="360" x2="364" y2="384" marker-end="url(#b1)" />
+
+      <!-- generators -->
+      <rect class="box-cool" x="120" y="384" width="488" height="56" rx="3" />
+      <text class="tsm" x="364" y="406" text-anchor="middle">算法 Generator · 统一 ask / tell</text>
+      <text class="ts" x="364" y="424" text-anchor="middle">11 种 · registry 注册即用 · 引擎从不 hard-code 算法名</text>
+
+      <line class="ln-cool" x1="330" y1="440" x2="330" y2="466" marker-end="url(#b1c)" />
+      <text class="tl" x="196" y="458" text-anchor="start">ask: 下一组 x</text>
+      <path class="ln-cool" d="M 400 466 L 400 440" marker-end="url(#b1c)" />
+      <text class="tl" x="412" y="458">tell: y</text>
+
+      <!-- evaluator -->
+      <rect class="box-cool" x="120" y="466" width="488" height="66" rx="3" />
+      <text class="tsm" x="364" y="490" text-anchor="middle">评估 Evaluator · evaluate(x, stage, channels) → {y}</text>
+      <text class="ts" x="364" y="508" text-anchor="middle">函数 / 代理模型 / 仿真硬件 / <tspan font-weight="700">真实设备</tspan></text>
+      <text class="ts" x="364" y="524" text-anchor="middle">安全 clamp · 平均 · 只读需要的通道 · 并行/串行计时</text>
+
+      <line class="ln" x1="364" y1="532" x2="364" y2="558" marker-end="url(#b1)" />
+
+      <rect class="box-dash" x="120" y="558" width="488" height="46" rx="3" />
+      <text class="tsm" x="364" y="580" text-anchor="middle">被优化对象</text>
+      <text class="ts" x="364" y="596" text-anchor="middle">耦合台 · 标定台 · WDL 均衡（或仿真台）</text>
+
+      <!-- sidecars -->
+      <rect class="box" x="700" y="298" width="176" height="86" rx="3" />
+      <text class="tsm" x="788" y="322" text-anchor="middle">数据层</text>
+      <text class="ts" x="788" y="340" text-anchor="middle">store 归档 / 续跑</text>
+      <text class="ts" x="788" y="356" text-anchor="middle">一键回滚最优点</text>
+      <text class="ts" x="788" y="372" text-anchor="middle">workspace 实时会话</text>
+
+      <rect class="box" x="700" y="410" width="176" height="102" rx="3" />
+      <text class="tsm" x="788" y="434" text-anchor="middle">评判层（确定性）</text>
+      <text class="ts" x="788" y="452" text-anchor="middle">trace_digest 诊断</text>
+      <text class="ts" x="788" y="468" text-anchor="middle">benchsuite 冻结题库</text>
+      <text class="ts" x="788" y="484" text-anchor="middle">audit 打分/泛化间隙</text>
+      <text class="ts" x="788" y="500" text-anchor="middle">autotune 搜参</text>
+
+      <line class="ln-thin" x1="608" y1="330" x2="700" y2="330" marker-end="url(#b1)" />
+      <line class="ln-thin" x1="788" y1="384" x2="788" y2="410" marker-end="url(#b1)" />
+      <path class="ln-thin" d="M 876 440 L 890 440 L 890 60 L 704 60" marker-end="url(#b1)" />
+      <text class="tl" x="884" y="252" text-anchor="end">证据 / 建议区间</text>
+      <text class="tl" x="884" y="268" text-anchor="end">（不能改分数）</text>
+    </svg>
+    <figcaption><span class="sw sw-wall"></span><b>承重墙</b>＝ IR 与执行核：改它们牵动全平台，加字段一律用向后兼容的可选项。
+    <span class="sw sw-swap"></span><b>可换件</b>＝编辑器、算法、评估：设计上就是拿来替换和增加的。
+    评判层是旁路——只读 trace 产确定性分数，<strong>不参与运行时，也无权改分</strong>。</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2><span class="num">FIG 2</span>可演进性：八个扩展点，六个是零改动</h2>
+
+  <figure>
+    <svg viewBox="0 0 900 536" role="img" aria-label="扩展点地图：新界面、新算法、新硬件、共享采集、新模型来源、新题库共六个扩展点都是零改动插拔；新目标模式需改一处；新编排算子需改两处且必须自带限幅。">
+      <defs>
+        <marker id="c1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-mut" d="M 0 0 L 10 5 L 0 10 z" /></marker>
+      </defs>
+
+      <text class="ts" x="24" y="22">插进哪一层</text>
+      <text class="ts" x="256" y="22">加什么 · 怎么加</text>
+      <text class="ts" x="760" y="22">代价</text>
+
+      <!-- r1 editors -->
+      <rect class="box-cool" x="24" y="32" width="196" height="54" rx="3" />
+      <text class="tsm" x="122" y="55" text-anchor="middle">编辑器层</text>
+      <text class="ts" x="122" y="72" text-anchor="middle">画布 / 表单 / Agent</text>
+      <line class="ln" x1="220" y1="59" x2="250" y2="59" marker-end="url(#c1)" />
+      <rect class="box" x="250" y="32" width="480" height="54" rx="3" />
+      <text class="tsm" x="266" y="55">新界面 / 新入口</text>
+      <text class="ts" x="266" y="72">只要产出合法 IR 即可；后端一行不动</text>
+      <rect class="box-cool" x="746" y="46" width="130" height="26" rx="13" />
+      <text class="t-cool" x="811" y="63" text-anchor="middle">零改动</text>
+
+      <!-- r2 IR -->
+      <rect class="box-wall" x="24" y="98" width="196" height="54" rx="3" />
+      <text class="tsm" x="122" y="121" text-anchor="middle">IR（承重墙）</text>
+      <text class="ts" x="122" y="138" text-anchor="middle">vocs.py</text>
+      <line class="ln" x1="220" y1="125" x2="250" y2="125" marker-end="url(#c1)" />
+      <rect class="box-warn" x="250" y="98" width="480" height="54" rx="3" />
+      <text class="tsm" x="266" y="121">新目标模式（除 max / min / target / scan）</text>
+      <text class="ts" x="266" y="138">ObjectiveMode 加枚举 + Objective.score() 加分支 → 算法自动跟随</text>
+      <rect class="box-warn" x="746" y="112" width="130" height="26" rx="13" />
+      <text class="t-warn" x="811" y="129" text-anchor="middle">改一处</text>
+
+      <!-- r3 orchestration -->
+      <rect class="box-wall" x="24" y="164" width="196" height="62" rx="3" />
+      <text class="tsm" x="122" y="187" text-anchor="middle">编排 + 执行核</text>
+      <text class="ts" x="122" y="204" text-anchor="middle">graph.py</text>
+      <text class="ts" x="122" y="219" text-anchor="middle">engine.py（承重墙）</text>
+      <line class="ln" x1="220" y1="195" x2="250" y2="195" marker-end="url(#c1)" />
+      <rect class="box-hot" x="250" y="164" width="480" height="62" rx="3" />
+      <text class="tsm" x="266" y="187">新编排算子（goto / on_fail / scan 执行器）</text>
+      <text class="ts" x="266" y="204">加节点类型 + 执行核分派；<tspan font-weight="700">必须自带限幅</tspan>，否则破公理 4</text>
+      <text class="ts" x="266" y="219">异步 / 批量评估也落在这里 —— 路线图里最贵的一项</text>
+      <rect class="box-hot" x="746" y="182" width="130" height="26" rx="13" />
+      <text class="t-hot" x="811" y="199" text-anchor="middle">改两处</text>
+
+      <!-- r4 algorithms -->
+      <rect class="box-cool" x="24" y="238" width="196" height="54" rx="3" />
+      <text class="tsm" x="122" y="261" text-anchor="middle">算法层</text>
+      <text class="ts" x="122" y="278" text-anchor="middle">registry.py</text>
+      <line class="ln" x1="220" y1="265" x2="250" y2="265" marker-end="url(#c1)" />
+      <rect class="box" x="250" y="238" width="480" height="54" rx="3" />
+      <text class="tsm" x="266" y="261">新算法（含接开源：pymoo / Nevergrad / Xopt）</text>
+      <text class="ts" x="266" y="278">register_algorithm(AlgorithmSpec) → 立刻成为可拖拽节点 + 进自动调优</text>
+      <rect class="box-cool" x="746" y="252" width="130" height="26" rx="13" />
+      <text class="t-cool" x="811" y="269" text-anchor="middle">零改动</text>
+
+      <!-- r5 evaluation (3 seams) -->
+      <rect class="box-cool" x="24" y="304" width="196" height="134" rx="3" />
+      <text class="tsm" x="122" y="345" text-anchor="middle">评估层</text>
+      <text class="ts" x="122" y="363" text-anchor="middle">userdev.py</text>
+      <text class="ts" x="122" y="379" text-anchor="middle">models.py</text>
+      <text class="ts" x="122" y="395" text-anchor="middle">hardware.py</text>
+      <line class="ln" x1="220" y1="371" x2="250" y2="371" marker-end="url(#c1)" />
+
+      <rect class="box" x="250" y="304" width="480" height="40" rx="3" />
+      <text class="tsm" x="266" y="320">新硬件 / 换仪器 / 增减 x·y</text>
+      <text class="ts" x="266" y="336">外部设备文件导出 AXES + METERS，平台自动读出 n_x / n_y</text>
+      <rect class="box-cool" x="746" y="311" width="130" height="26" rx="13" />
+      <text class="t-cool" x="811" y="328" text-anchor="middle">零改动</text>
+
+      <rect class="box" x="250" y="350" width="480" height="40" rx="3" />
+      <text class="tsm" x="266" y="366">一次采集出多个 y</text>
+      <text class="ts" x="266" y="382">Source(read_fn).meter(y, key) — 仪器触发一次，计时算一次</text>
+      <rect class="box-cool" x="746" y="357" width="130" height="26" rx="13" />
+      <text class="t-cool" x="811" y="374" text-anchor="middle">零改动</text>
+
+      <rect class="box" x="250" y="396" width="480" height="42" rx="3" />
+      <text class="tsm" x="266" y="413">新的「给 x 出 y」来源：客户数据建模 / GP / 神经网络</text>
+      <text class="ts" x="266" y="429">register_model(kind, builder) → 评估、画布、自动调优全部照旧</text>
+      <rect class="box-cool" x="746" y="404" width="130" height="26" rx="13" />
+      <text class="t-cool" x="811" y="421" text-anchor="middle">零改动</text>
+
+      <!-- r6 judge -->
+      <rect class="box-cool" x="24" y="450" width="196" height="54" rx="3" />
+      <text class="tsm" x="122" y="473" text-anchor="middle">评判层</text>
+      <text class="ts" x="122" y="490" text-anchor="middle">benchsuite / audit</text>
+      <line class="ln" x1="220" y1="477" x2="250" y2="477" marker-end="url(#c1)" />
+      <rect class="box" x="250" y="450" width="480" height="54" rx="3" />
+      <text class="tsm" x="266" y="473">新题库 / 新失效模式 / 新评判维度</text>
+      <text class="ts" x="266" y="490">题库带内容指纹，被改动可检测；排名只依据 FROZEN</text>
+      <rect class="box-cool" x="746" y="464" width="130" height="26" rx="13" />
+      <text class="t-cool" x="811" y="481" text-anchor="middle">零改动</text>
+    </svg>
+    <figcaption><b>加东西之前先在这张图里找缝。</b>八个扩展点里六个是纯插拔，靠的是同一个机制：
+    <strong>上层只依赖契约，不依赖实现</strong>——引擎不认识算法名字（只调 builder）、评估层不认识仪器型号（只调 move/get）、画布不认识算法参数（只读 schema）。
+    唯二要动平台的两处都在承重墙上，且各有硬要求：新目标模式必须同时给出打分函数，新编排算子必须自带限幅。</figcaption>
+  </figure>
+</section>
+
+<hr class="rule" />
+
+<section>
+  <h2><span class="num">公理</span>五条不可动摇</h2>
+  <ol class="ax">
+    <li><b>IR 是唯一真相</b><span>所有界面都只是它的编辑器。一旦让某个 UI 持有独占状态，四个入口立刻分叉。</span></li>
+    <li><b>算法统一 ask / tell</b><span>算法永远不知道 f 是仿真、代理模型还是真实电机——这是"换算法 / 换硬件互不影响"的根。</span></li>
+    <li><b>编排自研且薄</b><span>通用算法有开源，"迭代优化 + 硬件在环 + 受限循环"的编排没有。这是差异化，也是唯一必须自己扛的复杂度，所以算子集固定，不做图灵完备。</span></li>
+    <li><b>安全护栏独立、不可关闭</b><span>限位在 Evaluator 层 clamp；循环强制限幅；全局预算熔断；条件走 asteval 白名单而非 eval。任何算法或编排的 bug 都不能命令越界运动。</span></li>
+    <li><b>打分确定性，LLM 只读证据</b><span>若允许 LLM 影响评分，"优化算法"会退化成"优化如何说服裁判"。</span></li>
+  </ol>
+</section>
+
+<section>
+  <h2><span class="num">演进</span>往哪儿长，什么时候长</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>方向</th><th>落在哪层</th><th>代价</th><th>什么时候做</th></tr></thead>
+      <tbody>
+        <tr><td>真实仪器批量接入</td><td>评估（可换件）</td><td><span class="pill p-swap">每台一个薄类</span></td><td><strong>现在</strong>——客户价值最直接，契约与规范已就位</td></tr>
+        <tr><td>客户数据建模闭环</td><td>评估（可换件）</td><td><span class="pill p-swap">加一个 provider</span></td><td>客户已有采集数据时；<code>dataset_idw</code> 之上换 GP/RBF</td></tr>
+        <tr><td>多目标真帕累托</td><td>算法（可换件）</td><td><span class="pill p-swap">接 pymoo ≈ 几十行</span></td><td>客户真要看前沿时；此前"分阶段 + keep"够用</td></tr>
+        <tr><td>GLM5.1 Copilot（NL→IR）</td><td>编辑器（可换件）</td><td><span class="pill p-swap">只加编辑器</span></td><td>要服务不经 Hermes 的用户时；工具面已备好</td></tr>
+        <tr><td><code>scan</code> 模式执行器</td><td>执行核（承重墙）</td><td><span class="pill p-wall">加执行分支</span></td><td>要出特性曲线时；schema 已占位</td></tr>
+        <tr><td>异步 / 批量评估</td><td>评估 + 执行核</td><td><span class="pill p-wall">要扩契约</span></td><td><strong>最贵</strong>——没被真实测量时间卡住之前不要做</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">红线</span>重构时不能破的</h2>
+  <div class="redline">
+    <ul>
+      <li>执行路径<strong>只有一条</strong>：任何入口最终都走 <code>StageEngine</code>，不要为某个前端开旁路。</li>
+      <li>安全限位、循环限幅、预算熔断<strong>不提供关闭开关</strong>，也不接受 IR 里的参数把它们调成无穷。</li>
+      <li>条件表达式只走 asteval 白名单，<strong>永不 <code>eval</code></strong>；LLM 产出的 IR 必须过 schema 校验才能执行。</li>
+      <li>分数只由确定性题库产生；诊断可以给建议区间，但<strong>越界会被 schema 夹回</strong>。</li>
+      <li>IR 加字段一律<strong>可选 + 有默认</strong>，存量方案 JSON 必须还能跑。</li>
+      <li>新依赖先核 license，permissive 才用，并登记 <code>THIRD_PARTY_LICENSES.md</code>。</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">索引</span>要看细节去哪</h2>
+  <p class="files">
+    <b>ARCHITECTURE.md</b> — 本页全文：分层契约表、八个扩展点、一次运行的完整数据流、已知简化与升级路径<br />
+    <b>skills/device-interface/</b> — 硬件接入接口规范（决策表 · 四条不变量 · 冒烟自检 · 症状对照）<br />
+    <b>docs/device-interface.html</b> — 硬件接入图文版<br />
+    <b>MCP_AGENT.md</b> · <b>skills/optplat/</b> — Agent 驱动平台的配置与用法<br />
+    <b>CLAUDE.md</b> — 当前进度、已完成清单、关键决策与理由
+  </p>
+</section>
+
+</div>
+</body></html>
