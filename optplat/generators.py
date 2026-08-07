@@ -818,3 +818,98 @@ class DampedSensitivity(Generator):
         # best-x / stopping are handled in observe() with the full y vector; the
         # scalar score path is intentionally a no-op here.
         return
+
+
+class SensitivityScan(Generator):
+    """灵敏度采集（单轴扫描 → 曲线 + 灵敏度矩阵）。
+
+    不是优化器：它**测量**局部响应。以当前操作点为原点，把每个自变量单独走
+    n_points 个点（其余轴钉在原点），记录每个因变量，然后对每对 x→y 拟合出
+    原点处斜率 ∂y/∂x，装配成矩阵 —— 形状与 `DampedSensitivity` 的 `sensitivity`
+    入参一致，所以流程里可以「先测灵敏度 → 再喂给阻尼灵敏度求解」。
+
+    两个刻意的设计：
+      * `observe()` 拿整条 y 向量，所以一次扫描同时标定所有被选中的因变量；
+      * 原点被列为第一个采样点且记为 best_x，于是执行核在阶段结束时把操作点
+        （以及真实机构）**送回原点** —— 采集不应该把台架留在最后一个扫描点。
+
+    多原点采集、曲线作图与线性范围分析走 `POST /sensitivity` 与画布的
+    『📐 灵敏度采集』面板（同一套 `optplat.sensitivity` 核心）。
+    """
+
+    def __init__(self, vocs, variables, objective, step=0.1, steps=None,
+                 n_points=5, fit="linear", linear_tol=0.05, objectives=""):
+        super().__init__(vocs, variables, objective)
+        from .sensitivity import SensitivitySpec, fit_curve       # 避免循环导入
+        self._fit_curve = fit_curve
+        picked = [o.strip() for o in str(objectives or "").split(",") if o.strip()]
+        self.objs = [o for o in (picked or list(vocs.objectives)) if o in vocs.objectives]
+        self.spec = SensitivitySpec(variables=list(variables), objectives=self.objs,
+                                    step=float(step), steps=steps or {},
+                                    n_points=int(n_points), fit=str(fit),
+                                    linear_tol=float(linear_tol))
+        self._plan: list[tuple[str, float]] = []                  # (轴, 绝对坐标)
+        self._i = 0
+        self._data: dict[str, dict] = {}
+        self.matrix: dict[str, dict] = {}
+        self.fits: dict[str, dict] = {}
+
+    def channels(self) -> set:
+        """本算子每步都要读的通道 = 所有被标定的因变量。"""
+        return set(self.objs)
+
+    def set_base(self, point):
+        super().set_base(point)
+        from .sensitivity import _offsets
+        self.origin = dict(self._base)
+        self._plan = [(self.variables[0], self.origin[self.variables[0]])]   # 原点先测
+        for v in self.variables:
+            var = self.vocs.variables[v]
+            for off in _offsets(self.spec, v):
+                if abs(off) < 1e-12:
+                    continue                                      # 原点已在计划里
+                self._plan.append((v, var.clip(self.origin[v] + off)))
+        self._data = {v: {"xs": [], "y": {o: [] for o in self.objs}} for v in self.variables}
+
+    def ask(self) -> dict[str, float]:
+        v, val = self._plan[min(self._i, len(self._plan) - 1)]
+        return {**self.origin, v: val}
+
+    def observe(self, x: dict[str, float], y: dict[str, float]) -> None:
+        v, val = self._plan[min(self._i, len(self._plan) - 1)]
+        if self._i == 0:                       # 原点：计入每一条曲线
+            for axis in self.variables:
+                self._data[axis]["xs"].append(self.origin[axis])
+                for o in self.objs:
+                    self._data[axis]["y"][o].append(float(y.get(o, float("nan"))))
+        else:
+            self._data[v]["xs"].append(val)
+            for o in self.objs:
+                self._data[v]["y"][o].append(float(y.get(o, float("nan"))))
+        self._i += 1
+        if self._i >= len(self._plan):
+            self._finish()
+            self.done = True
+
+    def _finish(self) -> None:
+        order = 2 if str(self.spec.fit).startswith("quad") else 1
+        self.fits = {o: {} for o in self.objs}
+        self.matrix = {o: {} for o in self.objs}
+        for v in self.variables:
+            for o in self.objs:
+                f = self._fit_curve(self._data[v]["xs"], self._data[v]["y"][o],
+                                    self.origin[v], order=order,
+                                    linear_tol=self.spec.linear_tol)
+                self.fits[o][v] = f
+                self.matrix[o][v] = f["slope"]
+        cells = ", ".join(f"∂{o}/∂{v}={self.matrix[o][v]:.4g}"
+                          for o in self.objs for v in self.variables)
+        worst = min((self.fits[o][v]["r2"] for o in self.objs for v in self.variables),
+                    default=1.0)
+        self.fit_info = f"灵敏度矩阵：{cells}（最差线性度 R²={worst:.3f}）"
+
+    def tell(self, x: dict[str, float], score: float) -> None:
+        # 采集不寻优。把原点记为 best，好让执行核在阶段结束时把操作点送回原点。
+        if self._i <= 1 and score > self.best_score:
+            self.best_score = score
+            self.best_x = {v: self.origin[v] for v in self.variables}

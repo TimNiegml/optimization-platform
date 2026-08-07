@@ -34,6 +34,7 @@ from .generators import (
     GridScan,
     NelderMead,
     ParametricFit,
+    SensitivityScan,
     SurrogateFit,
 )
 from .vocs import VOCS
@@ -206,6 +207,29 @@ _BUILTINS = [
         label="阻尼灵敏度求解",
         desc="多进多出定值：已知灵敏度∂y/∂x与各y目标，用阻尼最小二乘(SVD正则,比pinv稳)解Δx，"
              "迭代把多个y同时逼到目标；x/y维度任选。",
+    ),
+    AlgorithmSpec(
+        "sensitivity_scan", "characterize", False,
+        lambda v, s: SensitivityScan(
+            v, s["variables"], s["objective"], step=s.get("step", 0.1),
+            steps=s.get("steps"), n_points=s.get("n_points", 5),
+            fit=s.get("fit", "linear"), linear_tol=s.get("linear_tol", 0.05),
+            objectives=s.get("objectives", "")),
+        {"step": {"type": "float", "default": 0.1, "min": 1e-6, "max": 1e6,
+                  "label": "步距(绝对)", "hint": "以原点为中心、每步走多远"},
+         "steps": {"type": "axis_steps", "default": {}, "label": "每轴步距(可空)",
+                   "hint": "留空=用上面的统一步距"},
+         "n_points": {"type": "int", "default": 5, "min": 2, "max": 51,
+                      "label": "每轴点数", "hint": "含原点，建议奇数"},
+         "fit": {"type": "enum", "default": "linear", "options": ["linear", "quadratic"],
+                 "label": "拟合阶次", "hint": "二次拟合时斜率取原点处导数"},
+         "linear_tol": {"type": "float", "default": 0.05, "min": 0.001, "max": 0.5,
+                        "label": "线性范围容差", "hint": "偏离切线 ≤ 该比例×y跨度即算线性"},
+         "objectives": {"type": "str", "default": "",
+                        "label": "标定哪些 y(逗号分隔)", "hint": "留空=全部因变量"}},
+        label="灵敏度采集",
+        desc="以当前点为原点逐轴扫描，测出 ∂y/∂x 灵敏度矩阵与线性范围；采集完自动回到原点。"
+             "矩阵可直接喂给阻尼灵敏度求解。多原点采集与曲线作图见画布『📐 灵敏度采集』面板。",
     ),
     AlgorithmSpec(
         "bayesian", "bayesian", False, _bayes_builder,

@@ -8,6 +8,7 @@ Endpoints:
   GET  /vocs                default demo VOCS (variables / objectives)
   POST /run/graph           run a {nodes, edges} graph JSON  -> result
   POST /run/pipeline        run a block pipeline JSON         -> result
+  POST /sensitivity         灵敏度采集：逐轴扫描 -> 曲线 + ∂y/∂x 矩阵
   GET  /                    the drag-drop canvas (static web/index.html)
 
 Evaluator: the simulated optical bench (function or noisy hardware sim). A real
@@ -35,6 +36,7 @@ from .hardware import HardwareEvaluator, SafetyLimits, SimulatedMeter, Simulated
 from .mcp_server import mcp
 from .orchestrator import Orchestrator
 from .registry import REGISTRY, algorithm_catalog
+from .sensitivity import SensitivitySpec, run_sensitivity
 from .userdev import load_device
 from .vocs import VOCS
 from .workspace import WORKSPACE
@@ -276,6 +278,41 @@ def run_pipeline(req: RunPipelineRequest):
         res = Orchestrator(vocs, ev, req.pipeline, eval_budget=req.eval_budget,
                            start_point=_start_point(req.start_point)).run()
         return _result(res)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
+class SensitivityRequest(RunRequest):
+    """灵敏度采集：给原点(可多个)、步距、点数，逐轴扫描出曲线与 ∂y/∂x 矩阵。"""
+
+    variables: list[str]
+    objectives: list[str] = []                 # 空 = 全部因变量
+    step: float = 0.1                          # 统一步距（绝对）
+    steps: dict[str, float] = {}               # 每轴步距，覆盖 step
+    n_points: int = 5                          # 每轴点数（含原点）
+    origins: list[dict[str, float]] = []       # 原点列表；空 = 用 start_point/当前点
+    fit: str = "linear"                        # linear | quadratic
+    linear_tol: float = 0.05
+    reuse_origin: bool = True
+    eval_budget: int = 2000
+
+
+@app.post("/sensitivity")
+def sensitivity(req: SensitivityRequest):
+    """跑一次灵敏度采集，返回每条 x→y 曲线、拟合(斜率/R²/线性范围)与灵敏度矩阵。
+
+    矩阵形状 {y:{x:∂y/∂x}} 与 `damped_sensitivity` 节点的 `sensitivity` 入参一致，
+    画布上可一键填进求解节点。"""
+    try:
+        vocs = _build_vocs(req.vocs, req.evaluator)
+        ev = _build_evaluator(vocs, req.evaluator)
+        spec = SensitivitySpec(
+            variables=req.variables, objectives=req.objectives,
+            step=req.step, steps=req.steps, n_points=req.n_points,
+            origins=req.origins, fit=req.fit, linear_tol=req.linear_tol,
+            reuse_origin=req.reuse_origin)
+        return run_sensitivity(vocs, ev, spec, start_point=_start_point(req.start_point),
+                               eval_budget=req.eval_budget)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
 

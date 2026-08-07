@@ -91,6 +91,7 @@ flowchart TB
 | 新界面 / 新入口 | 只要产合法 IR | **零改动** | 画布 · 表单 · MCP Agent 并存 |
 | 新目标模式（除 max/min/target/scan） | `ObjectiveMode` + `Objective.score()` | **改一处**（枚举 + 打分），算法自动跟随 | `target` 模式已贯通 |
 | 新编排算子（如 `goto`/`on_fail`） | `graph.py` 节点类型 + 执行核分派 | **改两处**，且必须自带限幅 | 分支/回边已有 |
+| 新的**测量/表征**能力（不是优化） | `register_algorithm` + 一个核心模块 + 面板 | **零改动**（走 `StageEngine.evaluate`） | 灵敏度采集 `sensitivity.py` |
 | 新评判维度 / 新题库 | `benchsuite` 加题、`trace_digest` 加失效模式 | **零改动**（题库有指纹校验） | DEV 4 题 + FROZEN 7 题 |
 
 ### 3.1 加算法（最常用的缝）

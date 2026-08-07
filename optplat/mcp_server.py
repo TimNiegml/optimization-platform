@@ -28,6 +28,7 @@ from .benchsuite import get_suite
 from .demo import BENCHES, demo_vocs
 from .registry import REGISTRY, algorithm_catalog
 from .runner import run_workflow as _run_workflow
+from .sensitivity import SensitivitySpec, run_sensitivity
 from .trace_digest import digest, digest_many
 from .workspace import WORKSPACE
 
@@ -344,6 +345,59 @@ def autotune(bench: str = "single_peak", target: Optional[str] = "y1>=0.95 and y
     if session:
         WORKSPACE.update(session, bench=bench, autotune=result)
     return result
+
+
+# ============================ 灵敏度采集 ============================
+@mcp.tool()
+def measure_sensitivity(variables: list[str], objectives: Optional[list[str]] = None,
+                        step: float = 0.1, n_points: int = 5,
+                        origins: Optional[list[dict]] = None, fit: str = "linear",
+                        bench: str = "single_peak", noise: float = 0.0,
+                        averages: int = 1, linear_tol: float = 0.05,
+                        session: Optional[str] = None) -> dict:
+    """灵敏度采集：逐轴扫描测出 ∂y/∂x 矩阵与线性范围（测量，不是优化）。
+
+    以每个原点为中心，把每个自变量单独走 n_points 个点（其余轴钉住），拟合出原点处斜率，
+    装配成矩阵。矩阵形状与 `damped_sensitivity` 节点的 `sensitivity` 入参一致——**测完可以
+    直接拿去搭多进多出定值流程**。
+
+      variables   要动的自变量，如 ["x1","x2"]
+      objectives  要测的因变量；留空=全部
+      step        步距（绝对值），n_points 每轴点数（含原点，建议奇数）
+      origins     原点列表，如 [{"x1":2,"x2":0},{"x1":4,"x2":1}]；留空=用默认起点。
+                  **给多个原点可以看灵敏度随工作点漂移多少**——漂移大说明非线性强、该分段建模。
+      fit         linear | quadratic（二次时斜率取原点处导数，曲线弯时更准）
+      linear_tol  线性范围判据：偏离原点切线 ≤ 该比例×y跨度就算线性
+      session     给了就把结果推到该实时会话，画布『📐 灵敏度采集』面板自动刷新
+    返回：matrix(∂y/∂x)、matrix_std(多原点时的漂移)、每对 x→y 的 R²/线性范围、summary 结论。
+    """
+    from .demo import bench_func
+    from .evaluator import Evaluator
+    from .hardware import HardwareEvaluator, SimulatedMeter, SimulatedStage
+
+    vocs = demo_vocs()
+    func = bench_func(bench)
+    if noise or averages > 1:
+        stage = SimulatedStage(vocs.initial_point())
+        ev = HardwareEvaluator(stage, SimulatedMeter(stage, func, noise=noise, seed=0),
+                               averages=averages)
+    else:
+        ev = Evaluator(func)
+    spec = SensitivitySpec(variables=list(variables), objectives=list(objectives or []),
+                           step=step, n_points=n_points, origins=list(origins or []),
+                           fit=fit, linear_tol=linear_tol)
+    out = run_sensitivity(vocs, ev, spec)
+    slim = {"bench": bench, "variables": out["variables"], "objectives": out["objectives"],
+            "fit": out["fit"], "matrix": out["matrix"], "matrix_std": out["matrix_std"],
+            "n_origins": out["n_origins"], "n_evals": out["n_evals"],
+            "summary": out["summary"], "warnings": out["warnings"],
+            "linearity": {o: {v: {"r2": round(r["fits"][o][v]["r2"], 4),
+                                  "linear_range": r["fits"][o][v].get("linear_range")}
+                              for v in out["variables"]}
+                          for o in out["objectives"] for r in out["origins"][:1]}}
+    if session:
+        WORKSPACE.update(session, bench=bench, sensitivity=out)
+    return slim
 
 
 # ============================ explain ============================

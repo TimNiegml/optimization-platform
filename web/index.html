@@ -159,6 +159,7 @@
     <span class="sp"></span>
     <button class="ghost sm" onclick="openUntil()" data-tip="用表格方式设置『全局达成条件』（各目标 达到/逼近 某值，与/或组合），不用手写表达式。">🎯 目标条件</button>
     <button class="ghost sm" onclick="openTune()" data-tip="自动调优：按当前场景搜索多种算法方案，按质量/时长/稳定性打分排名，一键采用最优方案。">🤖 自动调优</button>
+    <button class="ghost sm" onclick="openSens()" data-tip="灵敏度采集：给原点/步距/点数，逐轴扫描测出每对 x→y 的曲线、线性范围与 ∂y/∂x 灵敏度矩阵；矩阵可一键填进阻尼灵敏度求解节点。">📐 灵敏度采集</button>
     <span class="fs-ctl" data-tip="调节画布里节点与连线的字体大小。">字号 <input id="fsRange" type="range" min="10" max="22" step="1" value="13"></span>
     <button class="ghost sm" onclick="toggleTheme()" id="themeBtn" data-tip="切换浅色 / 深色主题。">🌙</button>
     <button class="ghost sm" onclick="openHelp()" data-tip="打开使用说明：节点、连线、目标、轨迹图、表达式怎么用。">帮助 ?</button>
@@ -268,6 +269,15 @@
   <h3>④c 与 Agent 对话（左下角）</h3>
   <p>左下角 <b>🤖 Agent 对话</b> 面板：点标题栏可展开/收起（收起后随时点回来）。连接『实时会话』后，在输入框给 Agent 发指令会写入会话，Agent（如 Hermes）用 <code>get_canvas</code> 读到后执行并把结果/说明推回来显示在这里。</p>
 
+  <h3>④a 灵敏度采集（📐 顶栏按钮）</h3>
+  <p>先<b>测</b>再解：给<b>原点、步距、点数</b>，平台逐轴扫描——每次只动一个自变量、其余钉在原点，测出每个因变量怎么变。出两样东西：</p>
+  <ul>
+    <li><b>变化曲线</b>（每对 x→y 一张）：蓝点=实测，虚线=原点处切线，<b>绿底=实测线性范围</b>（从原点沿切线向两侧外扩，偏离超过『容差×y跨度』就出界），下方给 ∂y/∂x、R²、曲率。用来看<b>线性度与线性范围到底有多宽</b>。</li>
+    <li><b>灵敏度矩阵 ∂y/∂x</b>：行=y、列=x，一键『<b>填入阻尼灵敏度节点</b>』就能直接拿去做多进多出定值（见下一节）。也可『下载采集点 CSV』。</li>
+  </ul>
+  <p><b>多原点</b>：点『＋ 加一个原点』可在几个工作点各做一遍，矩阵里会显示<b>均值 ± 标准差</b>；某格相对漂移超过 20% 会标红——说明该处非线性强，一个全局矩阵不够用，应分段/按工作点建模。</p>
+  <p><b>拟合阶次</b>：一次=直线（斜率即矩阵）；二次=抛物线，<b>斜率取原点处的导数</b>（曲线弯时比整段直线更接近真实的局部灵敏度）。采集结束会自动<b>回到原点</b>，不会把机构留在最后一个扫描点。流程里也可用<b>灵敏度采集</b>节点做同样的事（单原点）。</p>
+
   <h3>④b 阻尼灵敏度求解（多进多出定值/标定）</h3>
   <p>已知<b>灵敏度 ∂y/∂x</b> 和各 y 的<b>目标值</b>时，加<b>阻尼灵敏度求解</b>节点：勾选要定值的 y 填目标、勾选要动的 x，再填灵敏度矩阵（行=y、列=x）。它用<b>阻尼最小二乘(SVD 正则伪逆)</b>解 Δx=阻尼·S⁺·(目标−当前)，比 pinv 数值更稳，迭代把多个 y 同时逼到目标；x/y 维度按勾选自动匹配。</p>
 
@@ -339,6 +349,31 @@
   <div id="tuneBody" style="margin-top:12px"></div>
 </div>
 
+<div id="sensModal" class="modal">
+  <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
+  <h2>灵敏度采集 <span class="info" data-tip="以原点为中心逐轴扫描：每次只动一个自变量、其余钉在原点，测出每个因变量怎么变。拟合出原点处斜率 ∂y/∂x 装配成灵敏度矩阵，并给出实测线性范围。这是测量，不是优化。">i</span></h2>
+  <p class="hint">设原点、步距、点数即可。出<b>变化曲线</b>（看线性度/线性范围）与<b>灵敏度矩阵</b>（可一键填进『阻尼灵敏度求解』节点）。多给几个原点还能看灵敏度随工作点漂移多少。</p>
+  <div class="trow2">
+    <div><label>动哪些自变量 x</label><div id="sensVars" class="paxes"></div></div>
+    <div><label>测哪些因变量 y</label><div id="sensObjs" class="paxes"></div></div>
+  </div>
+  <div class="trow2">
+    <div><label>步距（绝对） <span class="info" data-tip="以原点为中心，每一步走多远。真实台架上取『能明显看出 y 变化、又不出线性区』的量级。">i</span></label><input id="sensStep" type="number" step="0.01" value="0.2"></div>
+    <div><label>每轴点数（含原点，建议奇数）</label><input id="sensN" type="number" min="2" max="51" value="7"></div>
+    <div><label>拟合阶次</label><select id="sensFit"><option value="linear">一次（直线 → 矩阵）</option><option value="quadratic">二次（斜率取原点处导数）</option></select></div>
+  </div>
+  <div class="trow2">
+    <div><label>线性范围容差 <span class="info" data-tip="从原点沿切线向两侧外扩，偏离超过『该比例 × y 跨度』就算出了线性区。0.05 = 5%。">i</span></label><input id="sensTol" type="number" step="0.01" min="0.001" max="0.5" value="0.05"></div>
+    <div style="display:flex;align-items:flex-end;gap:6px">
+      <button class="ghost sm" onclick="sensAddOrigin()" data-tip="再加一个原点：同一套扫描在不同工作点各做一遍，用来看灵敏度随工作点漂移多少。">＋ 加一个原点</button>
+      <button class="ghost sm" onclick="sensUseStart()" data-tip="把第一个原点设成左下『自定义起始点』（或各变量量程中点）。">用当前起点</button>
+    </div>
+    <div style="display:flex;align-items:flex-end"><button id="sensRun" onclick="runSens()" style="width:100%">▶ 开始采集</button></div>
+  </div>
+  <div id="sensOrigins" style="margin-top:6px"></div>
+  <div id="sensBody" style="margin-top:12px"></div>
+</div>
+
 <script>
 const API = location.origin;
 let catalog = [], benches = [], vocs = {variables:{}, objectives:{}};
@@ -354,6 +389,7 @@ let benchSmooth = {}, showSurface = false, lastSurface = null;
 let untilExpr = '', untilRows = [], untilRawEdited = false;
 let startPoint = {}, useStartPoint = false, twoDMap = null;   // 自定义起始点 + 2D图坐标映射
 let tuneRandomStart = true, tuneStartDomain = {};             // 自动调优随机初始点 + 定义域
+let sensVars=[], sensObjs=[], sensOrigins=[{}], lastSens=null;  // 灵敏度采集：选中的 x/y、原点列表、上次结果
 
 const NODE_COLORS = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#ec4899','#84cc16'];
 const MODE_LABEL = {'':'默认','maximize':'最大化','minimize':'最小化','target':'逼近目标值','scan':'扫描'};
@@ -1161,6 +1197,150 @@ const EXAMPLES = {
 let tuneResult = null, tuneSpace = null, varState = {};
 let paretoX = 'time', paretoY = 'quality';
 const METRICS = {time:{label:'时长',better:'low'}, quality:{label:'质量',better:'high'}, stability:{label:'稳定',better:'high'}, evals:{label:'评估次数',better:'low'}};
+
+// ==================== 灵敏度采集（逐轴扫描 → 曲线 + ∂y/∂x 矩阵）====================
+// 这是【测量】不是优化：每次只动一个 x、其余钉在原点，看每个 y 怎么变。
+function openSens(){
+  if(!sensVars.length) sensVars = varKeys.slice(0, 2);
+  if(!sensObjs.length) sensObjs = Object.keys(vocs.objectives);
+  if(!sensOrigins.length) sensOrigins = [{}];
+  renderSensForm(); showModal('sensModal');
+}
+function renderSensForm(){
+  document.getElementById('sensVars').innerHTML = varKeys.map(v =>
+    `<label style="display:inline;margin:0 8px 0 0"><input type="checkbox" style="width:auto" ${sensVars.includes(v)?'checked':''} onchange="toggleSensVar('${v}',this.checked)"> ${v}</label>`).join('');
+  document.getElementById('sensObjs').innerHTML = Object.keys(vocs.objectives).map(o =>
+    `<label style="display:inline;margin:0 8px 0 0"><input type="checkbox" style="width:auto" ${sensObjs.includes(o)?'checked':''} onchange="toggleSensObj('${o}',this.checked)"> ${o}</label>`).join('');
+  renderSensOrigins();
+}
+window.toggleSensVar=(v,on)=>{ sensVars = on ? [...new Set([...sensVars,v])] : sensVars.filter(x=>x!==v); renderSensForm(); };
+window.toggleSensObj=(o,on)=>{ sensObjs = on ? [...new Set([...sensObjs,o])] : sensObjs.filter(x=>x!==o); renderSensForm(); };
+function sensDefault(v){ const V=vocs.variables[v]; return (V.low+V.high)/2; }
+window.sensAddOrigin=()=>{ sensOrigins.push({}); renderSensOrigins(); };
+window.sensDelOrigin=(i)=>{ sensOrigins.splice(i,1); if(!sensOrigins.length) sensOrigins=[{}]; renderSensOrigins(); };
+window.sensUseStart=()=>{ const o={}; varKeys.forEach(v=> o[v] = useStartPoint&&startPoint[v]!=null ? +startPoint[v] : sensDefault(v));
+  sensOrigins[0]=o; renderSensOrigins(); };
+window.setSensOrigin=(i,v,val)=>{ sensOrigins[i][v] = val===''?undefined:+val; };
+function renderSensOrigins(){
+  const el=document.getElementById('sensOrigins'); if(!el) return;
+  let h=`<label>原点（每行一个工作点；留空=该轴用量程中点 <span class="info" data-tip="给多个原点时，同一套扫描在每个工作点各做一遍。比较各原点的矩阵就能看出灵敏度随工作点漂移多少——漂移大说明非线性强、该分段建模。">i</span>）</label>`;
+  h+=`<div style="overflow-x:auto"><table class="sens"><tr><th>#</th>${varKeys.map(v=>`<th>${v}</th>`).join('')}<th></th></tr>`;
+  sensOrigins.forEach((o,i)=>{
+    h+=`<tr><td style="color:var(--muted)">${i+1}</td>`+varKeys.map(v=>
+      `<td><input type="number" step="0.01" value="${o[v]!=null?o[v]:''}" placeholder="${sensDefault(v).toFixed(2)}" oninput="setSensOrigin(${i},'${v}',this.value)"></td>`).join('');
+    h+=`<td>${sensOrigins.length>1?`<button class="ghost sm" onclick="sensDelOrigin(${i})">✕</button>`:''}</td></tr>`;
+  });
+  el.innerHTML = h+'</table></div>';
+}
+
+async function runSens(){
+  if(!sensVars.length || !sensObjs.length){ document.getElementById('sensBody').innerHTML='<p class="hint">请至少选一个自变量和一个因变量。</p>'; return; }
+  const btn=document.getElementById('sensRun'); btn.disabled=true; btn.textContent='采集中…';
+  const origins = sensOrigins.map(o=>{ const full={}; varKeys.forEach(v=> full[v] = o[v]!=null ? +o[v] : sensDefault(v)); return full; });
+  const body = {variables:sensVars, objectives:sensObjs,
+    step:+document.getElementById('sensStep').value, n_points:+document.getElementById('sensN').value,
+    fit:document.getElementById('sensFit').value, linear_tol:+document.getElementById('sensTol').value,
+    origins, evaluator:readEvalConfig()};
+  try{
+    const r=await fetch(API+'/sensitivity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!r.ok){ document.getElementById('sensBody').innerHTML=`<p style="color:var(--danger)">${d.detail||'采集出错'}</p>`; return; }
+    lastSens=d; renderSens(d);
+  }catch(e){ document.getElementById('sensBody').innerHTML=`<p style="color:var(--danger)">${e}</p>`; }
+  finally{ btn.disabled=false; btn.textContent='▶ 开始采集'; }
+}
+
+function renderSens(d){
+  const multi = d.n_origins>1;
+  let h=`<div class="row" style="gap:6px;flex-wrap:wrap">
+    <span class="metric">评估 <b>${d.n_evals}</b></span>
+    <span class="metric">原点 <b>${d.n_origins}</b></span>
+    <span class="metric">拟合 <b>${d.fit==='quadratic'?'二次':'一次'}</b></span>`;
+  if(d.sim_seconds) h+=`<span class="metric">测量耗时 <b>${(+d.sim_seconds).toFixed(1)}s</b></span>`;
+  h+=`</div>`;
+  (d.summary||[]).forEach(s=> h+=`<p class="hint" style="margin:4px 0">· ${s}</p>`);
+  (d.warnings||[]).forEach(s=> h+=`<p class="hint" style="margin:4px 0;color:var(--danger)">⚠ ${s}</p>`);
+
+  h+=`<h3 style="margin:12px 0 4px;font-size:13px">灵敏度矩阵 ∂y/∂x${multi?'（多原点均值 ± 标准差）':''}</h3>`;
+  h+=`<div style="overflow-x:auto"><table class="sens"><tr><th></th>${d.variables.map(v=>`<th>${v}</th>`).join('')}</tr>`;
+  d.objectives.forEach(o=>{
+    h+=`<tr><th>${o}</th>`+d.variables.map(v=>{
+      const m=d.matrix[o][v], sd=(d.matrix_std[o]||{})[v]||0;
+      const drift = multi && Math.abs(m)>1e-12 ? sd/Math.abs(m) : 0;
+      const col = drift>0.2 ? 'color:var(--danger)' : '';
+      return `<td style="${col}" data-tip="${multi?`各原点标准差 ${sd.toExponential(2)}（相对 ${(drift*100).toFixed(0)}%）`:'原点处斜率'}">${(+m).toPrecision(4)}${multi&&sd?`<br><span style="font-size:10px;color:var(--muted)">±${sd.toPrecision(2)}</span>`:''}</td>`;
+    }).join('')+`</tr>`;
+  });
+  h+=`</table></div>`;
+  h+=`<div class="row" style="gap:6px;margin-top:8px">
+    <button class="ghost sm" onclick="sensApply()" data-tip="把这个矩阵填进画布上选中的『阻尼灵敏度求解』节点（没选中就填第一个）。">↧ 填入阻尼灵敏度节点</button>
+    <button class="ghost sm" onclick="sensCSV()" data-tip="导出所有采集点(原点/轴/x/各 y)为 CSV。">⇩ 下载采集点 CSV</button>
+  </div>`;
+
+  d.origins.forEach((r,i)=>{
+    h+=`<h3 style="margin:14px 0 4px;font-size:13px">变化曲线 · 原点 ${i+1}：${d.variables.map(v=>`${v}=${(+r.origin[v]).toPrecision(4)}`).join(', ')}</h3>`;
+    h+=`<div style="display:flex;flex-wrap:wrap;gap:8px">`;
+    d.objectives.forEach(o=> d.variables.forEach(v=> h+=sensChart(r,o,v)));
+    h+=`</div>`;
+  });
+  document.getElementById('sensBody').innerHTML=h;
+}
+
+// 一张小图 = 一对 x→y：实测点 + 原点切线 + 线性范围底色
+function sensChart(r,o,v){
+  const xs=r.curves[v].xs, ys=r.curves[v].y[o], f=r.fits[o][v];
+  const W=272,H=150,pad={l:46,r:10,t:12,b:26}, iw=W-pad.l-pad.r, ih=H-pad.t-pad.b;
+  const xmin=Math.min(...xs), xmax=Math.max(...xs);
+  let ymin=Math.min(...ys), ymax=Math.max(...ys);
+  if(ymax-ymin<1e-12){ ymin-=1; ymax+=1; }
+  const xr=(xmax-xmin)||1, yr=(ymax-ymin)||1;
+  const X=t=>pad.l+((t-xmin)/xr)*iw, Y=t=>pad.t+ih-((t-ymin)/yr)*ih;
+  const x0=r.origin[v];
+  let g=`<div><svg width="${W}" height="${H}" style="background:var(--chartbg);border:1px solid var(--line);border-radius:6px">`;
+  const lr=f.linear_range;
+  if(lr && lr[1]>lr[0]) g+=`<rect x="${X(lr[0])}" y="${pad.t}" width="${Math.max(1,X(lr[1])-X(lr[0]))}" height="${ih}" fill="var(--ok)" fill-opacity="0.10"/>`;
+  for(let t=0;t<=2;t++){ const yv=ymin+yr*t/2, y=Y(yv);
+    g+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="var(--line)"/><text x="${pad.l-5}" y="${y+3}" fill="var(--muted)" font-size="9" text-anchor="end">${yv.toPrecision(3)}</text>`; }
+  // 原点处切线：y = y0 + slope·(x−x0)
+  const ln=t=> f.y0 + f.slope*(t-x0);
+  g+=`<line x1="${X(xmin)}" y1="${Y(ln(xmin))}" x2="${X(xmax)}" y2="${Y(ln(xmax))}" stroke="var(--accent)" stroke-dasharray="4 3" stroke-width="1.5"/>`;
+  g+=`<polyline points="${xs.map((x,i)=>`${X(x)},${Y(ys[i])}`).join(' ')}" fill="none" stroke="var(--muted)" stroke-width="1" stroke-opacity="0.55"/>`;
+  xs.forEach((x,i)=> g+=`<circle cx="${X(x)}" cy="${Y(ys[i])}" r="2.8" fill="var(--accent)"/>`);
+  g+=`<line x1="${X(x0)}" y1="${pad.t}" x2="${X(x0)}" y2="${pad.t+ih}" stroke="var(--muted)" stroke-dasharray="2 3"/>`;
+  [xmin,xmax].forEach(xv=> g+=`<text x="${X(xv)}" y="${H-4}" fill="var(--muted)" font-size="9" text-anchor="middle">${xv.toPrecision(3)}</text>`);
+  g+=`<text x="${pad.l+iw/2}" y="${H-4}" fill="var(--muted)" font-size="9" text-anchor="middle">${v} → ${o}</text>`;
+  g+=`</svg>`;
+  const rangeTxt = f.linear_range==null ? '无响应'
+    : (f.linear_full ? '整段线性' : `线性范围 ${f.linear_range[0].toPrecision(3)} ~ ${f.linear_range[1].toPrecision(3)}`);
+  g+=`<p class="hint" style="margin:2px 0 0;max-width:${W}px" data-tip="虚线=原点处切线（斜率即矩阵里那一格）；绿底=实测线性范围；R²=直线拟合优度。">
+      ∂${o}/∂${v}=<b>${(+f.slope).toPrecision(4)}</b> · R²=${(+f.r2).toFixed(4)} · ${rangeTxt}${f.curvature?` · 曲率 ${(+f.curvature).toPrecision(3)}`:''}</p></div>`;
+  return g;
+}
+
+window.sensApply=()=>{
+  if(!lastSens) return;
+  let n = nodes.find(x=>x.id===sel && x.algorithm==='damped_sensitivity') || nodes.find(x=>x.algorithm==='damped_sensitivity');
+  if(!n){ alert('画布上没有『阻尼灵敏度求解』节点。先拖一个出来，再点这里把矩阵填进去。'); return; }
+  if(!n.params) n.params={};
+  n.params.sensitivity = JSON.parse(JSON.stringify(lastSens.matrix));
+  n.variables = lastSens.variables.slice();
+  render(); if(sel===n.id) inspectNode(n);
+  agentLogPush(`灵敏度矩阵已填入节点 ${n.id}（${lastSens.objectives.join(',')} × ${lastSens.variables.join(',')}）`, 'result');
+  closeModals();
+};
+
+window.sensCSV=()=>{
+  if(!lastSens) return;
+  const d=lastSens, head=['origin','swept_axis',...d.variables,...d.objectives];
+  const rows=[head.join(',')];
+  d.origins.forEach((r,oi)=> d.variables.forEach(v=> r.curves[v].xs.forEach((x,i)=>{
+    const pt = d.variables.map(vv => vv===v ? x : r.origin[vv]);
+    rows.push([oi+1, v, ...pt, ...d.objectives.map(o=> r.curves[v].y[o][i])].join(','));
+  })));
+  const blob=new Blob([rows.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='sensitivity_points.csv'; a.click(); URL.revokeObjectURL(a.href);
+};
 
 async function openTune(){
   const t=untilExpr||document.getElementById('tuneTarget').value;

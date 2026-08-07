@@ -1,7 +1,7 @@
 # CLAUDE.md — 项目上下文与继续指南
 
 > 这份文件是给 Claude Code 新会话的"接手说明"。读完它 + `ARCHITECTURE.md` 就能无缝继续。
-> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 98 项全过）。
+> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 120 项全过）。
 
 ---
 
@@ -45,13 +45,14 @@
 | 评估接入 | `optplat/evaluator.py` `optplat/hardware.py` | 函数版 + 硬件版(稳定时间/平均/**独立安全限位** clamp)；含仿真 stage/meter；按通道选择性读取+成本 |
 | 外部设备接入 | `optplat/userdev.py` + `examples/device_template.py` | 用户在外部 Python 定义 `AXES`(x: move/get) + `METERS`(y: get)，平台**自动读几个 x/几个 y**建 VOCS + Evaluator；起点=轴当前位置(`axis.get()`)。一次采集出多个通道用 `Source`(读一次缓存、派生 meter，见 §4 P2h)。`run_device.py` 命令行跑、`OPTPLAT_DEVICE=xx.py` 让画布/REST/MCP 自动用它 |
 | 模型接口 | `optplat/models.py` | ModelProvider 注册式：`analytic`(解析 bench) / `dataset_idw`(用户数据 surrogate)，可插拔 |
+| 灵敏度采集 | `optplat/sensitivity.py` | **测量**而非优化：给原点/步距/点数，逐轴扫描出每对 x→y 曲线、实测线性范围、∂y/∂x 矩阵（形状=阻尼灵敏度求解的入参）；多原点可看灵敏度随工作点漂移。`sensitivity_scan` 节点 / `POST /sensitivity` / MCP `measure_sensitivity` / 画布『📐 灵敏度采集』 |
 | 自动调优 | `optplat/autotune.py` | AutoTuner(L1)：候选生成(粗调×精调×拟合+参数/噪声变异)、多试验评估、质量/时长/稳定打分、帕累托；`search_space` 接收 LLM 从 trace 推出的搜索区间 |
 | 轨迹诊断 | `optplat/trace_digest.py` | 把 trace 压成 LLM 可读诊断：阶段成本/增益归因、失效模式(振荡/停滞/卡边界/平坦区/拟合被拒)、**实测峰宽→建议搜索区间**；`digest_many` 跨种子只保留**可复现**的问题(防轶事) |
 | 题库 | `optplat/benchsuite.py` | DEV(可见,调优用) + FROZEN(冻结,仅验收)；`fingerprint()` 内容哈希，题库被改动可检测 |
 | 审计 | `optplat/audit.py` | 在 DEV/FROZEN 上确定性打分 → **泛化间隙**(检测"针对可见题目调参")、验收 flags；排名**只依据 FROZEN** |
 | 持久化 | `optplat/store.py` | SQLite 归档 / 断点续跑(start_point) / 一键回滚(rollback_to_best) |
 | 后端 API | `optplat/api.py` | FastAPI：`/catalog` `/vocs` `/run/graph` `/run/pipeline` `/`(画布) |
-| L2 MCP 服务器 | `optplat/mcp_server.py` | 把平台暴露成 20 个 MCP 工具供 Agent 驱动；配套 `optplat/solutions.py`(方案库) + `optplat/runner.py`(跑流程)；见 `MCP_AGENT.md` |
+| L2 MCP 服务器 | `optplat/mcp_server.py` | 把平台暴露成 21 个 MCP 工具供 Agent 驱动；配套 `optplat/solutions.py`(方案库) + `optplat/runner.py`(跑流程)；见 `MCP_AGENT.md` |
 | 实时工作区 | `optplat/workspace.py` | Agent↔画布共享状态(按 session)；MCP 挂进 FastAPI(`/mcp`) + `/workspace` SSE → Agent 改动画布自动刷新 |
 | 硬件接入规范 skill | `skills/device-interface/` | 接入/更新硬件的**接口规范**：决策表(Meter/Source/老路径)、逐字段语义、四条不变量(别自己缓存/平均/clamp)、冒烟自检脚本、症状→原因对照。软链到 `.claude/skills/` 供本仓库会话自动触发；图文版 `docs/device-interface.html` |
 | Hermes skill | `skills/optplat/` | `SKILL.md`+`connect.json`+`reference/`：上传 Hermes 即自动连 MCP、学会用法(NL→IR 起草/推画布/跑对比调优) |
@@ -84,11 +85,11 @@
   - **梯度上升(PI闪电式)** `gradient_ascent`：有限差分测局部梯度、沿上升方向步进+步长自适应。
   - **拟合公式回显**：`SurrogateFit`/`FormulaMethod`/`ParametricFit` 暴露 `fit_info`（峰位/参数/R²），引擎收进 `result.fits`（用 finally 保证全局早停也记录），画布对应**节点卡片显示拟合公式**。
   - **按场景示例 + 方案库**：`载入示例` 按当前仿真场景放量身流程（多峰/多模用贝叶斯全局、相关谷用单纯形、偏斜/尖峰用梯度上升等）；`📁 方案库` 内置各场景示例，并可选**整个文件夹批量加载**保存过的方案（webkitdirectory / 多选文件）。
-- **测试**：`python -m pytest -q` → **98 项全过**（algorithms / graph / p1b / api / autotune / mcp）。
+- **测试**：`python -m pytest -q` → **120 项全过**（algorithms / graph / p1b / api / autotune / mcp / enhancements / audit / sensitivity）。
 
-算法库（11 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
+算法库（12 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
 `nelder_mead` `gradient_ascent`(PI闪电式) `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula`
-`damped_sensitivity`(阻尼灵敏度求解/多进多出定值) `bayesian`。
+`damped_sensitivity`(阻尼灵敏度求解/多进多出定值) `bayesian` `sensitivity_scan`(灵敏度采集，category=`characterize`，不入自动调优变异)。
 
 - **P2d 光调优增强**（Chromium 全流程验证，pytest 84 项全过）：
   - **API host/port**：`main()` 默认 `0.0.0.0:8003`（可用 `OPTPLAT_HOST/OPTPLAT_PORT` 覆盖），画布/REST/MCP 一个进程。
@@ -110,6 +111,21 @@
   - **接线**：`run_device.py path.py [graph.json]` 命令行直接跑(与后端解耦)；`OPTPLAT_DEVICE=path.py python -m optplat.api` 后画布/REST(`/vocs`/`/benches`/新增 `/device`)/MCP **自动用该设备**、起点默认取轴当前位置；`/surface` 对设备返回 400(无解析面)。
   - **相对起点贯通全算法**：拟合类 `quadratic_fit`/`gaussian_fit`/`parametric_fit` 也加 `span_frac`(0=全程绝对；>0=以起点为中心的相对窗口)，连同 grid/line 的 `span_frac`、坐标下降/单纯形/梯度/公式/阻尼灵敏度**都从起点出发**——真实台架"从当前位置开始、无绝对坐标"。注意 `span_frac=1` 是以起点为中心±半量程，起点在中点时正好=全程(看起来没变)，要局部扫用小值。
 
+- **P2i 灵敏度采集（先测后解，pytest 120 项全过）**：回答"这台设备的 ∂y/∂x 到底是多少、线性范围有多宽"。
+  `optplat/sensitivity.py`：给**原点+步距+点数**，逐轴扫描（每次只动一个 x、其余钉在原点），对每对 x→y
+  拟合出**原点处斜率**装配成矩阵 —— 形状与 `damped_sensitivity` 的 `sensitivity` 入参一致，
+  **测完直接喂给求解器**（有测试端到端验证）。四个要点：
+  - **线性范围是实测的**：以原点切线为基准向两侧外扩，直到偏离 > `linear_tol × y跨度`。非线性台架上
+    会真的收窄（实测 [2,6] 扫描 → 线性范围 [3,5]），这正是用户要看的东西。
+  - **多原点看漂移**：同一套扫描在几个工作点各做一遍，矩阵给**均值±标准差**；相对漂移 >20% 画布标红
+    （实测 nonlinear_sens 上 ∂y1/∂x1 漂移 12.3%）→ 提示该分段/按工作点建模。
+  - **二次拟合时斜率取原点处导数** `2c₂x₀+c₁`（曲线弯时比整段直线斜率更接近真实局部灵敏度）；
+    浮点噪声级的曲率/漂移会被归零，不显示 ±3e-16。
+  - **走统一执行核**：测量经 `StageEngine.evaluate`，安全限位/预算熔断/按通道选择性读取/耗时统计照旧；
+    采集结束**自动回到原点**（真实台架不能把机构留在最后一个扫描点）。
+  接口：`sensitivity_scan` 节点（流程内单原点，矩阵回显在节点卡片）、`POST /sensitivity`、
+  MCP `measure_sensitivity`（21 工具）、画布**『📐 灵敏度采集』**面板（曲线小图带线性范围绿底 +
+  矩阵表 + 一键填入阻尼灵敏度节点 + 采集点 CSV）。
 - **P2h 共享采集 Source（一次读取出多个 y，pytest 102 项全过）**：一台仪器一次触发返回一组读数
   （双通道功率计 `read()` → power1+power2，y1 要 power1、y3 要 power2）。若给每个 y 各写一个 `read_fn`，
   仪器会被触发多次——慢，且两个 y 来自**不同次采集**（不同噪声/不同时刻，物理上不一致）。
@@ -203,7 +219,7 @@ python run_device.py examples/device_template.py   # 用外部定义的设备(�
 OPTPLAT_DEVICE=examples/device_template.py python -m optplat.api  # 让画布/REST/MCP 用你的真实设备（起点=轴当前位置）
 python run_mcp.py          # L2 MCP 服务器（stdio；--http 走 HTTP）→ 供 Agent 驱动，配置见 MCP_AGENT.md
 streamlit run app.py       # 表单式控制台
-python -m pytest -q        # 98 项测试
+python -m pytest -q        # 120 项测试
 ```
 
 接自己的优化函数：改 `optplat/demo.py` 的 `optical_bench(x)` 与 `demo_vocs()`。
