@@ -26,7 +26,7 @@ flowchart TB
     subgraph RUN["执行层 — 只认 IR，不认 UI"]
       ORCH["编排 GraphRunner / Orchestrator<br/>分支 · 受限循环 · 全局早停"]
       ENG["执行核 StageEngine<br/>条件求值 · 通道裁剪 · 预算熔断"]
-      GEN["算法 Generator（ask/tell）<br/>11 种 · registry 可插拔"]
+      GEN["算法 Generator（ask/tell）<br/>13 种 · registry 可插拔"]
     end
 
     EVAL["评估层 Evaluator<br/>函数 / 模型 / 仿真硬件 / <b>真实设备</b><br/>安全 clamp · 平均 · 选择性读通道 · 计时"]
@@ -89,6 +89,7 @@ flowchart TB
 | 一次采集出多个 y | `Source(...).meter(y, key)` | **零改动** | 双通道功率计，4 项测试 |
 | 新"给 x 出 y"的来源（代理模型/客户数据/GP/神经网络） | `register_model(kind, builder)` | **零改动** | `analytic` · `dataset_idw` |
 | 新界面 / 新入口 | 只要产合法 IR | **零改动** | 画布 · 表单 · MCP Agent 并存 |
+| 运行时**观察**（实时显示/日志/远程监视） | `StageEngine.on_eval` 观察者钩子 + 新端点 | **零改动语义**（纯旁观，有测试锁住） | `/run/graph/stream` SSE → 画布实时状态 |
 | 新目标模式（除 max/min/target/scan） | `ObjectiveMode` + `Objective.score()` | **改一处**（枚举 + 打分），算法自动跟随 | `target` 模式已贯通 |
 | 新编排算子（如 `goto`/`on_fail`） | `graph.py` 节点类型 + 执行核分派 | **改两处**，且必须自带限幅 | 分支/回边已有 |
 | 新的**测量/表征**能力（不是优化） | `register_algorithm` + 一个核心模块 + 面板 | **零改动**（走 `StageEngine.evaluate`） | 灵敏度采集 `sensitivity.py` |

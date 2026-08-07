@@ -913,3 +913,80 @@ class SensitivityScan(Generator):
         if self._i <= 1 and score > self.best_score:
             self.best_score = score
             self.best_x = {v: self.origin[v] for v in self.variables}
+
+
+class SpiralScan(Generator):
+    """螺旋扫描（找光）：**从原点向外**螺旋式展开搜索。
+
+    真实台架没有绝对坐标，找光都是"从当前位置开始往外找"。阿基米德螺旋正是光纤耦合
+    对准的经典搜法：半径随角度线性增长，先密集搜近处、再逐圈扩大，配合阶段的
+    `stop.target` 一旦扫到阈值就停——比整幅网格扫描省得多。
+
+    **变量个数任意**（不同场景加载的 x 个数不同，节点不写死维度）：
+      * 1 个变量 → 从原点交替 ±r 向两侧外扩（退化成展开式线搜索）；
+      * 2 个变量 → 标准阿基米德螺旋，每 `points_per_turn` 个点转一圈，半径每圈 +step；
+      * ≥3 个变量 → 同样的"半径线性增长"，方向取自 N 维单位球面上的低差异序列
+        （Roberts/Kronecker + 正态反函数），即从原点向外的均匀扩散搜索。
+
+    每轴步距可各不相同（`steps`：{x1:Δ1, x2:Δ2, ...}），因为不同执行器的物理量纲和
+    行程差异很大；留空则该轴用统一 `step`。
+    """
+
+    def __init__(self, vocs, variables, objective, step=0.1, steps=None,
+                 points_per_turn=12, turns=4):
+        super().__init__(vocs, variables, objective)
+        self.step = float(step)
+        self.steps = dict(steps or {})
+        self.ppt = max(2, int(points_per_turn))
+        self.turns = max(1, int(turns))
+        self.n_points = self.ppt * self.turns
+        self._k = 0
+
+    def _axis_step(self, v: str) -> float:
+        s = self.steps.get(v)
+        return float(s) if s not in (None, "") else self.step
+
+    @staticmethod
+    def _sphere_dirs(n_dim: int, k: int) -> list[float]:
+        """N 维单位球面上的第 k 个低差异方向（确定性，无随机种子依赖）。
+
+        Roberts 序列（广义黄金比）给 [0,1)^N 的低差异点 → 正态分布反函数 → 归一化，
+        得到球面上近似均匀且互不聚集的方向序列。"""
+        import numpy as np
+        from scipy.special import ndtri
+        g = 2.0                                   # 解 g^(d+1) = g + 1 得广义黄金比
+        for _ in range(24):
+            g = (1.0 + g) ** (1.0 / (n_dim + 1.0))
+        alpha = np.array([g ** -(i + 1) for i in range(n_dim)])
+        u = np.mod(0.5 + alpha * (k + 1), 1.0)
+        u = np.clip(u, 1e-9, 1 - 1e-9)
+        z = ndtri(u)
+        nrm = float(np.linalg.norm(z))
+        return (z / nrm).tolist() if nrm > 0 else [1.0] + [0.0] * (n_dim - 1)
+
+    def _direction(self, k: int) -> list[float]:
+        n = len(self.variables)
+        if n == 1:
+            return [1.0 if k % 2 == 0 else -1.0]
+        if n == 2:
+            import math
+            th = 2.0 * math.pi * k / self.ppt
+            return [math.cos(th), math.sin(th)]
+        return self._sphere_dirs(n, k)
+
+    def ask(self) -> dict[str, float]:
+        k = self._k
+        # 半径线性增长：转满一圈半径长一个 step（1 维时每两点长一个 step）
+        r = (k + 1) / self.ppt if len(self.variables) > 1 else (k // 2 + 1)
+        d = self._direction(k)
+        out = {}
+        for i, v in enumerate(self.variables):
+            val = self._base[v] + r * self._axis_step(v) * d[i]
+            out[v] = self.vocs.variables[v].clip(val)
+        return out
+
+    def tell(self, x: dict[str, float], score: float) -> None:
+        self._record(x, score)
+        self._k += 1
+        if self._k >= self.n_points:
+            self.done = True

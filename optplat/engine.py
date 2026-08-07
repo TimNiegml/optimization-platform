@@ -49,6 +49,10 @@ class StageEngine:
         self.events: list[str] = []
         self.fits: dict[str, str] = {}            # stage name -> fitted-formula summary
         self.global_until: Optional[str] = None   # driver sets this; checked per-eval
+        # 观察者钩子（可选）：每完成一次测量就被调用一次 on_eval(x, y, stage, n_evals)。
+        # 纯旁观——不改变任何执行语义，只是让"实时看着 x/y 在动"这类界面成为可能
+        # （REST 的 /run/graph/stream 用它把每个点推给画布）。
+        self.on_eval = None
 
     # ---- whitelisted condition evaluation ----
     def cond(self, expr: Optional[str]) -> bool:
@@ -132,6 +136,8 @@ class StageEngine:
         y = self.evaluator.evaluate(x, stage=stage, channels=channels)
         self.last_y.update(y)
         self._last_x = dict(x)
+        if self.on_eval is not None:
+            self.on_eval(dict(x), dict(self.last_y), stage, self.n_evals)
         return y
 
     def check_global(self) -> None:

@@ -149,6 +149,19 @@
   .vrow .vp { font-size:10px; color:var(--muted); display:flex; align-items:center; gap:3px; }
   .vrow .vp input { width:96px; }
   .paxes { display:flex; gap:8px; align-items:center; font-size:11px; color:var(--muted); margin-bottom:5px; }
+  .palGroup { font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.04em;
+    margin:10px 0 4px; padding-bottom:3px; border-bottom:1px solid var(--line); cursor:help; }
+  .palGroup:first-child { margin-top:0; }
+  #liveBox .lvRow { display:grid; grid-template-columns:34px 1fr 74px; gap:6px; align-items:center;
+    font-size:11px; margin-bottom:3px; }
+  #liveBox .lvBar { height:7px; background:var(--line); border-radius:4px; position:relative; overflow:hidden; }
+  #liveBox .lvFill { position:absolute; top:0; bottom:0; border-radius:4px; transition:left .12s linear, width .12s linear; }
+  #liveBox .lvVal { font-family:var(--mono,monospace); text-align:right; font-variant-numeric:tabular-nums; }
+  #liveBox .lvHead { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:6px; }
+  #liveBox .lvDot { width:8px; height:8px; border-radius:50%; background:var(--ok); display:inline-block;
+    animation:lvPulse 1s ease-in-out infinite; }
+  @keyframes lvPulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  @media (prefers-reduced-motion: reduce) { #liveBox .lvDot { animation:none } #liveBox .lvFill { transition:none } }
 </style>
 </head>
 <body>
@@ -209,7 +222,9 @@
   </div>
 
   <aside id="inspector">
-    <h2>属性 <span class="info" data-tip="点选节点编辑变量/目标/参数；点选连线设条件或删除。">i</span></h2>
+    <h2>实时状态 <span class="info" data-tip="运行时逐点显示当前自变量 x 与因变量 y 的取值、所在算子和已评估次数——看得见台架正在往哪走。仿真几毫秒就跑完，用下面的『演示时延』放慢到能看清；真实硬件本来就慢，时延填 0。">i</span></h2>
+    <div id="liveBox"></div>
+    <h2 style="margin-top:12px">属性 <span class="info" data-tip="点选节点编辑变量/目标/参数；点选连线设条件或删除。">i</span></h2>
     <div id="inspBody"></div>
     <div id="results"></div>
   </aside>
@@ -268,6 +283,18 @@
 
   <h3>④c 与 Agent 对话（左下角）</h3>
   <p>左下角 <b>🤖 Agent 对话</b> 面板：点标题栏可展开/收起（收起后随时点回来）。连接『实时会话』后，在输入框给 Agent 发指令会写入会话，Agent（如 Hermes）用 <code>get_canvas</code> 读到后执行并把结果/说明推回来显示在这里。</p>
+
+  <h3>③b 节点货架分组 / 实时状态</h3>
+  <p>左栏节点按真实调试顺序分四组：<b>① 找光</b>（网格/线/螺旋扫描——从当前位置往外找到第一束光，配 stop.target 扫到阈值即停）→
+  <b>② 粗调</b>（贝叶斯全局、梯度上升——已有信号，快速逼近峰附近）→ <b>③ 精调</b>（坐标下降/单纯形/各类拟合定峰）→
+  <b>④ 求解 / 表征</b>（阻尼灵敏度求解、灵敏度采集，不是寻优）。</p>
+  <p><b>螺旋扫描</b>：绕<b>当前位置</b>向外螺旋展开，先密搜近处再逐圈扩大——比整幅网格省得多，最贴近真实找光。
+  参数是<b>每圈半径增量</b>与<b>每圈点数/圈数</b>，各轴增量可单独设（量纲差别大时必用）。变量选 1 个退化为两侧交替外扩，2 个是阿基米德螺旋，≥3 个是向外的球面扩散。</p>
+  <p><b>贝叶斯</b>可限定<b>初始搜索范围（相对起点）</b>——填 0 在全量程搜，填 0.2 只在当前位置附近 20% 窗口内搜；
+  <b>初始随机探索点数</b>决定先纯随机撒几个点建模型；<b>探索系数 γ</b> 调大更倾向继续探索、调小只围着最好的点挖。</p>
+  <p><b>单纯形</b>默认从<b>当前位置</b>启动，初始单纯形边长可逐轴填 (Δx1, Δx2, Δx3…)；变量个数按场景自动变，表格列跟着勾选实时刷新。</p>
+  <p><b>右栏『实时状态』</b>：运行时逐点显示当前 x（条=在量程中的位置）与 y（条=本次运行内的相对高低）、所在算子、已评估次数——看得见台架正往哪走。
+  仿真几毫秒就跑完，用<b>演示时延</b>滑块放慢到能看清；真实硬件本身就慢，时延填 0。</p>
 
   <h3>④a 灵敏度采集（📐 顶栏按钮）</h3>
   <p>先<b>测</b>再解：给<b>原点、步距、点数</b>，平台逐轴扫描——每次只动一个自变量、其余钉在原点，测出每个因变量怎么变。出两样东西：</p>
@@ -402,18 +429,34 @@ async function boot() {
     objKeys = Object.keys(vocs.objectives); varKeys = Object.keys(vocs.variables);
     c1dVar=varKeys[0]; c1dObj=objKeys[0]; c2dX=varKeys[0]; c2dY=varKeys[1]||varKeys[0]; c2dObj=objKeys[0];
     document.getElementById('conn').textContent = '已连接 · ' + catalog.length + ' 种算法';
+    // 按『找光 → 粗调 → 精调 → 求解/表征』分组陈列，跟真实调试顺序一致
     const pal = document.getElementById('palList'); pal.innerHTML = '';
-    catalog.forEach((a,i) => {
-      const d = document.createElement('div');
-      d.className = 'palItem'; d.style.borderLeftColor = NODE_COLORS[i % NODE_COLORS.length];
-      d.setAttribute('data-tip', a.desc || a.label || a.name);
-      d.innerHTML = `<b>${a.label||a.name}</b><span>${a.category}</span>`;
-      d.onclick = () => addNode(a.name); pal.appendChild(d);
+    const GTIP = {'① 找光':'从当前位置往外找到第一束光/有效信号，通常配 stop.target 扫到阈值即停',
+                  '② 粗调':'已经有信号了，快速逼近到峰附近（全局搜索或大步长）',
+                  '③ 精调':'在峰附近收敛到最优，或用拟合直接定峰',
+                  '④ 求解 / 表征':'多进多出定值、灵敏度测量——不是寻优'};
+    const order = ['① 找光','② 粗调','③ 精调','④ 求解 / 表征'];
+    const byGroup = {};
+    catalog.forEach((a,i) => { const g=a.group_label||'其它'; (byGroup[g]=byGroup[g]||[]).push({a,i}); });
+    const seen = order.filter(g=>byGroup[g]).concat(Object.keys(byGroup).filter(g=>!order.includes(g)));
+    seen.forEach(g => {
+      const hd = document.createElement('div');
+      hd.className = 'palGroup'; hd.textContent = g;
+      if(GTIP[g]) hd.setAttribute('data-tip', GTIP[g]);
+      pal.appendChild(hd);
+      byGroup[g].forEach(({a,i}) => {
+        const d = document.createElement('div');
+        d.className = 'palItem'; d.style.borderLeftColor = NODE_COLORS[i % NODE_COLORS.length];
+        d.setAttribute('data-tip', a.desc || a.label || a.name);
+        d.innerHTML = `<b>${a.label||a.name}</b><span>${a.category}</span>`;
+        d.onclick = () => addNode(a.name); pal.appendChild(d);
+      });
     });
     const bs = document.getElementById('evBench');
     bs.innerHTML = benches.map(b=>`<option value="${b.name}">${b.label}</option>`).join('') || '<option value="single_peak">单峰光纤耦合</option>';
     bs.onchange = () => renderEvalExtras();
     benches.forEach(b => benchSmooth[b.name] = !!b.smooth);
+    renderLive();
     varKeys.forEach((v,i) => { const V=vocs.variables[v];
       safetyLimits[v]=[V.low, V.high]; actuators[v]={device:'PI六足', param:'axis'+(i+1)};
       startPoint[v]=+(0.5*(V.low+V.high)).toFixed(4); tuneStartDomain[v]=[V.low, V.high]; });
@@ -756,14 +799,84 @@ function readEvalConfig(){
     safety:document.getElementById('evSafety').checked, safety_limits:safetyLimits,
     channel_costs, channel_groups, channels, actuators }; }
 
+// ==================== 右栏「实时状态」：跑的时候看得见 x/y 在动 ====================
+// 走 /run/graph/stream（SSE）：每测一个点后端推一条，前端刷新。执行仍是同一个
+// GraphRunner/StageEngine，这里只是多了个观察者——不是第二条执行路径。
+let liveDelay = 0.06, liveOn = false, liveLast = null, liveSeen = 0, liveSpan = {};
+function liveRanges(){ const r={}; varKeys.forEach(v=>{ const V=vocs.variables[v]; r[v]=[V.low,V.high]; }); return r; }
+function renderLive(){
+  const box=document.getElementById('liveBox'); if(!box) return;
+  const d=liveLast;
+  let h=`<div class="lvHead">
+    <label style="display:inline;margin:0;font-size:11px" data-tip="仿真几毫秒就跑完，看不出过程；把时延调大可以像看真实台架一样逐点观察。真实硬件本身就慢，填 0 即可。">演示时延
+      <input type="range" id="lvDelay" min="0" max="0.4" step="0.02" value="${liveDelay}" style="width:82px;vertical-align:middle" oninput="liveDelay=+this.value; document.getElementById('lvDelayV').textContent=(+this.value).toFixed(2)+'s'">
+      <b id="lvDelayV">${(+liveDelay).toFixed(2)}s</b></label>`;
+  if(liveOn) h+=`<span class="lvDot"></span><span style="font-size:11px;color:var(--muted)">运行中</span>`;
+  h+=`</div>`;
+  if(!d){ box.innerHTML=h+`<p class="hint">点 ▶ 运行后，这里逐点显示当前 x / y。</p>`; return; }
+  h+=`<div class="lvHead"><span class="metric">第 <b>${d.n}</b> 次评估</span><span class="metric">算子 <b>${stageBase(d.stage)||'—'}</b></span></div>`;
+  const R=liveRanges();
+  h+=`<div style="font-size:11px;color:var(--muted);margin:6px 0 3px">自变量 x（条=在量程中的位置）</div>`;
+  varKeys.forEach(v=>{
+    const val=d.x[v]; if(val==null) return;
+    const [lo,hi]=R[v]; const f=Math.max(0,Math.min(1,(val-lo)/((hi-lo)||1)));
+    h+=`<div class="lvRow" data-tip="${v} ∈ [${lo}, ${hi}]"><b>${v}</b>
+      <div class="lvBar"><div class="lvFill" style="left:${(f*100).toFixed(1)}%;width:4px;background:var(--accent)"></div></div>
+      <span class="lvVal">${(+val).toPrecision(5)}</span></div>`;
+  });
+  h+=`<div style="font-size:11px;color:var(--muted);margin:8px 0 3px">因变量 y（条=本次运行内的相对高低）</div>`;
+  objKeys.forEach(o=>{
+    const val=d.y[o]; if(val==null) return;
+    const sp=liveSpan[o]||{lo:val,hi:val};
+    const f=sp.hi>sp.lo ? (val-sp.lo)/(sp.hi-sp.lo) : 1;
+    h+=`<div class="lvRow" data-tip="本次运行内 ${o} 的范围 ${sp.lo.toPrecision(4)} ~ ${sp.hi.toPrecision(4)}"><b>${o}</b>
+      <div class="lvBar"><div class="lvFill" style="left:0;width:${(Math.max(0.02,f)*100).toFixed(1)}%;background:var(--ok)"></div></div>
+      <span class="lvVal">${(+val).toPrecision(5)}</span></div>`;
+  });
+  box.innerHTML=h;
+}
+function liveReset(){ liveLast=null; liveSeen=0; liveSpan={}; renderLive(); }
+function liveFeed(ev){
+  liveSeen++;
+  objKeys.forEach(o=>{ const v=ev.y[o]; if(v==null) return;
+    const sp=liveSpan[o]||(liveSpan[o]={lo:v,hi:v}); sp.lo=Math.min(sp.lo,v); sp.hi=Math.max(sp.hi,v); });
+  liveLast=ev; renderLive();
+}
+
+// 逐行解析 SSE（fetch 流；EventSource 只支持 GET，而图 JSON 要用 POST 发）
+async function streamRun(body, onEvent){
+  const r = await fetch(API+'/run/graph/stream', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if(!r.ok || !r.body) throw new Error('stream failed: '+r.status);
+  const reader=r.body.getReader(), dec=new TextDecoder(); let buf='';
+  for(;;){
+    const {done, value} = await reader.read(); if(done) break;
+    // 归一化换行：sse_starlette 用 \r\n\r\n 分帧，别的实现用 \n\n，两种都要吃得下
+    buf += dec.decode(value, {stream:true}).replace(/\r\n/g, '\n');
+    let i;
+    while((i = buf.indexOf('\n\n')) >= 0){
+      const chunk = buf.slice(0, i); buf = buf.slice(i+2);
+      chunk.split('\n').forEach(line=>{
+        if(line.startsWith('data:')) { try{ onEvent(JSON.parse(line.slice(5).trim())); }catch(e){} }
+      });
+    }
+  }
+}
+
 async function run(){
   const btn=document.getElementById('runBtn'); btn.disabled=true; btn.textContent='运行中…';
-  const body = {graph:toGraph(), evaluator:readEvalConfig()};
+  const body = {graph:toGraph(), evaluator:readEvalConfig(), delay:liveDelay};
   if(useStartPoint){ const sp={}; varKeys.forEach(v=>sp[v]=+startPoint[v]); body.start_point=sp; }
+  liveReset(); liveOn=true; renderLive();
   try {
-    const r = await fetch(API+'/run/graph',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const d = await r.json();
-    if(!r.ok){ showResults(`<p style="color:var(--danger)">${d.detail||'运行出错'}</p>`); return; }
+    let d=null, err=null;
+    await streamRun(body, ev=>{
+      if(ev.type==='eval') liveFeed(ev);
+      else if(ev.type==='done') d=ev.result;
+      else if(ev.type==='error') err=ev.detail;
+    });
+    liveOn=false; renderLive();
+    if(err || !d){ showResults(`<p style="color:var(--danger)">${err||'运行出错'}</p>`); return; }
     lastHistory = d.history || []; lastFits = d.fits||{}; lastReads = d.reads||{}; lastSim = d.sim_seconds||0; lastState = d.state||{};
     showSurface = false; lastSurface = null;
     nodes.forEach(n=> n.fitInfo='');                       // clear old fit formulas
@@ -778,7 +891,7 @@ async function run(){
     h+=`<div id="chartBox"></div><div id="events">${d.events.join('\n')}</div>`;
     showResults(h); renderChart();
   } catch(e){ showResults(`<p style="color:var(--danger)">${e}</p>`); }
-  finally { btn.disabled=false; btn.textContent='▶ 运行'; }
+  finally { liveOn=false; renderLive(); btn.disabled=false; btn.textContent='▶ 运行'; }
 }
 function showResults(h){ document.getElementById('results').innerHTML=h; }
 

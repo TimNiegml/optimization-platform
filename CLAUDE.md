@@ -1,7 +1,7 @@
 # CLAUDE.md — 项目上下文与继续指南
 
 > 这份文件是给 Claude Code 新会话的"接手说明"。读完它 + `ARCHITECTURE.md` 就能无缝继续。
-> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 120 项全过）。
+> 面向的是一个**已经能跑的平台**，不是从零开始。改动前先跑 `python -m pytest -q`（应 142 项全过）。
 
 ---
 
@@ -87,7 +87,7 @@
   - **按场景示例 + 方案库**：`载入示例` 按当前仿真场景放量身流程（多峰/多模用贝叶斯全局、相关谷用单纯形、偏斜/尖峰用梯度上升等）；`📁 方案库` 内置各场景示例，并可选**整个文件夹批量加载**保存过的方案（webkitdirectory / 多选文件）。
 - **测试**：`python -m pytest -q` → **120 项全过**（algorithms / graph / p1b / api / autotune / mcp / enhancements / audit / sensitivity）。
 
-算法库（12 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `coordinate_descent`
+算法库（13 种，均 ask/tell、可在画布/图/块里用）：`grid_scan` `line_scan` `spiral_scan`(螺旋找光) `coordinate_descent`
 `nelder_mead` `gradient_ascent`(PI闪电式) `quadratic_fit` `gaussian_fit` `parametric_fit`(非标拟合/公式法) `formula`
 `damped_sensitivity`(阻尼灵敏度求解/多进多出定值) `bayesian` `sensitivity_scan`(灵敏度采集，category=`characterize`，不入自动调优变异)。
 
@@ -111,6 +111,22 @@
   - **接线**：`run_device.py path.py [graph.json]` 命令行直接跑(与后端解耦)；`OPTPLAT_DEVICE=path.py python -m optplat.api` 后画布/REST(`/vocs`/`/benches`/新增 `/device`)/MCP **自动用该设备**、起点默认取轴当前位置；`/surface` 对设备返回 400(无解析面)。
   - **相对起点贯通全算法**：拟合类 `quadratic_fit`/`gaussian_fit`/`parametric_fit` 也加 `span_frac`(0=全程绝对；>0=以起点为中心的相对窗口)，连同 grid/line 的 `span_frac`、坐标下降/单纯形/梯度/公式/阻尼灵敏度**都从起点出发**——真实台架"从当前位置开始、无绝对坐标"。注意 `span_frac=1` 是以起点为中心±半量程，起点在中点时正好=全程(看起来没变)，要局部扫用小值。
 
+- **P2j 找光/粗调/精调 + 实时状态（pytest 142 项全过，Chromium 验证）**：
+  - **螺旋扫描** `spiral_scan`（category=`find-light`，自动进自动调优的粗调相）：绕**当前位置**向外
+    螺旋展开找光，半径随圈数线性增长，配 `stop.target` 扫到阈值即停——比整幅网格省得多。
+    **维度不写死**：1 维=两侧交替外扩，2 维=阿基米德螺旋（一圈半径 +step，一圈内角度不重复），
+    ≥3 维=Roberts 低差异序列映射到球面的向外扩散。每轴半径增量可单独设（量纲差异大时必用）。
+  - **贝叶斯加两类旋钮**：`span_frac`（初始搜索范围，0=全量程；>0=以起点为中心的相对窗口）、
+    `n_startup`（先纯随机撒几点建模型）、`explore`（TPE 的 γ 分位；注意 optuna 4.9 起 `gamma`
+    标记弃用，代码里已压掉告警并在其被移除时自动退回只用 n_startup——升级依赖不会崩）。
+  - **节点货架分组**：`AlgorithmSpec.group` + `GROUPS`＝找光/粗调/精调/求解·表征，画布左栏按此
+    分组陈列。**与 `category` 解耦**：group 是给人找算法的货架，category 是给自动调优归相用的。
+  - **右栏『实时状态』**：`StageEngine.on_eval` 观察者钩子（纯旁观，有测试证明挂上钩子结果一致）
+    → `POST /run/graph/stream` SSE 逐点推送 → 画布右栏显示当前 x/y/算子/评估次数。
+    仿真太快看不清，请求带 `delay` 参数逐点停顿（画布上是『演示时延』滑块；真实硬件填 0）。
+    **注意 sse_starlette 用 `\r\n\r\n` 分帧**，前端解析前先把 `\r\n` 归一化（踩过一次）。
+  - 单纯形每轴初始边长 (Δx1,Δx2,…) 与"从当前位置启动"已有，本轮补了测试锁住行为；
+    所有算子对**任意变量个数**（场景不同 x 个数不同）都有参数化测试。
 - **P2i 灵敏度采集（先测后解，pytest 120 项全过）**：回答"这台设备的 ∂y/∂x 到底是多少、线性范围有多宽"。
   `optplat/sensitivity.py`：给**原点+步距+点数**，逐轴扫描（每次只动一个 x、其余钉在原点），对每对 x→y
   拟合出**原点处斜率**装配成矩阵 —— 形状与 `damped_sensitivity` 的 `sensitivity` 入参一致，
@@ -219,7 +235,7 @@ python run_device.py examples/device_template.py   # 用外部定义的设备(�
 OPTPLAT_DEVICE=examples/device_template.py python -m optplat.api  # 让画布/REST/MCP 用你的真实设备（起点=轴当前位置）
 python run_mcp.py          # L2 MCP 服务器（stdio；--http 走 HTTP）→ 供 Agent 驱动，配置见 MCP_AGENT.md
 streamlit run app.py       # 表单式控制台
-python -m pytest -q        # 120 项测试
+python -m pytest -q        # 142 项测试
 ```
 
 接自己的优化函数：改 `optplat/demo.py` 的 `optical_bench(x)` 与 `demo_vocs()`。

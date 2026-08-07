@@ -8,6 +8,7 @@ Endpoints:
   GET  /vocs                default demo VOCS (variables / objectives)
   POST /run/graph           run a {nodes, edges} graph JSON  -> result
   POST /run/pipeline        run a block pipeline JSON         -> result
+  POST /run/graph/stream    同上，但 SSE 逐点推送 -> 画布实时显示 x/y
   POST /sensitivity         灵敏度采集：逐轴扫描 -> 曲线 + ∂y/∂x 矩阵
   GET  /                    the drag-drop canvas (static web/index.html)
 
@@ -21,6 +22,9 @@ import asyncio
 import contextlib
 import json
 import os
+import queue
+import threading
+import time
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -280,6 +284,57 @@ def run_pipeline(req: RunPipelineRequest):
         return _result(res)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
+class RunStreamRequest(RunGraphRequest):
+    """流式运行：每测一个点就推一条事件，画布右栏可以【实时】看着 x/y 在动。"""
+
+    delay: float = 0.0      # 每点之间的额外停顿（秒）。仿真快到看不清时用；真实硬件填 0
+
+
+@app.post("/run/graph/stream")
+def run_graph_stream(req: RunStreamRequest):
+    """SSE 流式跑图：`{type:"eval", n, stage, x, y}` 逐点推送，末尾一条 `{type:"done"}`。
+
+    运行仍然走同一个 GraphRunner/StageEngine —— 这里只是挂了个观察者钩子，
+    执行语义与 `/run/graph` 完全一致（不是另开一条执行路径）。
+    """
+    q: "queue.Queue" = queue.Queue(maxsize=1000)
+    delay = max(0.0, min(float(req.delay), 2.0))
+
+    def work():
+        try:
+            vocs = _build_vocs(req.vocs, req.evaluator)
+            ev = _build_evaluator(vocs, req.evaluator)
+            runner = GraphRunner(vocs, ev, req.graph, eval_budget=req.eval_budget,
+                                 start_point=_start_point(req.start_point))
+
+            def on_eval(x, y, stage, n):
+                q.put({"type": "eval", "n": n, "stage": stage,
+                       "x": {k: v for k, v in x.items() if k in vocs.variables}, "y": y})
+                if delay:
+                    time.sleep(delay)             # 让人看得清（仿真几毫秒就跑完了）
+
+            runner.engine.on_eval = on_eval
+            q.put({"type": "start", "variables": list(vocs.variables),
+                   "objectives": list(vocs.objectives)})
+            res = runner.run()
+            q.put({"type": "done", "result": _result(res)})
+        except Exception as e:                    # 把异常也送到流里，前端才看得见
+            q.put({"type": "error", "detail": f"{type(e).__name__}: {e}"})
+        finally:
+            q.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    async def stream():
+        while True:
+            item = await asyncio.to_thread(q.get)
+            if item is None:
+                break
+            yield {"data": json.dumps(item)}
+
+    return EventSourceResponse(stream())
 
 
 class SensitivityRequest(RunRequest):

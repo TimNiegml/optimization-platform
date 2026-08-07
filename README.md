@@ -16,7 +16,7 @@ python demo_hardware.py       # 硬件接入 + 噪声/平均/安全 + 断点续�
 python run_device.py examples/device_template.py   # ★ 用外部定义的设备(轴 move/get + 测量 get)跑；平台自动读几个 x/y
                               #   接口规范见 skills/device-interface/，图文版 docs/device-interface.html
 python run_mcp.py             # ★ L2 MCP 服务器 → 让 Agent 直接驱动平台（配置见 MCP_AGENT.md）
-python -m pytest -q           # 回归测试（算法 + 块/图/API + 硬件/归档 + 自动调优 + MCP + 实时联动 + 外部设备 + 共享采集 + 灵敏度采集 + 审计，120 项）
+python -m pytest -q           # 回归测试（算法 + 块/图/API + 硬件/归档 + 自动调优 + MCP + 实时联动 + 外部设备 + 共享采集 + 灵敏度采集 + 找光/实时状态 + 审计，142 项）
 ```
 
 ## 用 Agent 驱动（L2 · MCP）
