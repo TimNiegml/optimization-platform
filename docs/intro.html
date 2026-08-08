@@ -1,0 +1,360 @@
+<!doctype html><html><head><meta charset='utf-8'><style>*{box-sizing:border-box;margin:0;padding:0}</style></head><body><title>光器件调试平台 · 它能为业务做什么</title>
+
+<style>
+  :root {
+    --bg: #F3F5F8; --surface: #FFFFFF; --ink: #16202E; --muted: #5B6B80; --rule: #DBE1E9;
+    --accent: #1B5A9E; --accent-soft: #E3EDF7; --gold: #A9711A; --gold-soft: #F6EDDC;
+    --good: #14795A; --good-soft: #DDF0E8; --warn: #A8452A; --warn-soft: #F8E6E1;
+    --sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0C1119; --surface: #141C27; --ink: #E5EAF1; --muted: #93A2B6; --rule: #23303F;
+      --accent: #6BA6E8; --accent-soft: #14243A; --gold: #DCA84A; --gold-soft: #2A2113;
+      --good: #46BC90; --good-soft: #102A22; --warn: #E48468; --warn-soft: #2C1A15;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0C1119; --surface: #141C27; --ink: #E5EAF1; --muted: #93A2B6; --rule: #23303F;
+    --accent: #6BA6E8; --accent-soft: #14243A; --gold: #DCA84A; --gold-soft: #2A2113;
+    --good: #46BC90; --good-soft: #102A22; --warn: #E48468; --warn-soft: #2C1A15;
+  }
+  :root[data-theme="light"] {
+    --bg: #F3F5F8; --surface: #FFFFFF; --ink: #16202E; --muted: #5B6B80; --rule: #DBE1E9;
+    --accent: #1B5A9E; --accent-soft: #E3EDF7; --gold: #A9711A; --gold-soft: #F6EDDC;
+    --good: #14795A; --good-soft: #DDF0E8; --warn: #A8452A; --warn-soft: #F8E6E1;
+  }
+
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 16.5px; line-height: 1.8; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 60px 24px 100px; display: flex; flex-direction: column; gap: 46px; }
+
+  header { display: flex; flex-direction: column; gap: 16px; }
+  .kicker { font-size: 13px; letter-spacing: 0.18em; color: var(--accent); font-weight: 700; }
+  h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.18; font-weight: 800; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+  .lede { font-size: 19px; line-height: 1.7; color: var(--muted); margin: 0; max-width: 40ch; }
+  .lede b { color: var(--ink); font-weight: 700; }
+  hr.rule { height: 1px; background: var(--rule); border: 0; margin: 0; }
+
+  section { display: flex; flex-direction: column; gap: 20px; }
+  h2 { font-size: 25px; font-weight: 800; letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+  h2 .n { color: var(--accent); font-size: 15px; font-weight: 700; margin-right: 10px; vertical-align: 3px; }
+  h3 { font-size: 17px; font-weight: 700; margin: 0; }
+  p { margin: 0; max-width: 62ch; }
+  .muted { color: var(--muted); }
+  .big { font-size: 18.5px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+  .card .tag { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--warn); }
+  .card.pos .tag { color: var(--good); }
+  .card p { font-size: 15px; color: var(--muted); max-width: none; line-height: 1.7; }
+
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 24px 22px 18px; display: flex; flex-direction: column; gap: 16px; overflow-x: auto; }
+  figure svg { display: block; width: 100%; min-width: 560px; height: auto; }
+  figcaption { font-size: 14px; color: var(--muted); line-height: 1.7; border-top: 1px solid var(--rule); padding-top: 14px; max-width: 70ch; }
+
+  .box-s { fill: var(--surface); stroke: var(--rule); stroke-width: 1.5; }
+  .box-a { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+  .box-g { fill: var(--good-soft); stroke: var(--good); stroke-width: 1.5; }
+  .box-w { fill: var(--warn-soft); stroke: var(--warn); stroke-width: 1.5; }
+  .box-d { fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 5 4; }
+  .tt { fill: var(--ink); font-family: var(--sans); font-size: 15px; font-weight: 700; }
+  .tm { fill: var(--ink); font-family: var(--sans); font-size: 13px; font-weight: 600; }
+  .ts { fill: var(--muted); font-family: var(--sans); font-size: 12.5px; }
+  .t-a { fill: var(--accent); font-family: var(--sans); font-size: 13px; font-weight: 700; }
+  .t-w { fill: var(--warn); font-family: var(--sans); font-size: 13px; font-weight: 700; }
+  .t-g { fill: var(--good); font-family: var(--sans); font-size: 13px; font-weight: 700; }
+  .ln { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+  .ln-a { stroke: var(--accent); stroke-width: 2.5; fill: none; }
+  .ln-r { stroke: var(--rule); stroke-width: 1.5; fill: none; }
+  .mk { fill: var(--muted); }
+
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 13px 16px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 13px; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; background: var(--bg); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { font-weight: 700; white-space: nowrap; }
+
+  .steps { display: flex; flex-direction: column; gap: 20px; }
+  .step { display: grid; grid-template-columns: 40px 1fr; gap: 6px 16px; align-items: start; }
+  .step .k { width: 30px; height: 30px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+             font-weight: 800; font-size: 14px; display: grid; place-items: center; }
+  .step .b { display: flex; flex-direction: column; gap: 6px; }
+  .step .b p { font-size: 15.5px; color: var(--muted); }
+
+  .quote { border-left: 4px solid var(--gold); background: var(--gold-soft); border-radius: 0 8px 8px 0;
+           padding: 18px 22px; font-size: 17px; line-height: 1.7; }
+  .quote b { font-weight: 800; }
+
+  .honest { border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+  .honest ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 15.5px; color: var(--muted); }
+  .honest ul b { color: var(--ink); }
+
+  .status { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .st { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px 18px; }
+  .st .lab { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .st .val { font-size: 15.5px; font-weight: 700; margin-top: 4px; }
+  .st .val.ok { color: var(--good); }
+  .st .val.next { color: var(--gold); }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="kicker">光器件调试平台</div>
+  <h1>把「老师傅调机」变成「设备自己调」</h1>
+  <p class="lede">而且<b>每一次都调得一样</b>——不看是谁在调、不看是第几个班次。</p>
+</header>
+
+<hr class="rule" />
+
+<section>
+  <h2><span class="n">01</span>今天卡在哪里</h2>
+  <p class="big">光器件出厂前有一道绕不开的工序：把两个器件<b>对准</b>，或者把一台设备<b>标定</b>到指标要求。今天这道工序主要靠人。</p>
+  <div class="cards">
+    <div class="card">
+      <div class="tag">依赖人</div>
+      <h3>手感是资产，也是风险</h3>
+      <p>调得好不好，取决于这个人干了几年。好手难招、难留，也带不了太多徒弟。人一走，手法就带走了。</p>
+    </div>
+    <div class="card">
+      <div class="tag">不可预测</div>
+      <h3>同一道工序，时间差很多</h3>
+      <p>顺利时几分钟，不顺时反复试、甚至返工。排产时只能按最坏情况留时间，产能被这段不确定性吃掉。</p>
+    </div>
+    <div class="card">
+      <div class="tag">结果会漂</div>
+      <h3>换人、换批次，结果就变</h3>
+      <p>每个人的收敛习惯不同，同样合格的产品，性能分布却很散。散意味着离规格边界近，也就意味着风险。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="n">02</span>平台做的事，一句话</h2>
+  <div class="quote">
+    把老师傅<b>「怎么调」的经验</b>，变成一份可以保存、可以复制、可以下发到每条产线的<b>调试流程</b>，然后交给设备自己执行。
+  </div>
+  <p>流程不是代码，是<b>像画流程图一样拖出来的</b>：先做什么、再做什么、什么条件下重来一次、什么时候算调完。工艺工程师自己就能改，不需要找软件的人。</p>
+
+  <figure>
+    <svg viewBox="0 0 900 400" role="img" aria-label="对比示意图：左侧是今天靠人工调试，结果分布散、部分落在合格线外、耗时不定；右侧是用平台按固定流程调试，结果集中在高位、全部在合格线内、耗时可预测。">
+      <rect class="box-d" x="14" y="12" width="418" height="374" rx="8" />
+      <text class="t-w" x="34" y="42">今天 · 靠人</text>
+      <text class="ts" x="34" y="66">每个人手法不同，快慢不定</text>
+      <text class="ts" x="34" y="86">结果分布散，靠事后检验兜底</text>
+
+      <text class="tm" x="34" y="128">一批产品调完之后的性能分布</text>
+      <line class="ln-r" x1="34" y1="290" x2="410" y2="290" />
+      <text class="ts" x="34" y="308">差</text>
+      <text class="ts" x="396" y="308" text-anchor="end">好</text>
+      <line x1="228" y1="150" x2="228" y2="296" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="4 3" />
+      <text class="t-w" x="224" y="146" text-anchor="end">合格线</text>
+      <circle cx="96" cy="268" r="6" fill="var(--warn)" fill-opacity="0.8" />
+      <circle cx="142" cy="238" r="6" fill="var(--warn)" fill-opacity="0.8" />
+      <circle cx="178" cy="270" r="6" fill="var(--warn)" fill-opacity="0.8" />
+      <circle cx="206" cy="212" r="6" fill="var(--warn)" fill-opacity="0.8" />
+      <circle cx="252" cy="252" r="6" fill="var(--muted)" fill-opacity="0.55" />
+      <circle cx="286" cy="200" r="6" fill="var(--muted)" fill-opacity="0.55" />
+      <circle cx="318" cy="244" r="6" fill="var(--muted)" fill-opacity="0.55" />
+      <circle cx="348" cy="214" r="6" fill="var(--muted)" fill-opacity="0.55" />
+      <circle cx="380" cy="262" r="6" fill="var(--muted)" fill-opacity="0.55" />
+      <circle cx="402" cy="226" r="6" fill="var(--muted)" fill-opacity="0.55" />
+      <text class="t-w" x="34" y="344">4 件不合格 → 返工或报废；合格的也散得很开</text>
+      <text class="ts" x="34" y="366">单件耗时：几分钟 ~ 需要返工，说不准</text>
+
+      <rect class="box-g" x="466" y="12" width="420" height="374" rx="8" fill="none" />
+      <text class="t-g" x="488" y="42">用平台 · 按固定流程</text>
+      <text class="ts" x="488" y="66">同一套流程，谁按都一样</text>
+      <text class="ts" x="488" y="86">调完自动停在最好的位置</text>
+
+      <text class="tm" x="488" y="128">一批产品调完之后的性能分布</text>
+      <line class="ln-r" x1="488" y1="290" x2="864" y2="290" />
+      <text class="ts" x="488" y="308">差</text>
+      <text class="ts" x="850" y="308" text-anchor="end">好</text>
+      <line x1="784" y1="150" x2="784" y2="296" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="4 3" />
+      <text class="t-w" x="780" y="146" text-anchor="end">合格线</text>
+      <circle cx="812" cy="232" r="6" fill="var(--good)" fill-opacity="0.8" />
+      <circle cx="826" cy="216" r="6" fill="var(--good)" fill-opacity="0.8" />
+      <circle cx="800" cy="248" r="6" fill="var(--good)" fill-opacity="0.8" />
+      <circle cx="838" cy="240" r="6" fill="var(--good)" fill-opacity="0.8" />
+      <circle cx="818" cy="262" r="6" fill="var(--good)" fill-opacity="0.8" />
+      <circle cx="846" cy="256" r="6" fill="var(--good)" fill-opacity="0.8" />
+      <circle cx="806" cy="204" r="6" fill="var(--good)" fill-opacity="0.8" />
+      <circle cx="834" cy="272" r="6" fill="var(--good)" fill-opacity="0.8" />
+      <circle cx="856" cy="228" r="6" fill="var(--good)" fill-opacity="0.8" />
+      <circle cx="792" cy="222" r="6" fill="var(--good)" fill-opacity="0.8" />
+      <text class="t-g" x="488" y="344">全部落在合格线内，且集中在高位</text>
+      <text class="ts" x="488" y="366">单件耗时：稳定、可排产</text>
+    </svg>
+    <figcaption><b>核心差别不是「更快」，是「更稳」。</b>结果集中意味着离规格边界更远，返工和报废自然下降，排产也不用再按最坏情况留时间。
+    <span style="color:var(--warn)">上图为说明用示意，不是实测数据</span>——真实收益要在你们自己的产线上试点后测量（见文末）。</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2><span class="n">03</span>它是怎么调的</h2>
+  <p class="big">顺序和老师傅完全一样，只是不知疲倦、不会手抖、每次都一样。</p>
+
+  <figure>
+    <svg viewBox="0 0 900 330" role="img" aria-label="调试四步示意：先大范围找到信号，再快速逼近，然后精细收敛到最佳点，全程守住其它指标的底线与设备行程限制。">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path class="mk" d="M 0 0 L 10 5 L 0 10 z" />
+        </marker>
+      </defs>
+
+      <rect x="60" y="34" width="200" height="196" fill="var(--accent-soft)" fill-opacity="0.45" />
+      <rect x="260" y="34" width="230" height="196" fill="var(--accent-soft)" fill-opacity="0.7" />
+      <rect x="490" y="34" width="370" height="196" fill="var(--good-soft)" fill-opacity="0.7" />
+
+      <line class="ln-r" x1="60" y1="230" x2="860" y2="230" />
+      <line class="ln-r" x1="60" y1="34" x2="60" y2="230" />
+      <text class="ts" x="52" y="46" text-anchor="end">好</text>
+      <text class="ts" x="52" y="228" text-anchor="end">差</text>
+      <text class="ts" x="36" y="140" text-anchor="middle" transform="rotate(-90 36 140)">产品性能指标</text>
+      <text class="ts" x="860" y="252" text-anchor="end">调试用时 →</text>
+
+      <path class="ln-a" d="M 70 224 C 130 222, 180 214, 232 196 C 280 178, 330 128, 400 96 C 460 70, 540 56, 620 50 C 700 46, 780 45, 852 44" />
+      <circle cx="70" cy="224" r="5" fill="var(--accent)" />
+      <circle cx="852" cy="44" r="6" fill="var(--good)" />
+      <text class="t-g" x="846" y="34" text-anchor="end">停在这里</text>
+
+      <text class="t-a" x="80" y="60">① 找到信号</text>
+      <text class="ts" x="80" y="80">从当前位置往外找，</text>
+      <text class="ts" x="80" y="98">一有反应就转下一步</text>
+
+      <text class="t-a" x="280" y="60">② 快速逼近</text>
+      <text class="ts" x="280" y="80">大步走，先靠近好的区域，</text>
+      <text class="ts" x="280" y="98">不纠结细节</text>
+
+      <text class="t-a" x="512" y="146">③ 精细收敛</text>
+      <text class="ts" x="512" y="166">小步微调，直到指标不再变好；</text>
+      <text class="ts" x="512" y="184">自动停在最好的位置，不会调过头</text>
+
+      <rect class="box-w" x="60" y="256" width="800" height="52" rx="6" />
+      <text class="tm" x="80" y="280">④ 全程守底线</text>
+      <text class="ts" x="188" y="280">调这个指标的同时，其它指标不许跌破设定值；机构不许超出行程——</text>
+      <text class="ts" x="188" y="298">这道保护独立存在，任何流程都关不掉，也绕不过。</text>
+    </svg>
+    <figcaption>四步之间的切换条件由流程写死（比如"信号超过某个值就进下一步"），所以每一件产品走的路径都一样。
+    第 ④ 步是<b>硬保护</b>：即使流程配错了，设备也不会被指挥到危险位置。</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2><span class="n">04</span>三件事，是这个平台真正的价值</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="k">1</div>
+      <div class="b">
+        <h3>经验变成资产，而不是留在个人手上</h3>
+        <p>一套调试流程就是一个文件。可以存档、复制、下发到每条线每个班次，也可以在版本之间对比"改了这一版，是不是真的更好"。老师傅的价值从"亲自调"变成"定义怎么调"——一个人的手法可以复制到几十台设备上。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="k">2</div>
+      <div class="b">
+        <h3>换产品、换机型，改设定就行，不用重做系统</h3>
+        <p>不同产品要调的旋钮个数不一样、要看的指标也不一样。平台不假设固定几个——接进来是几个就是几个。换型时改的是流程里的几个设定值，不是重新开发一套软件。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="k">3</div>
+      <div class="b">
+        <h3>开工前先给设备做体检，而不是上来就瞎调</h3>
+        <p>平台可以先自动跑一遍"每个旋钮拧一格，指标到底动多少、在多大范围内还是线性的"。这一步能提前发现装配偏差、接线接错、某个轴根本没响应这类问题——避免把设备的毛病当成调试没调好，反复浪费工时。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="n">05</span>不同岗位分别得到什么</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>谁</th><th>今天的麻烦</th><th>平台给的</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>产线主管</td>
+          <td>调试工时不可预测，排产只能留冗余；换班结果有波动</td>
+          <td>同一流程重复执行，用时和结果都收敛；每一件的过程全程留痕，异常可回溯</td>
+        </tr>
+        <tr>
+          <td>工艺工程师</td>
+          <td>想换个调法就要排期找软件；新想法验证周期长</td>
+          <td>自己拖拽就能改流程、当场看效果；平台还能自动比较几种调法哪种更快更稳，给出排名</td>
+        </tr>
+        <tr>
+          <td>质量 / 客诉</td>
+          <td>出了问题只能追到结果，追不到过程</td>
+          <td>每一次调试的全过程自动存档，可以回放"当时是怎么调到这个结果的"</td>
+        </tr>
+        <tr>
+          <td>设备 / 安全</td>
+          <td>担心自动化程序把机构撞坏</td>
+          <td>行程保护是独立一层，不随流程改动，任何配置都关不掉</td>
+        </tr>
+        <tr>
+          <td>IT / 合规</td>
+          <td>担心数据出厂、依赖外部服务</td>
+          <td>整套在厂内网运行，断网可用；不依赖任何外部在线服务</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2><span class="n">06</span>现在到哪一步了</h2>
+  <div class="status">
+    <div class="st"><div class="lab">核心能力</div><div class="val ok">已完成</div></div>
+    <div class="st"><div class="lab">模拟台架全流程</div><div class="val ok">已跑通</div></div>
+    <div class="st"><div class="lab">工艺人员自助改流程</div><div class="val ok">已可用</div></div>
+    <div class="st"><div class="lab">接真实设备</div><div class="val next">标准化对接，一台仪器一次</div></div>
+    <div class="st"><div class="lab">产线试点</div><div class="val next">下一步</div></div>
+  </div>
+  <p class="muted">目前的验证是在<b>模拟台架</b>上完成的：用软件模拟出光器件的响应，把整套流程从头到尾跑通并反复回归。
+  接真实设备走的是一套固定的对接方式——每接一台新仪器是一次一次性工作量，不需要改动平台本身。</p>
+</section>
+
+<section>
+  <h2><span class="n">07</span>该拿什么衡量它</h2>
+  <div class="honest">
+    <p><b>这一页没有写任何收益百分比，是故意的。</b>调试工时能降多少、一致性能改善多少，取决于你们现在的基线、产品形态和设备精度——现在给数字只能是编的。</p>
+    <p class="muted">平台在运行时会自动记录下面这几项。试点一到两周，就能用<b>你们自己的数据</b>把这几栏填上，再决定是否推广：</p>
+    <ul>
+      <li><b>单件调试用时</b>——以及它的波动范围（这一项往往比平均值更值钱）</li>
+      <li><b>一次通过率</b>——不需要人工介入就完成的比例</li>
+      <li><b>结果一致性</b>——同一批产品调完后的性能分布有多集中</li>
+      <li><b>对人的依赖</b>——熟手与新手操作同一流程，结果差多少</li>
+    </ul>
+    <p class="muted">建议的试点方式：选<b>一道具体工序、一台设备</b>，让平台和现有人工方式并行跑两周，直接比这四项。范围小、可回退、结论清楚。</p>
+  </div>
+</section>
+
+<section>
+  <h2><span class="n">08</span>它不做什么</h2>
+  <p>说清楚边界，比夸大能力更有用：</p>
+  <div class="cards">
+    <div class="card">
+      <div class="tag">不是</div>
+      <h3>不能替代工艺判断</h3>
+      <p>调什么、调到什么算好，仍然由工艺定义。平台负责把这个定义高效、稳定地执行到每一件产品上。</p>
+    </div>
+    <div class="card">
+      <div class="tag">不是</div>
+      <h3>不能修复设备本身的问题</h3>
+      <p>如果器件装配有偏差或仪器状态不对，平台能<b>更早发现并指出来</b>，但修不了它。</p>
+    </div>
+    <div class="card">
+      <div class="tag">不是</div>
+      <h3>不是买来即用的黑盒</h3>
+      <p>每接一种新设备、新工序，都需要一次对接和一次流程整定。这部分工作量真实存在，只是可以复用。</p>
+    </div>
+  </div>
+</section>
+
+</div>
+</body></html>

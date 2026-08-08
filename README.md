@@ -5,6 +5,7 @@
 （如"先优 y1，再优 y2 并保持 y1>k"）编排成带 `if / loop / 早停` 的流水线。
 
 **上手请看 [`DEMO.md`](DEMO.md)**（交互界面 + 命令行演示的完整走法）。
+**给非技术同事/领导看**：`docs/intro.html` —— 用业务语言讲清楚这平台解决什么问题、怎么衡量它（浏览器直接打开，离线可用）。
 
 ```bash
 pip install -r requirements.txt

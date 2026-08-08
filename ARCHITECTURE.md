@@ -4,6 +4,7 @@
 > 约束：闭源交付客户，依赖全部 permissive（MIT/BSD/Apache），零 GPL/fair-code。
 > 本文是提纲。图文一页纸看 `docs/architecture.html`（主干图 + 扩展点地图），逐字段接口看
 > `skills/device-interface/`，Agent 用法看 `MCP_AGENT.md`，当前进度与决策看 `CLAUDE.md`。
+> 不带技术背景的介绍（给业务方/领导）看 `docs/intro.html`。
 
 ---
 
