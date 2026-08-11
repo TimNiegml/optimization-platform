@@ -18,7 +18,7 @@ from typing import Iterable, Optional
 
 from asteval import Interpreter
 
-from .evaluator import Evaluator
+from .evaluator import Evaluator, with_derived_outputs
 from .generators import (
     CoordinateDescent,
     FormulaMethod,
@@ -40,7 +40,7 @@ class StageEngine:
     def __init__(self, vocs: VOCS, evaluator: Evaluator, eval_budget: int = 5000,
                  start_point: Optional[dict[str, float]] = None):
         self.vocs = vocs
-        self.evaluator = evaluator
+        self.evaluator = with_derived_outputs(evaluator, vocs)
         self.eval_budget = eval_budget
         self.state: dict[str, float] = dict(start_point) if start_point else vocs.initial_point()
         self.last_y: dict[str, float] = {}

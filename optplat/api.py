@@ -249,7 +249,8 @@ def vocs():
     return {
         "variables": {n: {"low": var.low, "high": var.high} for n, var in v.variables.items()},
         "objectives": {n: {"mode": o.mode.value, "cost": o.cost,
-                           "device": o.device, "param": o.param, "group": o.group}
+                           "device": o.device, "param": o.param, "group": o.group,
+                           "expression": o.expression}
                        for n, o in v.objectives.items()},
     }
 

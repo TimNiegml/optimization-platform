@@ -173,6 +173,7 @@
     <button class="ghost sm" onclick="openUntil()" data-tip="用表格方式设置『全局达成条件』（各目标 达到/逼近 某值，与/或组合），不用手写表达式。">🎯 目标条件</button>
     <button class="ghost sm" onclick="openTune()" data-tip="自动调优：按当前场景搜索多种算法方案，按质量/时长/稳定性打分排名，一键采用最优方案。">🤖 自动调优</button>
     <button class="ghost sm" onclick="openSens()" data-tip="灵敏度采集：给原点/步距/点数，逐轴扫描测出每对 x→y 的曲线、线性范围与 ∂y/∂x 灵敏度矩阵；矩阵可一键填进阻尼灵敏度求解节点。">📐 灵敏度采集</button>
+    <button class="ghost sm" onclick="openDerived()" data-tip="用外部测量通道计算新的因变量，例如 z1=y1+y2、z2=max(y1,y2)-min(y1,y2)；可直接用于优化、约束和灵敏度矩阵。">🧮 自定义因变量</button>
     <span class="fs-ctl" data-tip="调节画布里节点与连线的字体大小。">字号 <input id="fsRange" type="range" min="10" max="22" step="1" value="13"></span>
     <button class="ghost sm" onclick="toggleTheme()" id="themeBtn" data-tip="切换浅色 / 深色主题。">🌙</button>
     <button class="ghost sm" onclick="openHelp()" data-tip="打开使用说明：节点、连线、目标、轨迹图、表达式怎么用。">帮助 ?</button>
@@ -401,6 +402,15 @@
   <div id="sensBody" style="margin-top:12px"></div>
 </div>
 
+<div id="derivedModal" class="modal">
+  <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
+  <h2>自定义因变量</h2>
+  <p class="hint">用已测通道计算新因变量。支持 <code>+ - * / **</code>、括号以及 <code>abs / min / max</code>；可引用前面定义的自定义因变量。保存后，它会和 y1/y2 一样出现在优化目标、条件、灵敏度采集与矩阵求解中。</p>
+  <div id="derivedRows"></div>
+  <button class="ghost sm" onclick="addDerivedRow()">＋ 添加因变量</button>
+  <div class="row" style="margin-top:12px"><button onclick="applyDerived()">应用</button></div>
+</div>
+
 <script>
 const API = location.origin;
 let catalog = [], benches = [], vocs = {variables:{}, objectives:{}};
@@ -417,6 +427,7 @@ let untilExpr = '', untilRows = [], untilRawEdited = false;
 let startPoint = {}, useStartPoint = false, twoDMap = null;   // 自定义起始点 + 2D图坐标映射
 let tuneRandomStart = true, tuneStartDomain = {};             // 自动调优随机初始点 + 定义域
 let sensVars=[], sensObjs=[], sensOrigins=[{}], lastSens=null;  // 灵敏度采集：选中的 x/y、原点列表、上次结果
+let derivedRows=[];                                             // [{name, expression, mode, target}]
 
 const NODE_COLORS = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#ec4899','#84cc16'];
 const MODE_LABEL = {'':'默认','maximize':'最大化','minimize':'最小化','target':'逼近目标值','scan':'扫描'};
@@ -461,6 +472,8 @@ async function boot() {
       safetyLimits[v]=[V.low, V.high]; actuators[v]={device:'PI六足', param:'axis'+(i+1)};
       startPoint[v]=+(0.5*(V.low+V.high)).toFixed(4); tuneStartDomain[v]=[V.low, V.high]; });
     objKeys.forEach(o => { const m=vocs.objectives[o]||{}; channels[o]={device:m.device||'功率计', param:m.param||o, cost:m.cost!=null?m.cost:0, group:m.group||''}; });
+    derivedRows = objKeys.filter(o=>vocs.objectives[o].expression).map(o=>({name:o, expression:vocs.objectives[o].expression,
+      mode:vocs.objectives[o].mode||'maximize', target:vocs.objectives[o].target}));
   } catch (e) { document.getElementById('conn').textContent = '后端未连接'; }
   renderEvalExtras(); inspectEmpty(); renderUntilRows();
 }
@@ -733,7 +746,8 @@ function renderEvalExtras(){
   // 通道规范：每个 y 一个读取通道（设备/参数/耗时/测量组），每个 x 一个执行器。始终可配。
   h += `<div class="sub"><div class="glab">通道规范 <span class="info" data-tip="把每个因变量 y 映射到读取设备(如光功率计/偏振分析仪)+参数，标注读取耗时(秒)，并填『测量组』——同组并行测(耗时取最大)、不同组串行测(相加)。每个自变量 x 映射到执行器。引擎只读取某步真正需要的通道。">i</span></div>`;
   h += `<div class="glab" style="margin-top:2px">因变量（读取通道）：设备 / 参数 / 耗时s / <b>测量组</b></div>`;
-  objKeys.forEach(o=>{ const c=channels[o];
+  objKeys.forEach(o=>{ const c=channels[o]; const expr=(vocs.objectives[o]||{}).expression;
+    if(expr){ h += `<div class="lim4"><b>${o}</b><span style="grid-column:span 3;color:var(--accent);font-family:monospace">= ${expr}</span></div>`; return; }
     h += `<div class="lim4"><b>${o}</b>
       <input value="${c.device}" oninput="channels['${o}'].device=this.value" title="读取设备">
       <input value="${c.param}" oninput="channels['${o}'].param=this.value" title="参数">
@@ -798,6 +812,15 @@ function readEvalConfig(){
     noise:+document.getElementById('evNoise').value, averages:+document.getElementById('evAvg').value,
     safety:document.getElementById('evSafety').checked, safety_limits:safetyLimits,
     channel_costs, channel_groups, channels, actuators }; }
+
+function currentVocs(){
+  const objectives={}; objKeys.forEach(o=>{ const m=vocs.objectives[o]||{}, c=channels[o]||{};
+    objectives[o]={mode:m.mode||'maximize', target:m.target==null?null:m.target,
+      cost:m.expression?0:(+c.cost||0), device:m.expression?null:(c.device||null),
+      param:m.expression?null:(c.param||null), group:m.expression?null:(c.group||null),
+      expression:m.expression||null}; });
+  return {variables:vocs.variables, objectives, constraints:vocs.constraints||[]};
+}
 
 // ==================== 右栏「实时状态」：跑的时候看得见 x/y 在动 ====================
 // 走 /run/graph/stream（SSE）：每测一个点后端推一条，前端刷新。执行仍是同一个
@@ -865,7 +888,7 @@ async function streamRun(body, onEvent){
 
 async function run(){
   const btn=document.getElementById('runBtn'); btn.disabled=true; btn.textContent='运行中…';
-  const body = {graph:toGraph(), evaluator:readEvalConfig(), delay:liveDelay};
+  const body = {graph:toGraph(), vocs:currentVocs(), evaluator:readEvalConfig(), delay:liveDelay};
   if(useStartPoint){ const sp={}; varKeys.forEach(v=>sp[v]=+startPoint[v]); body.start_point=sp; }
   liveReset(); liveOn=true; renderLive();
   try {
@@ -1091,7 +1114,7 @@ function downloadTrajectory(){
 // ---------- save / load solution ----------
 function saveSolution(){
   const name = prompt('方案名称', '优化方案') || '优化方案';
-  const obj = {version:1, name, until:untilExpr, evaluator:readEvalConfig(),
+  const obj = {version:2, name, until:untilExpr, evaluator:readEvalConfig(), derivedObjectives:derivedRows,
     useStartPoint, startPoint:{...startPoint},
     nodes:nodes.map(n=>({...n})), edges:edges.map(e=>({...e})), seq};
   const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
@@ -1107,6 +1130,7 @@ function applySolution(o){
   if(o.useStartPoint!=null) useStartPoint=!!o.useStartPoint;
   if(o.startPoint) varKeys.forEach(v=>{ if(o.startPoint[v]!=null) startPoint[v]=+o.startPoint[v]; });
   if(o.evaluator) applyEvalConfig(o.evaluator);
+  if(o.derivedObjectives){ derivedRows=JSON.parse(JSON.stringify(o.derivedObjectives)); applyDerived(); }
   sel=null; selEdge=null; render(); inspectEmpty(); renderUntilRows();
   document.getElementById('conn').textContent='已加载方案：'+(o.name||'');
 }
@@ -1233,6 +1257,37 @@ function showModal(id){ document.getElementById('modalBack').style.display='bloc
 function openHelp(){ showModal('helpModal'); }
 function closeModals(){ document.getElementById('modalBack').style.display='none'; document.querySelectorAll('.modal').forEach(m=>m.style.display='none'); }
 
+// ---------- calculated/derived objectives ----------
+function openDerived(){ renderDerivedRows(); showModal('derivedModal'); }
+function addDerivedRow(){ derivedRows.push({name:'z'+(derivedRows.length+1),expression:'',mode:'maximize',target:null}); renderDerivedRows(); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function renderDerivedRows(){
+  const box=document.getElementById('derivedRows'); if(!box) return;
+  if(!derivedRows.length){ box.innerHTML='<p class="hint">尚未定义。示例：z1 = y1+y2；z2 = max(y1,y2,y3)-min(y1,y2,y3)。</p>'; return; }
+  box.innerHTML=`<div style="overflow-x:auto"><table class="sens"><tr><th>名称</th><th>表达式</th><th>默认模式</th><th>目标值</th><th></th></tr>`+
+    derivedRows.map((r,i)=>`<tr><td><input value="${escapeHtml(r.name||'')}" oninput="derivedRows[${i}].name=this.value.trim()" placeholder="z1"></td>
+      <td><input value="${escapeHtml(r.expression||'')}" oninput="derivedRows[${i}].expression=this.value" placeholder="y1+y2" style="min-width:240px;font-family:monospace"></td>
+      <td><select onchange="derivedRows[${i}].mode=this.value"><option value="maximize" ${r.mode==='maximize'?'selected':''}>最大化</option><option value="minimize" ${r.mode==='minimize'?'selected':''}>最小化</option><option value="target" ${r.mode==='target'?'selected':''}>逼近目标</option><option value="scan" ${r.mode==='scan'?'selected':''}>扫描</option></select></td>
+      <td><input type="number" step="any" value="${r.target==null?'':r.target}" oninput="derivedRows[${i}].target=this.value===''?null:+this.value" placeholder="仅逼近模式"></td>
+      <td><button class="ghost sm" onclick="derivedRows.splice(${i},1);renderDerivedRows()">✕</button></td></tr>`).join('')+'</table></div>';
+}
+function applyDerived(){
+  const base=Object.keys(vocs.objectives).filter(o=>!(vocs.objectives[o]||{}).expression), seen=new Set(base);
+  for(const r of derivedRows){
+    if(!/^[A-Za-z_]\w*$/.test(r.name||'')){ alert('因变量名称必须是字母或下划线开头的标识符：'+r.name); return; }
+    if(seen.has(r.name)){ alert('因变量名称重复或与外部通道重名：'+r.name); return; }
+    if(!(r.expression||'').trim()){ alert(r.name+' 的表达式不能为空'); return; }
+    if(r.mode==='target' && r.target==null){ alert(r.name+' 使用逼近目标模式时必须填写目标值'); return; }
+    seen.add(r.name);
+  }
+  Object.keys(vocs.objectives).filter(o=>(vocs.objectives[o]||{}).expression).forEach(o=>delete vocs.objectives[o]);
+  derivedRows.forEach(r=>{ vocs.objectives[r.name]={mode:r.mode||'maximize',target:r.target,cost:0,expression:r.expression.trim()}; channels[r.name]={device:'',param:r.name,cost:0,group:''}; });
+  objKeys=Object.keys(vocs.objectives); sensObjs=sensObjs.filter(o=>objKeys.includes(o));
+  if(!objKeys.includes(c1dObj)) c1dObj=objKeys[0]; if(!objKeys.includes(c2dObj)) c2dObj=objKeys[0];
+  renderEvalExtras(); render(); if(sel) select(sel); closeModals();
+  document.getElementById('conn').textContent='已应用 '+derivedRows.length+' 个自定义因变量';
+}
+
 const tip=document.getElementById('tipbox');
 document.addEventListener('mouseover', e=>{ const el=e.target.closest('[data-tip]'); if(!el||!el.getAttribute('data-tip')) return; tip.textContent=el.getAttribute('data-tip'); tip.style.display='block'; positionTip(e); });
 document.addEventListener('mousemove', e=>{ if(tip.style.display==='block') positionTip(e); });
@@ -1350,7 +1405,7 @@ async function runSens(){
   if(!sensVars.length || !sensObjs.length){ document.getElementById('sensBody').innerHTML='<p class="hint">请至少选一个自变量和一个因变量。</p>'; return; }
   const btn=document.getElementById('sensRun'); btn.disabled=true; btn.textContent='采集中…';
   const origins = sensOrigins.map(o=>{ const full={}; varKeys.forEach(v=> full[v] = o[v]!=null ? +o[v] : sensDefault(v)); return full; });
-  const body = {variables:sensVars, objectives:sensObjs,
+  const body = {variables:sensVars, objectives:sensObjs, vocs:currentVocs(),
     step:+document.getElementById('sensStep').value, n_points:+document.getElementById('sensN').value,
     fit:document.getElementById('sensFit').value, linear_tol:+document.getElementById('sensTol').value,
     origins, evaluator:readEvalConfig()};

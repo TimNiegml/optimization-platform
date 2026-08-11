@@ -10,7 +10,129 @@ resume / rollback.
 """
 from __future__ import annotations
 
+import ast
+import math
 from typing import Callable, Iterable, Optional
+
+
+_DERIVED_FUNCS = {"abs": abs, "min": min, "max": max}
+_DERIVED_BINOPS = {
+    ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
+    ast.Mult: lambda a, b: a * b, ast.Div: lambda a, b: a / b,
+    ast.Pow: lambda a, b: a ** b, ast.Mod: lambda a, b: a % b,
+}
+_DERIVED_UNARY = {ast.UAdd: lambda a: a, ast.USub: lambda a: -a}
+
+
+def _expression_names(expression: str) -> set[str]:
+    """Return channel names referenced by a derived-output expression."""
+    tree = ast.parse(expression, mode="eval")
+    return {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)
+            and n.id not in _DERIVED_FUNCS}
+
+
+def _eval_expression(expression: str, values: dict[str, float]) -> float:
+    """Evaluate the small arithmetic DSL used for derived outputs.
+
+    Deliberately does not use Python ``eval``. Only numbers, channel names,
+    arithmetic, and ``abs/min/max`` are accepted.
+    """
+    def visit(node):
+        if isinstance(node, ast.Expression):
+            return visit(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node, ast.Name) and node.id in values:
+            return float(values[node.id])
+        if isinstance(node, ast.BinOp) and type(node.op) in _DERIVED_BINOPS:
+            return _DERIVED_BINOPS[type(node.op)](visit(node.left), visit(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _DERIVED_UNARY:
+            return _DERIVED_UNARY[type(node.op)](visit(node.operand))
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in _DERIVED_FUNCS and not node.keywords):
+            return _DERIVED_FUNCS[node.func.id](*(visit(a) for a in node.args))
+        raise ValueError(f"unsupported derived-output expression element: {ast.dump(node)}")
+
+    result = float(visit(ast.parse(expression, mode="eval")))
+    if not math.isfinite(result):
+        raise ValueError(f"derived-output expression produced a non-finite value: {expression}")
+    return result
+
+
+class DerivedEvaluator:
+    """Decorator that turns measured channels into calculated objectives.
+
+    It expands a request for ``z1`` into the physical channels referenced by
+    its expression, asks the wrapped evaluator to read only those channels,
+    and then calculates ``z1``. Expressions may reference other derived
+    outputs; unknown names and dependency cycles fail before hardware moves.
+    """
+
+    def __init__(self, evaluator, expressions: dict[str, str], known_channels: Iterable[str]):
+        self.evaluator = evaluator
+        self.expressions = {k: v.strip() for k, v in expressions.items() if v and v.strip()}
+        self.known = set(known_channels)
+        self.dependencies = {k: _expression_names(v) for k, v in self.expressions.items()}
+        for name, deps in self.dependencies.items():
+            unknown = deps - self.known
+            if unknown:
+                raise ValueError(f"derived output {name!r} references unknown channels: {sorted(unknown)}")
+        # Resolve every derived channel now, so cycles are reported before a run.
+        for name in self.expressions:
+            self._physical_dependencies(name, set())
+
+    def _physical_dependencies(self, name: str, visiting: set[str]) -> set[str]:
+        if name not in self.expressions:
+            return {name}
+        if name in visiting:
+            raise ValueError(f"cyclic derived-output dependency involving {name!r}")
+        return set().union(*(self._physical_dependencies(dep, visiting | {name})
+                             for dep in self.dependencies[name])) if self.dependencies[name] else set()
+
+    def _calculate(self, name: str, values: dict[str, float], visiting: set[str]) -> float:
+        if name in values:
+            return values[name]
+        if name in visiting:
+            raise ValueError(f"cyclic derived-output dependency involving {name!r}")
+        for dep in self.dependencies[name]:
+            if dep in self.expressions:
+                values[dep] = self._calculate(dep, values, visiting | {name})
+        values[name] = _eval_expression(self.expressions[name], values)
+        return values[name]
+
+    def evaluate(self, x: dict[str, float], stage: str = "", channels=None) -> dict[str, float]:
+        requested = set(self.known if channels is None else channels)
+        physical = set().union(*(self._physical_dependencies(k, set()) for k in requested))
+        values = self.evaluator.evaluate(x, stage=stage, channels=physical)
+        for name in requested:
+            if name in self.expressions:
+                self._calculate(name, values, set())
+        result = {k: values[k] for k in requested if k in values}
+        # Keep calculated values in the shared trace/CSV without counting them
+        # as instrument reads or charging an extra measurement cost.
+        if self.evaluator.history:
+            self.evaluator.history[-1].update(result)
+        return result
+
+    @property
+    def history(self):
+        return self.evaluator.history
+
+    @property
+    def reads(self):
+        return self.evaluator.reads
+
+    @property
+    def sim_seconds(self):
+        return self.evaluator.sim_seconds
+
+
+def with_derived_outputs(evaluator, vocs):
+    expressions = {name: obj.expression for name, obj in vocs.objectives.items()
+                   if obj.expression}
+    if not expressions or isinstance(evaluator, DerivedEvaluator):
+        return evaluator
+    return DerivedEvaluator(evaluator, expressions, vocs.objectives)
 
 
 def read_seconds(keys: Iterable[str], costs: dict[str, float],

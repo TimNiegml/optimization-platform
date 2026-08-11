@@ -48,6 +48,7 @@ class Objective(BaseModel):
     param: Optional[str] = None          # e.g. "power" / "指向角"
     group: Optional[str] = None          # measurement group: same group = 并行测量
                                          # (time = max), different groups = 串行 (sum)
+    expression: Optional[str] = None     # derived output, e.g. "max(y1,y2)-min(y1,y2)"
 
     def direction(self) -> int:
         """+1 if larger score is better, -1 if smaller is better.
