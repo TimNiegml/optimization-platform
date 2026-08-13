@@ -21,7 +21,8 @@ from typing import Any, Optional
 class WorkspaceStore:
     def __init__(self) -> None:
         self._data: dict[str, dict[str, Any]] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._changed = threading.Condition(self._lock)
 
     def _blank(self, sid: str) -> dict[str, Any]:
         return {"session": sid, "graph": None, "bench": "single_peak",
@@ -59,6 +60,7 @@ class WorkspaceStore:
             cur["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             cur["session"] = sid
             self._data[sid] = cur
+            self._changed.notify_all()
             return dict(cur)
 
     def poll_user_messages(self, sid: str, mark_read: bool = True) -> list[dict]:
@@ -75,6 +77,31 @@ class WorkspaceStore:
                 for m in unread:
                     m["read"] = True
             return [dict(m) for m in unread]
+
+    def wait_user_messages(self, sid: str, timeout: float = 25.0,
+                           mark_read: bool = True) -> list[dict]:
+        """Long-poll an agent inbox, returning immediately when a user writes.
+
+        This is the bridge primitive for a continuously-running Agent host. MCP
+        itself is client initiated and cannot wake a dormant Hermes conversation;
+        a host/worker keeps this call outstanding and invokes its model when it
+        returns. The bounded timeout lets workers reconnect and shut down cleanly.
+        """
+        deadline = time.monotonic() + max(0.0, min(float(timeout), 60.0))
+        with self._changed:
+            while True:
+                cur = self._data.get(sid)
+                unread = [m for m in (cur or {}).get("messages", [])
+                          if m.get("role") == "user" and not m.get("read")]
+                if unread:
+                    if mark_read:
+                        for message in unread:
+                            message["read"] = True
+                    return [dict(message) for message in unread]
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return []
+                self._changed.wait(remaining)
 
     def sessions(self) -> list[str]:
         with self._lock:

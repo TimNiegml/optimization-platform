@@ -177,6 +177,7 @@
     <span class="fs-ctl" data-tip="调节画布里节点与连线的字体大小。">字号 <input id="fsRange" type="range" min="10" max="22" step="1" value="13"></span>
     <button class="ghost sm" onclick="toggleTheme()" id="themeBtn" data-tip="切换浅色 / 深色主题。">🌙</button>
     <button class="ghost sm" onclick="openHelp()" data-tip="打开使用说明：节点、连线、目标、轨迹图、表达式怎么用。">帮助 ?</button>
+    <button class="ghost sm" onclick="openAgentGuide()" data-tip="说明 MCP 为什么不能主动唤醒 Hermes，以及如何用常驻 Agent gateway 实现平台聊天框直接驱动 Agent。">Agent 对话教程</button>
     <button id="runBtn" onclick="run()">▶ 运行</button>
   </header>
 
@@ -325,6 +326,17 @@
   <h3>⑥ 其它</h3>
   <ul><li>右上：<b>字号</b>放大画布字体、<b>🌙/☀</b>切换深浅主题、关键处 <span class="info">i</span> 悬浮有提示。</li>
       <li>左上『方案』可<b>保存/加载</b>整条流程 JSON。</li></ul>
+</div>
+
+<div id="agentGuideModal" class="modal">
+  <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
+  <h2>平台 ↔ Agent 双向对话</h2>
+  <p><b>MCP 是 Agent 主动调用平台的协议。</b>平台可以保存画布消息，但不能反向唤醒一个已经空闲的 Hermes 会话。</p>
+  <h3>人在 Hermes 中使用</h3>
+  <ol><li>画布与 Hermes 工具统一使用同一个 session。</li><li>要求 Agent 每轮先调用 <code>poll_messages(session)</code>。</li><li>处理后调用 <code>push_to_canvas(note=回复)</code>，回复会实时回到这里。</li></ol>
+  <h3>直接在平台聊天框唤起 Agent</h3>
+  <p>需要一个常驻 Agent gateway。它持续调用 <code>wait_for_messages</code>（或 REST <code>/workspace/{session}/messages/wait</code>），收到消息后调用模型和 MCP 工具，再把回复推回画布。</p>
+  <p class="hint">完整部署步骤、伪代码和排错表见仓库 <b>AGENT_CHAT_TUTORIAL.md</b>。如果提供 Hermes 的 Agent API 与鉴权格式，可以继续实现具体 gateway adapter。</p>
 </div>
 
 <div id="untilModal" class="modal">
@@ -1346,6 +1358,7 @@ function toggleTheme(){ theme = theme==='light'?'dark':'light'; document.documen
   document.getElementById('themeBtn').textContent = theme==='light'?'🌙':'☀'; if(lastHistory.length) renderChart(); }
 function showModal(id){ document.getElementById('modalBack').style.display='block'; document.getElementById(id).style.display='block'; }
 function openHelp(){ showModal('helpModal'); }
+function openAgentGuide(){ showModal('agentGuideModal'); }
 function closeModals(){ document.getElementById('modalBack').style.display='none'; document.querySelectorAll('.modal').forEach(m=>m.style.display='none'); }
 
 // ---------- calculated/derived objectives ----------
@@ -1840,7 +1853,7 @@ function sendAgentMessage(){
     headers:Object.assign({'Content-Type':'application/json'}, tok?{'Authorization':'Bearer '+tok}:{}),
     body:JSON.stringify({user_message:text})})
     .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-    .then(d=>{ agentLogPush('已送到会话「'+sid+'」收件箱。平台无法主动叫醒 Agent——在 Hermes 里对它说一句(哪怕「看下画布」)，它会 poll_messages 读到并执行；要马上执行也可直接在 Hermes 对话里下指令。','sys'); })
+    .then(d=>{ agentLogPush('已送到会话「'+sid+'」收件箱。若已部署常驻 Agent gateway，它会通过 wait_for_messages 立即接收；否则需在 Hermes 发起下一轮，让 Agent 调用 poll_messages。点顶部「Agent 对话教程」查看说明。','sys'); })
     .catch(e=>agentLogPush('发送失败：'+e+'（消息发往实时会话工作区，需要后端在运行、会话 ID 一致）','sys'));
 }
 function applyLiveSnapshot(s){

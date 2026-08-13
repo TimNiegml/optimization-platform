@@ -513,6 +513,14 @@ async def workspace_stream(sid: str, request: Request):
     return EventSourceResponse(gen())
 
 
+@app.get("/workspace/{sid}/messages/wait")
+def workspace_wait_messages(sid: str, timeout: float = 25.0, mark_read: bool = True):
+    """Long-poll inbox for an external Hermes/Agent gateway process."""
+    messages = WORKSPACE.wait_user_messages(sid, timeout, mark_read)
+    return {"session": sid, "messages": messages, "count": len(messages),
+            "timed_out": not bool(messages)}
+
+
 # Mount the agent-facing MCP endpoint (streamable-HTTP) at /mcp.
 app.mount("/mcp", mcp.streamable_http_app())
 
