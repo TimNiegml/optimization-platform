@@ -27,6 +27,17 @@ from optplat.workspace import WorkspaceStore
 _DEVICE = os.path.join(os.path.dirname(__file__), "..", "examples", "device_template.py")
 
 
+def test_external_device_accepts_and_averages_matrix_meter():
+    from optplat.userdev import Axis, DeviceSpec, Meter
+
+    readings = iter(([[1, 2], [3, 4]], [[3, 4], [5, 6]]))
+    spec = DeviceSpec([Axis("x1", 0, 1)], [
+        Meter("camera", lambda: next(readings), value_type="matrix")])
+    assert spec.vocs().objectives["camera"].value_type.value == "matrix"
+    result = spec.evaluator(averages=2).evaluate({"x1": 0.5}, channels={"camera"})
+    assert result["camera"] == [[2.0, 3.0], [4.0, 5.0]]
+
+
 # ---------------- DampedSensitivity ----------------
 SENS = {"y1": {"x1": 0.8, "x2": 0.3}, "y2": {"x1": 0.2, "x2": -0.6}}
 

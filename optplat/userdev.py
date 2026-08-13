@@ -27,6 +27,10 @@ for parallel/serial timing, ``device``, ``param``). Duck typing — subclass the
 ``Axis``/``Meter`` helpers here or bring your own. See
 ``examples/device_template.py`` for a copy-paste starting point.
 
+Matrix-valued instruments use ``Meter("image", read_fn, value_type="matrix")``;
+the reading may be a nested list, tuple, or NumPy array. Matrix channels are for
+observation/visualisation, not direct scalar optimization.
+
 When ONE instrument acquisition yields several outputs (``pm.read()`` →
 power1 + power2, one y per channel), declare a ``Source`` and derive the meters
 from it (``pm.meter("y1", "power1")``): the instrument is triggered once per
@@ -43,9 +47,9 @@ import importlib.util
 import os
 from typing import Optional
 
-from .evaluator import read_seconds
+from .evaluator import json_value, read_seconds
 from .hardware import SafetyLimits
-from .vocs import VOCS, Objective, ObjectiveMode, Variable
+from .vocs import VOCS, Objective, ObjectiveMode, ObjectiveValueType, Variable
 
 
 # ---- optional helper base classes (bring your own if you prefer) ----
@@ -79,7 +83,7 @@ class Meter:
                  target: Optional[float] = None, cost: float = 0.0,
                  group: Optional[str] = None, device: Optional[str] = None,
                  param: Optional[str] = None, source: Optional["Source"] = None,
-                 key: Optional[str] = None):
+                 key: Optional[str] = None, value_type: str = "scalar"):
         self.name = name
         self._read_fn = read_fn
         self.mode = mode
@@ -90,13 +94,16 @@ class Meter:
         self.param = param
         self.source = source            # shared acquisition this channel comes from
         self.key = key or name          # this channel's key inside the source reading
+        self.value_type = value_type
 
-    def get(self) -> float:
+    def get(self):
         if self.source is not None:
-            return float(self.source.read()[self.key])
+            value = self.source.read()[self.key]
+            return float(value) if self.value_type == "scalar" else json_value(value)
         if self._read_fn is None:
             raise NotImplementedError(f"meter {self.name}: provide read_fn or override get()")
-        return float(self._read_fn())
+        value = self._read_fn()
+        return float(value) if self.value_type == "scalar" else json_value(value)
 
 
 class Source:
@@ -145,14 +152,14 @@ class Source:
     def meter(self, name: str, key: Optional[str] = None, mode: str = "maximize",
               target: Optional[float] = None, cost: Optional[float] = None,
               group: Optional[str] = None, device: Optional[str] = None,
-              param: Optional[str] = None) -> Meter:
+              param: Optional[str] = None, value_type: str = "scalar") -> Meter:
         """Expose one channel of this acquisition as an objective y."""
         return Meter(name, mode=mode, target=target,
                      cost=self.cost if cost is None else cost,
                      group=group or self.group,
                      device=device or self.device,
                      param=param or key or name,
-                     source=self, key=key or name)
+                     source=self, key=key or name, value_type=value_type)
 
 
 # ---- evaluator backed by the user's axes + meters ----
@@ -205,13 +212,22 @@ class DeviceEvaluator:
             time.sleep(self.settle_time)
         keys = self._order if channels is None else [k for k in channels if k in self._meters]
         sources = self._sources(keys)
-        acc = {k: 0.0 for k in keys}
+        samples = {k: [] for k in keys}
         for _ in range(self.averages):
             for src in sources:
                 src.invalidate()          # each pass = a FRESH acquisition, so averaging
             for k in keys:                #   still samples independent noise
-                acc[k] += float(self._meters[k].get())        # only read what's needed
-        y = {k: acc[k] / self.averages for k in keys}
+                samples[k].append(self._meters[k].get())       # only read what's needed
+        import numpy as np
+        y = {}
+        for k, vals in samples.items():
+            if getattr(self._meters[k], "value_type", "scalar") == "matrix":
+                shapes = [np.asarray(v).shape for v in vals]
+                if len(set(shapes)) != 1:
+                    raise ValueError(f"matrix channel {k!r} changed shape while averaging: {shapes}")
+                y[k] = np.mean(np.asarray(vals, dtype=float), axis=0).tolist()
+            else:
+                y[k] = sum(float(v) for v in vals) / len(vals)
         for k in y:
             self.reads[k] = self.reads.get(k, 0) + 1
         self.sim_seconds += self.averages * read_seconds(y.keys(), self.costs, self.groups)
@@ -242,6 +258,8 @@ class DeviceSpec:
                 group=getattr(m, "group", None),
                 device=getattr(m, "device", None),
                 param=getattr(m, "param", None))
+            objectives[m.name].value_type = ObjectiveValueType(
+                getattr(m, "value_type", "scalar") or "scalar")
         return VOCS(variables=variables, objectives=objectives)
 
     def current_point(self) -> dict:

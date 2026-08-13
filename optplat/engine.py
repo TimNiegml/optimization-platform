@@ -121,6 +121,12 @@ class StageEngine:
         a multi-objective trade-off.
         """
         weights = step.get("objective_weights")
+        selected = set(weights or {obj_name})
+        matrix = [k for k in selected if k in self.vocs.objectives
+                  and self.vocs.objectives[k].value_type.value == "matrix"]
+        if matrix:
+            raise ValueError(f"matrix channels cannot be optimized directly: {matrix}; "
+                             "use an observer or define a scalar derived feature")
         if weights:
             objs = {k: self.vocs.objectives[k] for k in weights if k in self.vocs.objectives}
             return lambda y: sum(w * objs[k].score(y[k]) for k, w in weights.items() if k in objs)

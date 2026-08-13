@@ -476,7 +476,7 @@ async function boot() {
     varKeys.forEach((v,i) => { const V=vocs.variables[v];
       safetyLimits[v]=[V.low, V.high]; actuators[v]={device:'PI六足', param:'axis'+(i+1)};
       startPoint[v]=+(0.5*(V.low+V.high)).toFixed(4); tuneStartDomain[v]=[V.low, V.high]; });
-    objKeys.forEach(o => { const m=vocs.objectives[o]||{}; channels[o]={device:m.device||'功率计', param:m.param||o, cost:m.cost!=null?m.cost:0, group:m.group||''}; });
+    objKeys.forEach(o => { const m=vocs.objectives[o]||{}; channels[o]={device:m.device||'功率计', param:m.param||o, cost:m.cost!=null?m.cost:0, group:m.group||'', valueType:m.value_type||'scalar'}; });
     derivedRows = objKeys.filter(o=>vocs.objectives[o].expression).map(o=>({name:o, expression:vocs.objectives[o].expression,
       mode:vocs.objectives[o].mode||'maximize', target:vocs.objectives[o].target}));
   } catch (e) { document.getElementById('conn').textContent = '后端未连接'; }
@@ -506,8 +506,9 @@ function addNode(algo, at) {
 function addObserver(kind, at){
   const labels={scalar:'标量观测仪',matrix:'矩阵观测仪',matrix_plot:'矩阵可视化观测仪'};
   const colors={scalar:'#64748b',matrix:'#0ea5e9',matrix_plot:'#a855f7'};
+  const matrices=objKeys.filter(o=>(channels[o]||{}).valueType==='matrix');
   const n={id:'n'+(++seq),type:'observer',observerKind:kind,label:labels[kind],color:colors[kind],
-    channels:objKeys.slice(),matrixChannel:objKeys[0]||'',featureAxis:'row',
+    channels:kind==='scalar'?objKeys.filter(o=>(channels[o]||{}).valueType!=='matrix'):[],matrixChannel:matrices[0]||'',featureAxis:'row',
     x:at?at.x:80+(nodes.length%4)*30,y:at?at.y:70+nodes.length*70};
   nodes.push(n); render(); select(n.id);
 }
@@ -640,7 +641,7 @@ function inspectNode(n){
     h += renderSolveEditor(n);
   } else {
     h += `<label>目标</label><select onchange="setF('${n.id}','objective',this.value)">`;
-    Object.keys(vocs.objectives).forEach(o => h += `<option ${o===n.objective?'selected':''}>${o}</option>`);
+    Object.keys(vocs.objectives).filter(o=>(channels[o]||{}).valueType!=='matrix').forEach(o => h += `<option ${o===n.objective?'selected':''}>${o}</option>`);
     h += `</select>`;
     const comp = compWeights(n);
     h += `<label style="margin-top:8px"><input type="checkbox" style="width:auto" ${comp?'checked':''} onchange="toggleComposite('${n.id}',this.checked)"> 加权组合多目标
@@ -692,9 +693,11 @@ function matrixFeaturePlot(m,axis){
 function inspectObserver(n){
   const picked=new Set(n.channels||[]); let h=`<label>名称</label><input value="${escapeHtml(n.label)}" onchange="setObserver('${n.id}','label',this.value)">`;
   if(n.observerKind==='scalar'){
-    h+='<label>观测通道</label><div>'+objKeys.map(o=>`<label style="display:inline-block;margin-right:8px"><input type="checkbox" style="width:auto" ${picked.has(o)?'checked':''} onchange="toggleObserverChannel('${n.id}','${o}',this.checked)"> ${o}</label>`).join('')+'</div>';
+    h+='<label>观测通道</label><div>'+objKeys.filter(o=>(channels[o]||{}).valueType!=='matrix').map(o=>`<label style="display:inline-block;margin-right:8px"><input type="checkbox" style="width:auto" ${picked.has(o)?'checked':''} onchange="toggleObserverChannel('${n.id}','${o}',this.checked)"> ${o}</label>`).join('')+'</div>';
   } else {
-    h+=`<label>矩阵通道</label><select onchange="setObserver('${n.id}','matrixChannel',this.value)">${objKeys.map(o=>`<option ${o===n.matrixChannel?'selected':''}>${o}</option>`).join('')}</select>`;
+    const matrices=objKeys.filter(o=>(channels[o]||{}).valueType==='matrix');
+    h+=`<label>矩阵通道</label><select onchange="setObserver('${n.id}','matrixChannel',this.value)">${matrices.map(o=>`<option ${o===n.matrixChannel?'selected':''}>${o}</option>`).join('')}</select>`;
+    if(!matrices.length) h+='<p class="hint">请先在左侧「通道规范」把一个因变量的类型设为矩阵。</p>';
     if(n.observerKind==='matrix_plot') h+=`<label>Feature 方向</label><select onchange="setObserver('${n.id}','featureAxis',this.value)"><option value="row" ${n.featureAxis==='row'?'selected':''}>每一行作为 feature</option><option value="column" ${n.featureAxis==='column'?'selected':''}>每一列作为 feature</option></select>`;
   }
   const values=observerValue(n); h+='<h2 style="margin-top:14px">观测结果</h2>';
@@ -810,7 +813,8 @@ function renderEvalExtras(){
       <input value="${c.device}" oninput="channels['${o}'].device=this.value" title="读取设备">
       <input value="${c.param}" oninput="channels['${o}'].param=this.value" title="参数">
       <input type="number" step="0.5" min="0" value="${c.cost}" oninput="channels['${o}'].cost=+this.value; renderEvalExtras()" title="读取耗时(秒)">
-      <input value="${c.group||''}" oninput="channels['${o}'].group=this.value; renderEvalExtras()" title="测量组：同组并行、不同组串行；留空=独立串行" placeholder="组"></div>`; });
+      <input value="${c.group||''}" oninput="channels['${o}'].group=this.value; renderEvalExtras()" title="测量组：同组并行、不同组串行；留空=独立串行" placeholder="组">
+      <select style="grid-column:2/6" onchange="channels['${o}'].valueType=this.value; renderEvalExtras()"><option value="scalar" ${c.valueType!=='matrix'?'selected':''}>标量</option><option value="matrix" ${c.valueType==='matrix'?'selected':''}>矩阵</option></select></div>`; });
   h += timingPreview();
   h += `<div class="glab" style="margin-top:6px">自变量（执行器）：设备 / 参数</div>`;
   varKeys.forEach(v=>{ const a=actuators[v];
@@ -878,7 +882,7 @@ function currentVocs(){
     objectives[o]={mode:m.mode||'maximize', target:m.target==null?null:m.target,
       cost:m.expression?0:(+c.cost||0), device:m.expression?null:(c.device||null),
       param:m.expression?null:(c.param||null), group:m.expression?null:(c.group||null),
-      expression:m.expression||null}; });
+      expression:m.expression||null, value_type:m.expression?'scalar':(c.valueType||'scalar')}; });
   return {variables:vocs.variables, objectives, constraints:vocs.constraints||[]};
 }
 
@@ -1344,7 +1348,7 @@ function applyDerived(){
     seen.add(r.name);
   }
   Object.keys(vocs.objectives).filter(o=>(vocs.objectives[o]||{}).expression).forEach(o=>delete vocs.objectives[o]);
-  derivedRows.forEach(r=>{ vocs.objectives[r.name]={mode:r.mode||'maximize',target:r.target,cost:0,expression:r.expression.trim()}; channels[r.name]={device:'',param:r.name,cost:0,group:''}; });
+  derivedRows.forEach(r=>{ vocs.objectives[r.name]={mode:r.mode||'maximize',target:r.target,cost:0,expression:r.expression.trim(),value_type:'scalar'}; channels[r.name]={device:'',param:r.name,cost:0,group:'',valueType:'scalar'}; });
   objKeys=Object.keys(vocs.objectives); sensObjs=sensObjs.filter(o=>objKeys.includes(o));
   if(!objKeys.includes(c1dObj)) c1dObj=objKeys[0]; if(!objKeys.includes(c2dObj)) c2dObj=objKeys[0];
   renderEvalExtras(); render(); if(sel) select(sel); closeModals();

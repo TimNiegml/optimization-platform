@@ -3,8 +3,9 @@ and custom-algorithm plug-in via the registry."""
 import random
 
 import numpy as np
+import pytest
 
-from optplat import Evaluator, Generator
+from optplat import Evaluator, Generator, ObjectiveValueType
 from optplat.demo import TWO_PHASE_GRAPH, demo_vocs, optical_bench
 from optplat.graph import GraphRunner, to_mermaid
 from optplat.hardware import HardwareEvaluator, SimulatedStage
@@ -217,3 +218,19 @@ def test_hardware_observer_averages_matrix_channels_elementwise():
         "data": {"kind": "matrix", "channels": ["matrix"]}}], "edges": []}).run()
     # prime consumes reads 1/2, observer consumes 3/4 -> element-wise mean 3.5 multiples
     assert result["observations"]["eye"][0]["values"]["matrix"] == [[3.5, 7.0], [10.5, 14.0]]
+
+
+def test_matrix_objective_is_accepted_but_not_directly_optimized():
+    vocs = demo_vocs()
+    vocs.objectives["image"] = vocs.objectives["y1"].model_copy(
+        update={"value_type": ObjectiveValueType.MATRIX})
+    ev = Evaluator(lambda x: {**optical_bench(x), "image": [[1, 2], [3, 4]]})
+    observed = GraphRunner(vocs, ev, {"nodes": [{"id": "eye", "type": "observer",
+        "data": {"kind": "matrix", "channels": ["image"]}}], "edges": []}).run()
+    assert observed["objectives"]["image"] == [[1, 2], [3, 4]]
+
+    graph = {"nodes": [{"id": "bad", "type": "algorithm", "data": {
+        "algorithm": "coordinate_descent", "variables": ["x1"], "objective": "image"}}],
+        "edges": []}
+    with pytest.raises(ValueError, match="cannot be optimized directly"):
+        GraphRunner(vocs, ev, graph).run()

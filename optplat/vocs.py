@@ -19,6 +19,11 @@ class ObjectiveMode(str, Enum):
     SCAN = "scan"          # characterise, no optimum (not exercised by MVP demo)
 
 
+class ObjectiveValueType(str, Enum):
+    SCALAR = "scalar"
+    MATRIX = "matrix"
+
+
 class Variable(BaseModel):
     """A tunable input, e.g. a motor axis position."""
     low: float
@@ -49,6 +54,7 @@ class Objective(BaseModel):
     group: Optional[str] = None          # measurement group: same group = 并行测量
                                          # (time = max), different groups = 串行 (sum)
     expression: Optional[str] = None     # derived output, e.g. "max(y1,y2)-min(y1,y2)"
+    value_type: ObjectiveValueType = ObjectiveValueType.SCALAR
 
     def direction(self) -> int:
         """+1 if larger score is better, -1 if smaller is better.
@@ -60,6 +66,8 @@ class Objective(BaseModel):
 
     def score(self, y: float) -> float:
         """Map a raw measurement to a 'higher is better' score."""
+        if self.value_type == ObjectiveValueType.MATRIX:
+            raise ValueError("matrix objective cannot be scored directly; derive a scalar feature first")
         if self.mode == ObjectiveMode.MINIMIZE:
             return -y
         if self.mode == ObjectiveMode.TARGET:

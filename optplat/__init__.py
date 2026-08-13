@@ -27,7 +27,7 @@ from .graph import GraphRunner, to_mermaid
 from .orchestrator import Orchestrator
 from .registry import AlgorithmSpec, algorithm_catalog, build_generator, register_algorithm
 from .store import SQLiteStore, rollback_to_best
-from .vocs import VOCS, Objective, ObjectiveMode, Variable
+from .vocs import VOCS, Objective, ObjectiveMode, ObjectiveValueType, Variable
 
 __all__ = [
     "VOCS", "Variable", "Objective", "ObjectiveMode",
