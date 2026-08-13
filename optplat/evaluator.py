@@ -24,6 +24,17 @@ _DERIVED_BINOPS = {
 _DERIVED_UNARY = {ast.UAdd: lambda a: a, ast.USub: lambda a: -a}
 
 
+def json_value(value):
+    """Normalize numpy/array-like measurement values for traces and REST JSON."""
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if isinstance(value, tuple):
+        value = list(value)
+    if isinstance(value, list):
+        return [json_value(v) for v in value]
+    return value
+
+
 def _expression_names(expression: str) -> set[str]:
     """Return channel names referenced by a derived-output expression."""
     tree = ast.parse(expression, mode="eval")
@@ -183,7 +194,7 @@ class Evaluator:
 
     def evaluate(self, x: dict[str, float], stage: str = "",
                  channels: Optional[Iterable[str]] = None) -> dict[str, float]:
-        y_all = self.func(x)
+        y_all = {k: json_value(v) for k, v in self.func(x).items()}
         y = y_all if channels is None else {k: y_all[k] for k in channels if k in y_all}
         for k in y:
             self.reads[k] = self.reads.get(k, 0) + 1

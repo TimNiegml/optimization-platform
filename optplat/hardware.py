@@ -23,6 +23,8 @@ from __future__ import annotations
 import time
 from typing import Callable, Optional, Protocol
 
+import numpy as np
+
 
 class Stage(Protocol):
     def move(self, axis: str, value: float) -> None: ...
@@ -87,7 +89,16 @@ class HardwareEvaluator:
             time.sleep(self.settle_time)
         reads = [self.meter.read() for _ in range(self.averages)]
         keys = reads[0].keys() if channels is None else [k for k in channels if k in reads[0]]
-        y = {k: sum(r[k] for r in reads) / len(reads) for k in keys}
+        def mean_value(key):
+            vals = [r[key] for r in reads]
+            if any(isinstance(v, (list, tuple, np.ndarray)) for v in vals):
+                shapes = [np.asarray(v).shape for v in vals]
+                if len(set(shapes)) != 1:
+                    raise ValueError(f"matrix channel {key!r} changed shape while averaging: {shapes}")
+                return np.mean(np.asarray(vals, dtype=float), axis=0).tolist()
+            return sum(vals) / len(vals)
+
+        y = {k: mean_value(k) for k in keys}
         for k in y:
             self.reads[k] = self.reads.get(k, 0) + 1
         # averaging N reads costs N× the per-acquisition time; grouping models

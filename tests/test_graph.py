@@ -2,9 +2,12 @@
 and custom-algorithm plug-in via the registry."""
 import random
 
+import numpy as np
+
 from optplat import Evaluator, Generator
 from optplat.demo import TWO_PHASE_GRAPH, demo_vocs, optical_bench
 from optplat.graph import GraphRunner, to_mermaid
+from optplat.hardware import HardwareEvaluator, SimulatedStage
 from optplat.registry import AlgorithmSpec, algorithm_catalog, register_algorithm
 
 
@@ -162,3 +165,55 @@ def test_catalog_has_chinese_labels():
 def test_to_mermaid_renders():
     m = to_mermaid(TWO_PHASE_GRAPH)
     assert "flowchart" in m and "find_light" in m and "-->" in m
+
+
+def test_observer_between_nodes_captures_fresh_scalar_values():
+    graph = {"nodes": [
+        {"id": "a", "type": "algorithm", "data": {"algorithm": "coordinate_descent",
+         "variables": ["x1"], "objective": "y1", "stop": {"max_iter": 10}}},
+        {"id": "eye", "type": "observer", "data": {"kind": "scalar",
+         "label": "节点1后", "channels": ["y1", "y2"]}},
+        {"id": "b", "type": "algorithm", "data": {"algorithm": "coordinate_descent",
+         "variables": ["x2"], "objective": "y1", "stop": {"max_iter": 10}}},
+    ], "edges": [{"source": "a", "target": "eye"}, {"source": "eye", "target": "b"}]}
+    result = _run(graph)
+    snap = result["observations"]["eye"][0]
+    assert snap["kind"] == "scalar" and set(snap["values"]) == {"y1", "y2"}
+    assert any("节点1后" in event for event in result["events"])
+
+
+def test_matrix_observer_preserves_matrix_for_table_and_feature_plot():
+    vocs = demo_vocs()
+    vocs.objectives["matrix"] = vocs.objectives["y1"].model_copy()
+    ev = Evaluator(lambda x: {**optical_bench(x), "matrix": np.array([[1, 2, 3], [4, 5, 6]])})
+    graph = {"nodes": [{"id": "eye", "type": "observer", "data": {
+        "kind": "matrix_plot", "channels": ["matrix"]}}], "edges": []}
+    result = GraphRunner(vocs, ev, graph).run()
+    assert result["observations"]["eye"][0]["values"]["matrix"] == [[1, 2, 3], [4, 5, 6]]
+    assert result["reads"]["matrix"] == 2  # initial acquisition + observer acquisition
+
+
+def test_observer_rejects_unknown_channels():
+    graph = {"nodes": [{"id": "eye", "type": "observer",
+                        "data": {"channels": ["missing"]}}], "edges": []}
+    try:
+        _run(graph)
+        assert False, "unknown observer channel should fail"
+    except ValueError as exc:
+        assert "unknown channels" in str(exc)
+
+
+def test_hardware_observer_averages_matrix_channels_elementwise():
+    class Meter:
+        def __init__(self): self.i = 0
+        def read(self):
+            self.i += 1
+            return {"matrix": [[self.i, 2*self.i], [3*self.i, 4*self.i]]}
+
+    vocs = demo_vocs()
+    vocs.objectives = {"matrix": vocs.objectives["y1"].model_copy()}
+    ev = HardwareEvaluator(SimulatedStage(vocs.initial_point()), Meter(), averages=2)
+    result = GraphRunner(vocs, ev, {"nodes": [{"id": "eye", "type": "observer",
+        "data": {"kind": "matrix", "channels": ["matrix"]}}], "edges": []}).run()
+    # prime consumes reads 1/2, observer consumes 3/4 -> element-wise mean 3.5 multiples
+    assert result["observations"]["eye"][0]["values"]["matrix"] == [[3.5, 7.0], [10.5, 14.0]]

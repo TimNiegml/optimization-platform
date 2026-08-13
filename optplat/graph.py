@@ -99,7 +99,12 @@ class GraphRunner:
                 if visits[cur] > mv:
                     eng.events.append(f"   node '{cur}' hit max_visits={mv} → stop")
                     break
-                eng.run_stage(node["data"])
+                if ntype == "observer":
+                    eng.observe(cur, node.get("data", {}))
+                elif ntype == "algorithm":
+                    eng.run_stage(node["data"])
+                else:
+                    raise ValueError(f"unsupported graph node type: {ntype!r}")
                 cur = self._next(cur)
             if steps >= self.max_steps:
                 eng.events.append(f"⛔ max_steps={self.max_steps} reached → stop")
@@ -118,6 +123,9 @@ def to_mermaid(graph: dict) -> str:
             lines.append(f'  {nid}([start])')
         elif t == "end":
             lines.append(f'  {nid}([end])')
+        elif t == "observer":
+            d = n.get("data", {})
+            lines.append(f'  {nid}{{"👁 {d.get("label", nid)}<br/>{d.get("kind", "scalar")}"}}')
         else:
             d = n.get("data", {})
             label = f'{nid}: {d.get("algorithm","?")}<br/>{",".join(d.get("variables",[]))} → {d.get("objective","")}'

@@ -170,6 +170,7 @@ def _result(res: dict) -> dict[str, Any]:
         "events": res["events"],
         "history": res["history"],
         "fits": res.get("fits", {}),
+        "observations": res.get("observations", {}),
         "reads": res.get("reads", {}),
         "sim_seconds": res.get("sim_seconds", 0.0),
     }

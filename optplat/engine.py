@@ -48,6 +48,7 @@ class StageEngine:
         self.n_evals = 0
         self.events: list[str] = []
         self.fits: dict[str, str] = {}            # stage name -> fitted-formula summary
+        self.observations: dict[str, list[dict]] = {}  # observer node id -> visit snapshots
         self.global_until: Optional[str] = None   # driver sets this; checked per-eval
         # 观察者钩子（可选）：每完成一次测量就被调用一次 on_eval(x, y, stage, n_evals)。
         # 纯旁观——不改变任何执行语义，只是让"实时看着 x/y 在动"这类界面成为可能
@@ -150,6 +151,24 @@ class StageEngine:
         """Measure the starting point so conditions have values to read."""
         self.evaluate(dict(self.state), "init")
 
+    def observe(self, node_id: str, data: dict) -> None:
+        """Take a read-only workflow snapshot at the current operating point.
+
+        Observer nodes deliberately go through ``evaluate``: on real hardware
+        this means the displayed value is a fresh acquisition with the same
+        safety, averaging, cost accounting and channel-selection semantics as
+        optimization stages.  They never move the operating point.
+        """
+        channels = set(data.get("channels") or self.vocs.objectives)
+        unknown = channels - set(self.vocs.objectives)
+        if unknown:
+            raise ValueError(f"observer {node_id!r} references unknown channels: {sorted(unknown)}")
+        values = self.evaluate(dict(self.state), f"observer:{node_id}", channels)
+        snap = {"visit": len(self.observations.get(node_id, [])) + 1,
+                "kind": data.get("kind", "scalar"), "values": values}
+        self.observations.setdefault(node_id, []).append(snap)
+        self.events.append(f"👁 observer '{data.get('label') or node_id}' captured {sorted(values)}")
+
     # ---- run one algorithm stage against the current operating point ----
     def run_stage(self, step: dict) -> None:
         name = step.get("stage", step["algorithm"])
@@ -213,6 +232,7 @@ class StageEngine:
             "events": self.events,
             "history": self.evaluator.history,
             "fits": self.fits,
+            "observations": self.observations,
             "reads": getattr(self.evaluator, "reads", {}),
             "sim_seconds": getattr(self.evaluator, "sim_seconds", 0.0),
         }
