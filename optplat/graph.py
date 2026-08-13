@@ -39,7 +39,8 @@ from typing import Optional
 
 from .engine import StageEngine, StopAll
 from .evaluator import Evaluator
-from .vocs import VOCS
+from .transforms import SCALAR_OPERATIONS, TransformEvaluator
+from .vocs import VOCS, Objective, ObjectiveMode, ObjectiveValueType
 
 
 class GraphRunner:
@@ -47,6 +48,20 @@ class GraphRunner:
                  eval_budget: int = 5000, start_point: Optional[dict] = None,
                  max_steps: int = 500, default_max_visits: int = 20):
         self.graph = graph
+        transforms = [n.get("data", {}) for n in graph["nodes"]
+                      if n.get("type") == "data_transform"]
+        if transforms:
+            vocs = vocs.model_copy(deep=True)
+            known = set(vocs.objectives)
+            for spec in transforms:
+                output = spec.get("output")
+                if output and output not in known:
+                    scalar = spec.get("operation") in SCALAR_OPERATIONS
+                    vocs.objectives[output] = Objective(
+                        mode=ObjectiveMode.SCAN,
+                        value_type=ObjectiveValueType.SCALAR if scalar else ObjectiveValueType.MATRIX)
+                    known.add(output)
+            evaluator = TransformEvaluator(evaluator, transforms, set(vocs.objectives) - set(s.get("output") for s in transforms))
         self.engine = StageEngine(vocs, evaluator, eval_budget, start_point)
         self.engine.global_until = graph.get("until")
         self.max_steps = max_steps
@@ -119,6 +134,10 @@ class GraphRunner:
                     break
                 if ntype == "observer":
                     eng.observe(cur, node.get("data", {}))
+                elif ntype == "data_transform":
+                    data = node.get("data", {})
+                    eng.observe(cur, {"label": data.get("label", data.get("output", cur)),
+                                      "kind": "transform", "channels": [data["output"]]})
                 elif ntype == "algorithm":
                     eng.run_stage(node["data"])
                 else:
@@ -147,6 +166,9 @@ def to_mermaid(graph: dict) -> str:
         elif t == "for_loop":
             d = n.get("data", {})
             lines.append(f'  {nid}{{"for × {d.get("iterations", 1)}"}}')
+        elif t == "data_transform":
+            d = n.get("data", {})
+            lines.append(f'  {nid}["⇄ {d.get("input", "?")} → {d.get("operation", "identity")} → {d.get("output", "?")}"]')
         else:
             d = n.get("data", {})
             label = f'{nid}: {d.get("algorithm","?")}<br/>{",".join(d.get("variables",[]))} → {d.get("objective","")}'

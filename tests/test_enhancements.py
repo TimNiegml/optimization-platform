@@ -8,6 +8,7 @@ import math
 import os
 
 import pytest
+import numpy as np
 
 from optplat.autotune import TuneSpec, _random_start, run_autotune
 from optplat.demo import demo_vocs, linear_sens_bench, nonlinear_sens_bench
@@ -25,6 +26,15 @@ from optplat.userdev import load_device
 from optplat.workspace import WorkspaceStore
 
 _DEVICE = os.path.join(os.path.dirname(__file__), "..", "examples", "device_template.py")
+
+
+def test_dataframe_like_measurement_is_normalized_without_pandas_dependency():
+    class FrameLike:
+        def to_numpy(self):
+            return np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    ev = Evaluator(lambda x: {"table": FrameLike()})
+    assert ev.evaluate({}, channels={"table"})["table"] == [[1.0, 2.0], [3.0, 4.0]]
 
 
 def test_external_device_accepts_and_averages_matrix_meter():

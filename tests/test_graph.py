@@ -285,3 +285,40 @@ def test_for_loop_requires_explicit_body_and_exit_edges():
              "edges": []}
     with pytest.raises(ValueError, match="needs one 'body' edge"):
         _run(graph)
+
+
+def test_data_transform_matrix_to_scalar_can_drive_optimizer():
+    vocs = demo_vocs()
+    vocs.objectives["image"] = vocs.objectives["y1"].model_copy(
+        update={"value_type": ObjectiveValueType.MATRIX})
+    ev = Evaluator(lambda x: {**optical_bench(x), "image": [[x["x1"]], [x["x1"]]]})
+    graph = {"nodes": [
+        {"id": "feature", "type": "data_transform", "data": {
+            "input": "image", "output": "image_mean", "operation": "mean"}},
+        {"id": "opt", "type": "algorithm", "data": {
+            "algorithm": "coordinate_descent", "variables": ["x1"],
+            "objective": "image_mean", "stop": {"max_iter": 20}}}],
+        "edges": [{"source": "feature", "target": "opt"}]}
+    result = GraphRunner(vocs, ev, graph).run()
+    assert result["state"]["x1"] > 3.5
+    assert "image_mean" in result["objectives"]
+    assert result["reads"]["image"] > 0
+    assert "image_mean" not in result["reads"]
+
+
+def test_data_transform_supports_roi_and_rejects_unknown_input():
+    vocs = demo_vocs()
+    vocs.objectives["image"] = vocs.objectives["y1"].model_copy(
+        update={"value_type": ObjectiveValueType.MATRIX})
+    ev = Evaluator(lambda x: {**optical_bench(x), "image": np.arange(16).reshape(4, 4)})
+    graph = {"nodes": [{"id": "crop", "type": "data_transform", "data": {
+        "input": "image", "output": "roi", "operation": "roi",
+        "params": {"row_start": 1, "row_end": 3, "column_start": 1, "column_end": 4}}}],
+        "edges": []}
+    result = GraphRunner(vocs, ev, graph).run()
+    assert result["objectives"]["roi"] == [[5.0, 6.0, 7.0], [9.0, 10.0, 11.0]]
+
+    bad = {"nodes": [{"id": "bad", "type": "data_transform", "data": {
+        "input": "missing", "output": "z", "operation": "mean"}}], "edges": []}
+    with pytest.raises(ValueError, match="unknown input"):
+        GraphRunner(vocs, ev, bad)

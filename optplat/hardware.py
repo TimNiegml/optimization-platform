@@ -91,7 +91,8 @@ class HardwareEvaluator:
         keys = reads[0].keys() if channels is None else [k for k in channels if k in reads[0]]
         def mean_value(key):
             vals = [r[key] for r in reads]
-            if any(isinstance(v, (list, tuple, np.ndarray)) for v in vals):
+            if any(isinstance(v, (list, tuple, np.ndarray)) or hasattr(v, "to_numpy") for v in vals):
+                vals = [v.to_numpy() if hasattr(v, "to_numpy") else v for v in vals]
                 shapes = [np.asarray(v).shape for v in vals]
                 if len(set(shapes)) != 1:
                     raise ValueError(f"matrix channel {key!r} changed shape while averaging: {shapes}")

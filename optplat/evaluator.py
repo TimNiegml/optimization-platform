@@ -26,12 +26,16 @@ _DERIVED_UNARY = {ast.UAdd: lambda a: a, ast.USub: lambda a: -a}
 
 def json_value(value):
     """Normalize numpy/array-like measurement values for traces and REST JSON."""
+    if hasattr(value, "to_numpy"):  # pandas DataFrame/Series, without a pandas dependency
+        value = value.to_numpy()
     if hasattr(value, "tolist"):
         value = value.tolist()
     if isinstance(value, tuple):
         value = list(value)
     if isinstance(value, list):
         return [json_value(v) for v in value]
+    if hasattr(value, "item"):
+        value = value.item()
     return value
 
 

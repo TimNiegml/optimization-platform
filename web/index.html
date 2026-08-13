@@ -206,6 +206,7 @@
     <div class="palItem" style="border-left-color:#64748b" onclick="addObserver('scalar')"><b>🔢 标量观测仪</b><span>数值</span></div>
     <div class="palItem" style="border-left-color:#0ea5e9" onclick="addObserver('matrix')"><b>▦ 矩阵观测仪</b><span>表格</span></div>
     <div class="palItem" style="border-left-color:#a855f7" onclick="addObserver('matrix_plot')"><b>📈 矩阵可视化</b><span>特征曲线</span></div>
+    <div class="palItem" style="border-left-color:#14b8a6" onclick="addTransform()"><b>⇄ 数据变换</b><span>矩阵/特征/标量</span></div>
     <h2>流程控制 <span class="info" data-tip="显式重复一段节点固定次数。循环节点需要一条『循环体』边、一条『退出』边，并把循环体末尾连回循环节点。">i</span></h2>
     <div class="palItem" style="border-left-color:#f97316" onclick="addForLoop()"><b>🔁 For 循环</b><span>固定次数</span></div>
 
@@ -500,8 +501,11 @@ async function boot() {
 
 function spec(name){ return catalog.find(a => a.name === name) || {params:{}, single_var:false, label:name}; }
 function labelOf(name){ return spec(name).label || name; }
-function nodeLabel(n){ return !n?'?':(n.type==='observer'?n.label:(n.type==='for_loop'?`For ×${n.iterations}`:(n.type==='start'?'开始':n.type==='end'?'结束':labelOf(n.algorithm)))); }
+function nodeLabel(n){ return !n?'?':(n.type==='observer'?n.label:(n.type==='data_transform'?`${n.inputChannel} → ${n.outputChannel}`:(n.type==='for_loop'?`For ×${n.iterations}`:(n.type==='start'?'开始':n.type==='end'?'结束':labelOf(n.algorithm))))); }
 function nextColor(){ return NODE_COLORS[nodes.length % NODE_COLORS.length]; }
+const SCALAR_TRANSFORMS=new Set(['mean','max','min','std']);
+function transformChannels(){ return nodes.filter(n=>n.type==='data_transform'&&n.outputChannel).map(n=>({name:n.outputChannel,valueType:SCALAR_TRANSFORMS.has(n.operation)?'scalar':'matrix'})); }
+function availableChannels(type){ const all=objKeys.map(name=>({name,valueType:(channels[name]||{}).valueType||'scalar'})).concat(transformChannels()); return type?all.filter(c=>c.valueType===type):all; }
 
 function addNode(algo, at) {
   const s = spec(algo);
@@ -525,9 +529,9 @@ function addNode(algo, at) {
 function addObserver(kind, at){
   const labels={scalar:'标量观测仪',matrix:'矩阵观测仪',matrix_plot:'矩阵可视化观测仪'};
   const colors={scalar:'#64748b',matrix:'#0ea5e9',matrix_plot:'#a855f7'};
-  const matrices=objKeys.filter(o=>(channels[o]||{}).valueType==='matrix');
+  const matrices=availableChannels('matrix').map(c=>c.name);
   const n={id:'n'+(++seq),type:'observer',observerKind:kind,label:labels[kind],color:colors[kind],
-    channels:kind==='scalar'?objKeys.filter(o=>(channels[o]||{}).valueType!=='matrix'):[],matrixChannel:matrices[0]||'',featureAxis:'row',
+    channels:kind==='scalar'?availableChannels('scalar').map(c=>c.name):[],matrixChannel:matrices[0]||'',featureAxis:'row',
     x:at?at.x:80+(nodes.length%4)*30,y:at?at.y:70+nodes.length*70};
   nodes.push(n); render(); select(n.id);
 }
@@ -535,6 +539,14 @@ function addObserver(kind, at){
 function addForLoop(at){
   const n={id:'n'+(++seq),type:'for_loop',label:'For 循环',iterations:3,color:'#f97316',
     x:at?at.x:80+(nodes.length%4)*30,y:at?at.y:70+nodes.length*70};
+  nodes.push(n); render(); select(n.id);
+}
+
+function addTransform(at){
+  const source=availableChannels('matrix')[0]||availableChannels()[0]||{name:'',valueType:'matrix'};
+  const n={id:'n'+(++seq),type:'data_transform',label:'数据变换',inputChannel:source.name,
+    outputChannel:'feature_'+seq,operation:'mean',params:{index:0,row_start:0,row_end:1,column_start:0,column_end:1},
+    color:'#14b8a6',x:at?at.x:80+(nodes.length%4)*30,y:at?at.y:70+nodes.length*70};
   nodes.push(n); render(); select(n.id);
 }
 
@@ -547,6 +559,8 @@ function render() {
     el.style.left = n.x+'px'; el.style.top = n.y+'px'; el.style.borderTopColor = n.color;
     if(n.type==='start'||n.type==='end'){
       el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">${n.type==='start'?'▶ 开始':'■ 结束'}</span><span class="x">✕</span></div><div class="bd">流程${n.type==='start'?'入口':'出口'}</div><div class="port"></div>`;
+    } else if(n.type==='data_transform'){
+      el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">⇄ 数据变换</span><span class="x">✕</span></div><div class="bd">${n.inputChannel||'?'} → ${n.operation} → ${n.outputChannel||'?'}</div><div class="port"></div>`;
     } else if(n.type==='for_loop'){
       el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">🔁 For 循环</span><span class="x">✕</span></div><div class="bd">重复 ${n.iterations} 次</div><div class="port"></div>`;
     } else if(n.type==='observer'){
@@ -661,7 +675,7 @@ window.addEventListener('keydown', e => {
   }
 });
 
-function select(id){ sel=id; selEdge=null; render(); const n=nodes.find(n=>n.id===id); if(!n)return; n.type==='observer'?inspectObserver(n):(n.type==='for_loop'?inspectForLoop(n):((n.type==='start'||n.type==='end')?inspectControl(n):inspectNode(n))); }
+function select(id){ sel=id; selEdge=null; render(); const n=nodes.find(n=>n.id===id); if(!n)return; n.type==='observer'?inspectObserver(n):(n.type==='data_transform'?inspectTransform(n):(n.type==='for_loop'?inspectForLoop(n):((n.type==='start'||n.type==='end')?inspectControl(n):inspectNode(n)))); }
 function selectEdge(id){ selEdge=id; sel=null; render(); inspectEdge(edges.find(e=>e.id===id)); }
 function inspectEmpty(){ document.getElementById('inspBody').innerHTML=
   '<p class="hint">点选<b>节点</b>编辑变量/目标/参数；点选<b>连线</b>设条件或删除。<br>连线：点节点右侧圆点 ＋ → 再点目标节点（指回前面的节点＝循环，会自动绕行）。</p>'; }
@@ -680,7 +694,7 @@ function inspectNode(n){
     h += renderSolveEditor(n);
   } else {
     h += `<label>目标</label><select onchange="setF('${n.id}','objective',this.value)">`;
-    Object.keys(vocs.objectives).filter(o=>(channels[o]||{}).valueType!=='matrix').forEach(o => h += `<option ${o===n.objective?'selected':''}>${o}</option>`);
+    availableChannels('scalar').map(c=>c.name).forEach(o => h += `<option ${o===n.objective?'selected':''}>${o}</option>`);
     h += `</select>`;
     const comp = compWeights(n);
     h += `<label style="margin-top:8px"><input type="checkbox" style="width:auto" ${comp?'checked':''} onchange="toggleComposite('${n.id}',this.checked)"> 加权组合多目标
@@ -743,9 +757,9 @@ function matrixFeaturePlot(m,axis){
 function inspectObserver(n){
   const picked=new Set(n.channels||[]); let h=`<label>名称</label><input value="${escapeHtml(n.label)}" onchange="setObserver('${n.id}','label',this.value)">`;
   if(n.observerKind==='scalar'){
-    h+='<label>观测通道</label><div>'+objKeys.filter(o=>(channels[o]||{}).valueType!=='matrix').map(o=>`<label style="display:inline-block;margin-right:8px"><input type="checkbox" style="width:auto" ${picked.has(o)?'checked':''} onchange="toggleObserverChannel('${n.id}','${o}',this.checked)"> ${o}</label>`).join('')+'</div>';
+    h+='<label>观测通道</label><div>'+availableChannels('scalar').map(c=>c.name).map(o=>`<label style="display:inline-block;margin-right:8px"><input type="checkbox" style="width:auto" ${picked.has(o)?'checked':''} onchange="toggleObserverChannel('${n.id}','${o}',this.checked)"> ${o}</label>`).join('')+'</div>';
   } else {
-    const matrices=objKeys.filter(o=>(channels[o]||{}).valueType==='matrix');
+    const matrices=availableChannels('matrix').map(c=>c.name);
     h+=`<label>矩阵通道</label><select onchange="setObserver('${n.id}','matrixChannel',this.value)">${matrices.map(o=>`<option ${o===n.matrixChannel?'selected':''}>${o}</option>`).join('')}</select>`;
     if(!matrices.length) h+='<p class="hint">请先在左侧「通道规范」把一个因变量的类型设为矩阵。</p>';
     if(n.observerKind==='matrix_plot') h+=`<label>Feature 方向</label><select onchange="setObserver('${n.id}','featureAxis',this.value)"><option value="row" ${n.featureAxis==='row'?'selected':''}>每一行作为 feature</option><option value="column" ${n.featureAxis==='column'?'selected':''}>每一列作为 feature</option></select>`;
@@ -759,6 +773,20 @@ function inspectObserver(n){
 }
 window.setObserver=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n[k]=v;if(k==='matrixChannel')n.channels=[v];render();inspectObserver(n);};
 window.toggleObserverChannel=(id,o,on)=>{const n=nodes.find(x=>x.id===id),s=new Set(n.channels||[]);on?s.add(o):s.delete(o);n.channels=[...s];render();inspectObserver(n);};
+
+function inspectTransform(n){
+  const ops={identity:'原样转换',transpose:'转置',flatten:'展平',row_mean:'每行均值',column_mean:'每列均值',mean:'整体均值',max:'最大值',min:'最小值',std:'标准差',normalize_minmax:'Min-Max 归一化',select_row:'选择行',select_column:'选择列',roi:'裁剪 ROI'};
+  const inputs=availableChannels().filter(c=>c.name!==n.outputChannel);
+  let h=`<label>输入通道</label><select onchange="setTransform('${n.id}','inputChannel',this.value)">${inputs.map(c=>`<option value="${c.name}" ${c.name===n.inputChannel?'selected':''}>${c.name}（${c.valueType}）</option>`).join('')}</select>
+    <label>输出通道名</label><input value="${escapeHtml(n.outputChannel)}" onchange="setTransform('${n.id}','outputChannel',this.value.trim())">
+    <label>变换</label><select onchange="setTransform('${n.id}','operation',this.value)">${Object.entries(ops).map(([k,v])=>`<option value="${k}" ${k===n.operation?'selected':''}>${v}</option>`).join('')}</select>`;
+  if(n.operation==='select_row'||n.operation==='select_column') h+=`<label>索引（从 0 开始）</label><input type="number" min="0" step="1" value="${n.params.index||0}" onchange="setTransformParam('${n.id}','index',this.value)">`;
+  if(n.operation==='roi') h+=`<label>ROI [起始, 结束)</label><div class="lim"><input type="number" min="0" value="${n.params.row_start||0}" onchange="setTransformParam('${n.id}','row_start',this.value)" title="行起始"><input type="number" min="0" value="${n.params.row_end||1}" onchange="setTransformParam('${n.id}','row_end',this.value)" title="行结束"></div><div class="lim"><input type="number" min="0" value="${n.params.column_start||0}" onchange="setTransformParam('${n.id}','column_start',this.value)" title="列起始"><input type="number" min="0" value="${n.params.column_end||1}" onchange="setTransformParam('${n.id}','column_end',this.value)" title="列结束"></div>`;
+  h+=`<p class="hint">输出类型：<b>${SCALAR_TRANSFORMS.has(n.operation)?'标量':'矩阵/向量'}</b>。基础 ndarray/DataFrame JSON 转换自动完成；此节点只表达有业务含义的变换。</p>`;
+  document.getElementById('inspBody').innerHTML=h;
+}
+window.setTransform=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n[k]=v;render();inspectTransform(n);};
+window.setTransformParam=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n.params[k]=Math.trunc(Number(v)||0);render();inspectTransform(n);};
 
 function inspectForLoop(n){
   const h=`<label>节点</label><input value="For 循环" disabled>
@@ -920,6 +948,7 @@ function toGraph(){
   const used={};
   const gnodes = nodes.map(n => {
     if(n.type==='start'||n.type==='end') return {id:n.id,type:n.type,position:{x:n.x,y:n.y}};
+    if(n.type==='data_transform') return {id:n.id,type:'data_transform',data:{label:n.label,input:n.inputChannel,output:n.outputChannel,operation:n.operation,params:n.params||{}},position:{x:n.x,y:n.y}};
     if(n.type==='for_loop') return {id:n.id,type:'for_loop',data:{iterations:Number(n.iterations)},position:{x:n.x,y:n.y}};
     if(n.type==='observer') return {id:n.id,type:'observer',data:{label:n.label,kind:n.observerKind,
       channels:n.observerKind==='scalar'?(n.channels||[]):[n.matrixChannel]},position:{x:n.x,y:n.y}};
@@ -1840,6 +1869,7 @@ function adoptGraph(graph){
   nodes=algoNodes.map((gn,i)=>{ const d=gn.data||{}, type=gn.type||(d.algorithm?'algorithm':'');
     const pos=gn.position||{x:40+i*240,y:100};
     if(type==='start'||type==='end') return {id:gn.id||('n'+(i+1)),type,color:'#64748b',x:pos.x,y:pos.y};
+    if(type==='data_transform') return {id:gn.id||('n'+(i+1)),type,label:d.label||'数据变换',inputChannel:d.input||'',outputChannel:d.output||'',operation:d.operation||'identity',params:d.params||{},color:'#14b8a6',x:pos.x,y:pos.y};
     if(type==='for_loop') return {id:gn.id||('n'+(i+1)),type:'for_loop',label:'For 循环',iterations:Number(d.iterations??1),color:'#f97316',x:pos.x,y:pos.y};
     if(type==='observer') return {id:gn.id||('n'+(i+1)),type:'observer',observerKind:d.kind||'scalar',label:d.label||'观测仪',color:d.kind==='matrix_plot'?'#a855f7':d.kind==='matrix'?'#0ea5e9':'#64748b',channels:d.channels||[],matrixChannel:(d.channels||[])[0]||'',featureAxis:d.feature_axis||'row',x:pos.x,y:pos.y};
     const params={};
