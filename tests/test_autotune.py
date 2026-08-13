@@ -1,6 +1,7 @@
 """AutoTuner (L1) + ModelProvider tests."""
 from optplat.autotune import (
     TuneSpec,
+    demonstrate_candidate,
     default_variation,
     generate_candidates,
     phase_algorithms,
@@ -64,6 +65,19 @@ def test_run_autotune_ranks_and_scores():
         assert {"quality", "time", "stability", "utility", "pareto", "graph"} <= set(r)
     assert any(r["pareto"] for r in res["ranked"])
     assert top["quality"] > 0.9                       # best workflow solves single_peak
+
+
+def test_candidate_demo_replays_each_seed_with_history_and_summary():
+    spec = TuneSpec(bench="single_peak", n_trials=2, noise_levels=[0.0, 0.02],
+                    max_candidates=2, seed=11, random_start=True)
+    ranked = run_autotune(spec)["ranked"]
+    demo = demonstrate_candidate(spec, ranked[0]["graph"])
+    assert len(demo["cases"]) == 4
+    assert demo["summary"]["n_cases"] == 4
+    assert demo["summary"]["n_success"] == 4
+    assert all(c["history"] and c["start"] and c["final_state"] for c in demo["cases"])
+    assert {c["seed"] for c in demo["cases"]} == {11, 18, 31, 38}
+    assert 0 <= demo["summary"]["reached_rate"] <= 1
 
 
 def test_weights_shift_ranking_toward_speed():

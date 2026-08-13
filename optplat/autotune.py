@@ -342,6 +342,53 @@ def evaluate_candidate(spec: TuneSpec, vocs: VOCS, model_fn, costs, graph: dict)
             "detail": {"quality_all": qs, "success_rate": (statistics.fmean(succ) if succ else 0.0)}}
 
 
+def demonstrate_candidate(spec: TuneSpec, graph: dict) -> dict:
+    """Replay one strategy over the exact seeded autotune cases with traces.
+
+    Search results stay compact; detailed histories are generated only when a
+    user clicks “演示”. Each case corresponds to one noise-level/trial pair and
+    exposes its random start, 2-D x trajectory, objective convergence and final
+    score, plus an aggregate summary across cases.
+    """
+    vocs = demo_vocs()
+    costs = {name: o.cost for name, o in vocs.objectives.items()}
+    model_fn = build_model(spec.model) if spec.model else build_model(
+        {"kind": "analytic", "bench": spec.bench})
+    qobj = spec.quality_obj or spec.landscape_obj
+    cases = []
+    for noise in spec.noise_levels:
+        for trial in range(spec.n_trials):
+            seed = spec.seed + trial * 7 + int(noise * 1000)
+            start = _random_start(vocs, spec, seed) if spec.random_start else vocs.initial_point()
+            try:
+                ev = _make_evaluator(vocs, model_fn, costs, noise, seed)
+                res = GraphRunner(vocs, ev, graph, eval_budget=spec.eval_budget,
+                                  start_point=start).run()
+                history = [{k: v for k, v in row.items()
+                            if k == "stage" or k in vocs.variables or k in vocs.objectives}
+                           for row in res.get("history", [])]
+                cases.append({"trial": trial + 1, "noise": noise, "seed": seed,
+                              "start": start, "final_state": res["state"],
+                              "objectives": res["objectives"], "quality": float(res["objectives"].get(qobj, 0)),
+                              "reached": bool(_reached(spec.target, res)), "n_evals": res["n_evals"],
+                              "sim_seconds": res.get("sim_seconds", 0), "history": history})
+            except Exception as exc:
+                cases.append({"trial": trial + 1, "noise": noise, "seed": seed,
+                              "start": start, "error": f"{type(exc).__name__}: {exc}", "history": []})
+    ok = [c for c in cases if "error" not in c]
+    qualities = [c["quality"] for c in ok]
+    return {"cases": cases, "summary": {
+        "n_cases": len(cases), "n_success": len(ok),
+        "quality_mean": statistics.fmean(qualities) if qualities else 0.0,
+        "quality_min": min(qualities) if qualities else 0.0,
+        "quality_max": max(qualities) if qualities else 0.0,
+        "reached_rate": statistics.fmean([1.0 if c["reached"] else 0.0 for c in ok]) if ok else 0.0,
+        "evals_mean": statistics.fmean([c["n_evals"] for c in ok]) if ok else 0.0,
+        "time_mean": statistics.fmean([c["sim_seconds"] for c in ok]) if ok else 0.0,
+    }, "variables": list(vocs.variables), "objectives": list(vocs.objectives),
+       "quality_obj": qobj}
+
+
 def _norm(vals: list[float], higher_better: bool) -> list[float]:
     lo, hi = min(vals), max(vals)
     if hi - lo < 1e-12:

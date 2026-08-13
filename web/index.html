@@ -379,6 +379,7 @@
     <div id="varTable" style="margin-top:6px"></div>
   </details>
   <div id="tuneBody" style="margin-top:12px"></div>
+  <div id="tuneDemo" style="margin-top:14px"></div>
 </div>
 
 <div id="sensModal" class="modal">
@@ -1453,6 +1454,7 @@ const EXAMPLES = {
 
 // ---------- AutoTuner (L1) ----------
 let tuneResult = null, tuneSpace = null, varState = {};
+let tuneDemoResult=null, tuneDemoCandidate=-1, tuneDemoCase=0;
 let paretoX = 'time', paretoY = 'quality';
 const METRICS = {time:{label:'时长',better:'low'}, quality:{label:'质量',better:'high'}, stability:{label:'稳定',better:'high'}, evals:{label:'评估次数',better:'low'}};
 
@@ -1689,9 +1691,51 @@ function renderTuneResults(){
         <span class="metric" data-tip="按通道成本累计的平均测量耗时">时长 <b>${(+r.time).toFixed(0)}s</b></span>
         <span class="metric" data-tip="有目标时=达标率；否则=重复性">稳定 <b>${(r.stability*100).toFixed(0)}%</b></span>
         ${r.pareto?'<span class="metric" style="color:var(--ok)">帕累托</span>':''}
+        <button class="ghost sm" onclick="demoCandidate(${i})" data-tip="用调优时相同的每个随机初始点/噪声 case 重放，并显示 2D 操作轨迹与目标收敛曲线。">▶ 演示</button>
         <button class="ghost sm" onclick="adoptCandidate(${i})" data-tip="把这个方案放到画布（切到该场景，可直接运行/微调）。">采用</button>
       </div></div>`).join('');
   document.getElementById('tuneBody').innerHTML=h;
+}
+async function demoCandidate(i){
+  const r=tuneResult.ranked[i], box=document.getElementById('tuneDemo'); if(!r||!box)return;
+  tuneDemoCandidate=i; box.innerHTML='<p class="hint">正在按全部随机初始点重放策略…</p>';
+  try{
+    const resp=await fetch(API+'/autotune/demo',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({spec:tuneResult.spec,graph:r.graph})});
+    const d=await resp.json(); if(!resp.ok)throw new Error(d.detail||'演示失败');
+    tuneDemoResult=d;tuneDemoCase=0;renderTuneDemo();
+  }catch(e){box.innerHTML=`<p style="color:var(--danger)">${escapeHtml(e.message||e)}</p>`;}
+}
+function renderTuneDemo(){
+  const d=tuneDemoResult,box=document.getElementById('tuneDemo');if(!d||!box)return;
+  const s=d.summary,cases=d.cases||[],c=cases[tuneDemoCase];
+  let h=`<h3>策略 #${tuneDemoCandidate+1} · 多 Case 演示</h3><div class="row" style="gap:6px;flex-wrap:wrap">
+    <span class="metric">Case <b>${s.n_success}/${s.n_cases}</b></span><span class="metric">质量均值 <b>${(+s.quality_mean).toFixed(4)}</b></span>
+    <span class="metric">范围 <b>${(+s.quality_min).toFixed(3)}~${(+s.quality_max).toFixed(3)}</b></span><span class="metric">达标率 <b>${(s.reached_rate*100).toFixed(0)}%</b></span>
+    <span class="metric">平均评估 <b>${(+s.evals_mean).toFixed(1)}</b></span><span class="metric">平均耗时 <b>${(+s.time_mean).toFixed(1)}s</b></span></div>`;
+  h+=`<div class="paxes" style="margin-top:8px">选择 Case <select onchange="tuneDemoCase=+this.value;renderTuneDemo()">${cases.map((x,j)=>`<option value="${j}" ${j===tuneDemoCase?'selected':''}>#${j+1} · seed ${x.seed} · σ=${x.noise}${x.error?' · 失败':''}</option>`).join('')}</select></div>`;
+  if(c){if(c.error)h+=`<p style="color:var(--danger)">${escapeHtml(c.error)}</p>`;else{
+    h+=`<p class="hint">随机起点：${Object.entries(c.start).map(([k,v])=>`${k}=${(+v).toFixed(3)}`).join('，')}　→　最终：${Object.entries(c.final_state).map(([k,v])=>`${k}=${(+v).toFixed(3)}`).join('，')}　· ${c.reached?'✓ 达标':'未达标'}</p>`;
+    h+=`<div style="display:flex;gap:10px;flex-wrap:wrap">${tuneCase2D(c,d.variables)}${tuneCaseConvergence(c,d.quality_obj)}</div>`;
+  }}
+  box.innerHTML=h;
+}
+function tuneCase2D(c,vars){
+  const xk=vars[0],yk=vars[1]||vars[0],pts=(c.history||[]).filter(r=>typeof r[xk]==='number'&&typeof r[yk]==='number');
+  if(!pts.length)return '<p class="hint">无 2D 轨迹。</p>';const W=330,H=210,p={l:42,r:12,t:12,b:28},iw=W-p.l-p.r,ih=H-p.t-p.b;
+  const Vx=vocs.variables[xk],Vy=vocs.variables[yk],X=v=>p.l+(v-Vx.low)/(Vx.high-Vx.low)*iw,Y=v=>p.t+ih-(v-Vy.low)/(Vy.high-Vy.low)*ih;
+  let g=`<div><b style="font-size:11px">2D 操作轨迹 · ${xk}/${yk}</b><br><svg width="${W}" height="${H}" style="background:var(--chartbg);border:1px solid var(--line);border-radius:6px">`;
+  g+=`<polyline points="${pts.map(r=>`${X(r[xk])},${Y(r[yk])}`).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.3"/>`;
+  pts.forEach((r,i)=>g+=`<circle cx="${X(r[xk])}" cy="${Y(r[yk])}" r="${i===0||i===pts.length-1?4:2}" fill="${i===0?'var(--warn)':i===pts.length-1?'var(--ok)':'var(--accent)'}"/>`);
+  return g+`<text x="${p.l+iw/2}" y="${H-5}" text-anchor="middle" fill="var(--muted)" font-size="9">${xk} →　↑ ${yk}　黄=起点 绿=终点</text></svg></div>`;
+}
+function tuneCaseConvergence(c,obj){
+  const vals=(c.history||[]).map(r=>r[obj]).filter(v=>typeof v==='number');if(!vals.length)return '<p class="hint">无目标收敛轨迹。</p>';
+  const W=330,H=210,p={l:42,r:12,t:12,b:28},iw=W-p.l-p.r,ih=H-p.t-p.b,lo=Math.min(...vals),hi=Math.max(...vals),rg=hi-lo||1;
+  const X=i=>p.l+(vals.length<2?iw/2:i/(vals.length-1)*iw),Y=v=>p.t+ih-(v-lo)/rg*ih;
+  let g=`<div><b style="font-size:11px">因变量收敛 · ${obj}</b><br><svg width="${W}" height="${H}" style="background:var(--chartbg);border:1px solid var(--line);border-radius:6px">`;
+  [0,.5,1].forEach(f=>{const v=lo+rg*f,y=Y(v);g+=`<line x1="${p.l}" y1="${y}" x2="${W-p.r}" y2="${y}" stroke="var(--line)"/><text x="${p.l-4}" y="${y+3}" text-anchor="end" fill="var(--muted)" font-size="9">${v.toPrecision(3)}</text>`;});
+  return g+`<polyline points="${vals.map((v,i)=>`${X(i)},${Y(v)}`).join(' ')}" fill="none" stroke="var(--ok)" stroke-width="1.8"/><text x="${p.l+iw/2}" y="${H-5}" text-anchor="middle" fill="var(--muted)" font-size="9">评估次数 →</text></svg></div>`;
 }
 function pareto2D(rows, xk, yk){
   const geq=(a,b,k)=> METRICS[k].better==='high' ? a>=b : a<=b;

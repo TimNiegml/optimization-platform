@@ -32,7 +32,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from .autotune import TuneSpec, run_autotune
+from .autotune import TuneSpec, demonstrate_candidate, run_autotune
 from .demo import BENCHES, bench_func, demo_vocs, optical_bench
 from .evaluator import Evaluator
 from .graph import GraphRunner
@@ -454,6 +454,20 @@ def autotune(spec: TuneSpec):
     """AutoTuner (L1): search workflow candidates, rank by quality/time/stability."""
     try:
         return run_autotune(spec)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
+class AutotuneDemoRequest(BaseModel):
+    spec: TuneSpec
+    graph: dict
+
+
+@app.post("/autotune/demo")
+def autotune_demo(req: AutotuneDemoRequest):
+    """Replay one ranked strategy over all seeded random-start cases."""
+    try:
+        return demonstrate_candidate(req.spec, req.graph)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
 
