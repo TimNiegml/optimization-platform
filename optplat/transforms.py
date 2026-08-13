@@ -8,7 +8,7 @@ import numpy as np
 from .evaluator import json_value
 
 
-SCALAR_OPERATIONS = {"mean", "max", "min", "std"}
+SCALAR_OPERATIONS = {"mean", "max", "min", "std", "element"}
 
 
 def transform_value(value, operation: str, params: dict | None = None):
@@ -32,7 +32,19 @@ def transform_value(value, operation: str, params: dict | None = None):
             raise ValueError("column_mean requires a 2-D input")
         result = arr.mean(axis=0)
     elif operation in SCALAR_OPERATIONS:
-        result = getattr(arr, operation)()
+        if operation == "element":
+            indices = params.get("indices")
+            if indices is None:
+                indices = [params.get("index", 0)] if arr.ndim == 1 else [params.get("row", 0), params.get("column", 0)]
+            indices = tuple(int(i) for i in indices)
+            if len(indices) != arr.ndim:
+                raise ValueError(f"element requires {arr.ndim} indices, got {len(indices)}")
+            try:
+                result = arr[indices]
+            except IndexError as exc:
+                raise ValueError(f"element index {indices} is outside input shape {arr.shape}") from exc
+        else:
+            result = getattr(arr, operation)()
     elif operation == "normalize_minmax":
         spread = arr.max() - arr.min()
         result = np.zeros_like(arr) if spread == 0 else (arr - arr.min()) / spread
@@ -117,4 +129,3 @@ class TransformEvaluator:
 
     @property
     def sim_seconds(self): return self.evaluator.sim_seconds
-

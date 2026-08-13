@@ -10,6 +10,7 @@ from optplat.demo import TWO_PHASE_GRAPH, demo_vocs, optical_bench
 from optplat.graph import GraphRunner, to_mermaid
 from optplat.hardware import HardwareEvaluator, SimulatedStage
 from optplat.registry import AlgorithmSpec, algorithm_catalog, register_algorithm
+from optplat.transforms import transform_value
 
 
 def _run(graph, **kw):
@@ -322,3 +323,34 @@ def test_data_transform_supports_roi_and_rejects_unknown_input():
         "input": "missing", "output": "z", "operation": "mean"}}], "edges": []}
     with pytest.raises(ValueError, match="unknown input"):
         GraphRunner(vocs, ev, bad)
+
+
+def test_element_transform_selects_vector_or_matrix_scalar():
+    assert transform_value([10, 20, 30], "element", {"indices": [1]}) == 20.0
+    assert transform_value([[1, 2], [3, 4]], "element", {"indices": [1, 0]}) == 3.0
+    with pytest.raises(ValueError, match="requires 2 indices"):
+        transform_value([[1, 2]], "element", {"indices": [0]})
+    with pytest.raises(ValueError, match="outside input shape"):
+        transform_value([1, 2], "element", {"indices": [5]})
+
+
+def test_vector_channel_requires_scalar_element_before_optimization():
+    vocs = demo_vocs()
+    vocs.objectives["spectrum"] = vocs.objectives["y1"].model_copy(
+        update={"value_type": ObjectiveValueType.VECTOR})
+    ev = Evaluator(lambda x: {**optical_bench(x), "spectrum": [x["x1"], -x["x1"]]})
+    direct = {"nodes": [{"id": "bad", "type": "algorithm", "data": {
+        "algorithm": "coordinate_descent", "variables": ["x1"], "objective": "spectrum"}}],
+        "edges": []}
+    with pytest.raises(ValueError, match="array channels cannot be optimized directly"):
+        GraphRunner(vocs, ev, direct).run()
+
+    selected = {"nodes": [
+        {"id": "pick", "type": "data_transform", "data": {
+            "input": "spectrum", "output": "spectrum_0", "operation": "element",
+            "params": {"indices": [0]}}},
+        {"id": "opt", "type": "algorithm", "data": {
+            "algorithm": "coordinate_descent", "variables": ["x1"],
+            "objective": "spectrum_0", "stop": {"max_iter": 20}}}],
+        "edges": [{"source": "pick", "target": "opt"}]}
+    assert GraphRunner(vocs, ev, selected).run()["state"]["x1"] > 3.5

@@ -503,7 +503,7 @@ function spec(name){ return catalog.find(a => a.name === name) || {params:{}, si
 function labelOf(name){ return spec(name).label || name; }
 function nodeLabel(n){ return !n?'?':(n.type==='observer'?n.label:(n.type==='data_transform'?`${n.inputChannel} → ${n.outputChannel}`:(n.type==='for_loop'?`For ×${n.iterations}`:(n.type==='start'?'开始':n.type==='end'?'结束':labelOf(n.algorithm))))); }
 function nextColor(){ return NODE_COLORS[nodes.length % NODE_COLORS.length]; }
-const SCALAR_TRANSFORMS=new Set(['mean','max','min','std']);
+const SCALAR_TRANSFORMS=new Set(['mean','max','min','std','element']);
 function transformChannels(){ return nodes.filter(n=>n.type==='data_transform'&&n.outputChannel).map(n=>({name:n.outputChannel,valueType:SCALAR_TRANSFORMS.has(n.operation)?'scalar':'matrix'})); }
 function availableChannels(type){ const all=objKeys.map(name=>({name,valueType:(channels[name]||{}).valueType||'scalar'})).concat(transformChannels()); return type?all.filter(c=>c.valueType===type):all; }
 
@@ -696,6 +696,12 @@ function inspectNode(n){
     h += `<label>目标</label><select onchange="setF('${n.id}','objective',this.value)">`;
     availableChannels('scalar').map(c=>c.name).forEach(o => h += `<option ${o===n.objective?'selected':''}>${o}</option>`);
     h += `</select>`;
+    const arrayInputs=availableChannels().filter(c=>c.valueType!=='scalar');
+    if(arrayInputs.length) h+=`<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">⚡ 从数组元素快速创建目标</summary>
+      <label>数组通道</label><select id="quickArraySource">${arrayInputs.map(c=>`<option value="${c.name}" data-type="${c.valueType}">${c.name}（${c.valueType==='vector'?'向量':'矩阵'}）</option>`).join('')}</select>
+      <label>索引</label><div class="lim"><input id="quickArrayI" type="number" min="0" step="1" value="0" title="向量索引 / 矩阵行"><input id="quickArrayJ" type="number" min="0" step="1" value="0" title="矩阵列；向量时忽略"></div>
+      <button class="ghost sm" style="margin-top:6px" onclick="quickElementTarget('${n.id}')">创建并设为本节点目标</button>
+      <p class="hint">矩阵填写行、列；向量只使用第一个索引。平台会自动插入元素提取节点。</p></details>`;
     const comp = compWeights(n);
     h += `<label style="margin-top:8px"><input type="checkbox" style="width:auto" ${comp?'checked':''} onchange="toggleComposite('${n.id}',this.checked)"> 加权组合多目标
           <span class="info" data-tip="把多个目标按权重合成一个单目标（Σ w·目标，每个目标按各自的最大/最小/逼近模式计分）。单目标算子(单纯形/坐标/梯度/拟合)即可优化多目标折中，如 0.7·y1+0.3·y2。">i</span></label>`;
@@ -775,18 +781,37 @@ window.setObserver=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n[k]=v;if(k==='ma
 window.toggleObserverChannel=(id,o,on)=>{const n=nodes.find(x=>x.id===id),s=new Set(n.channels||[]);on?s.add(o):s.delete(o);n.channels=[...s];render();inspectObserver(n);};
 
 function inspectTransform(n){
-  const ops={identity:'原样转换',transpose:'转置',flatten:'展平',row_mean:'每行均值',column_mean:'每列均值',mean:'整体均值',max:'最大值',min:'最小值',std:'标准差',normalize_minmax:'Min-Max 归一化',select_row:'选择行',select_column:'选择列',roi:'裁剪 ROI'};
+  const ops={identity:'原样转换',transpose:'转置',flatten:'展平',row_mean:'每行均值',column_mean:'每列均值',element:'提取单个元素',mean:'整体均值',max:'最大值',min:'最小值',std:'标准差',normalize_minmax:'Min-Max 归一化',select_row:'选择行',select_column:'选择列',roi:'裁剪 ROI'};
   const inputs=availableChannels().filter(c=>c.name!==n.outputChannel);
   let h=`<label>输入通道</label><select onchange="setTransform('${n.id}','inputChannel',this.value)">${inputs.map(c=>`<option value="${c.name}" ${c.name===n.inputChannel?'selected':''}>${c.name}（${c.valueType}）</option>`).join('')}</select>
     <label>输出通道名</label><input value="${escapeHtml(n.outputChannel)}" onchange="setTransform('${n.id}','outputChannel',this.value.trim())">
     <label>变换</label><select onchange="setTransform('${n.id}','operation',this.value)">${Object.entries(ops).map(([k,v])=>`<option value="${k}" ${k===n.operation?'selected':''}>${v}</option>`).join('')}</select>`;
   if(n.operation==='select_row'||n.operation==='select_column') h+=`<label>索引（从 0 开始）</label><input type="number" min="0" step="1" value="${n.params.index||0}" onchange="setTransformParam('${n.id}','index',this.value)">`;
+  if(n.operation==='element') h+=`<label>索引（JSON；向量如 [2]，矩阵如 [1,3]）</label><input value="${escapeHtml(JSON.stringify(n.params.indices||[0,0]))}" onchange="setTransformIndices('${n.id}',this.value)">`;
   if(n.operation==='roi') h+=`<label>ROI [起始, 结束)</label><div class="lim"><input type="number" min="0" value="${n.params.row_start||0}" onchange="setTransformParam('${n.id}','row_start',this.value)" title="行起始"><input type="number" min="0" value="${n.params.row_end||1}" onchange="setTransformParam('${n.id}','row_end',this.value)" title="行结束"></div><div class="lim"><input type="number" min="0" value="${n.params.column_start||0}" onchange="setTransformParam('${n.id}','column_start',this.value)" title="列起始"><input type="number" min="0" value="${n.params.column_end||1}" onchange="setTransformParam('${n.id}','column_end',this.value)" title="列结束"></div>`;
   h+=`<p class="hint">输出类型：<b>${SCALAR_TRANSFORMS.has(n.operation)?'标量':'矩阵/向量'}</b>。基础 ndarray/DataFrame JSON 转换自动完成；此节点只表达有业务含义的变换。</p>`;
   document.getElementById('inspBody').innerHTML=h;
 }
 window.setTransform=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n[k]=v;render();inspectTransform(n);};
 window.setTransformParam=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n.params[k]=Math.trunc(Number(v)||0);render();inspectTransform(n);};
+window.setTransformIndices=(id,v)=>{const n=nodes.find(x=>x.id===id);try{const a=JSON.parse(v);if(!Array.isArray(a))throw Error();n.params.indices=a.map(x=>Math.trunc(Number(x)));render();inspectTransform(n);}catch(e){alert('索引必须是 JSON 数组，例如 [2] 或 [1,3]');}};
+window.quickElementTarget=(targetId)=>{
+  const target=nodes.find(n=>n.id===targetId), sourceEl=document.getElementById('quickArraySource');
+  if(!target||!sourceEl)return;
+  const source=sourceEl.value, type=sourceEl.selectedOptions[0].dataset.type;
+  const i=Math.max(0,Math.trunc(Number(document.getElementById('quickArrayI').value)||0));
+  const j=Math.max(0,Math.trunc(Number(document.getElementById('quickArrayJ').value)||0));
+  const base=(source+'_'+(type==='vector'?i:(i+'_'+j))).replace(/[^A-Za-z0-9_]/g,'_');
+  const used=new Set(availableChannels().map(c=>c.name)); let output=base, suffix=2;
+  while(used.has(output))output=base+'_'+suffix++;
+  const node={id:'n'+(++seq),type:'data_transform',label:'元素目标',inputChannel:source,outputChannel:output,
+    operation:'element',params:{indices:type==='vector'?[i]:[i,j]},color:'#14b8a6',x:Math.max(10,target.x-220),y:target.y};
+  const index=nodes.indexOf(target); nodes.splice(index,0,node);
+  edges.filter(e=>e.target===targetId).forEach(e=>e.target=node.id);
+  edges.push({id:'e'+(++seq),source:node.id,target:targetId,condition:'',role:''});
+  target.objective=output; target.objectiveWeights=null;
+  render(); select(targetId);
+};
 
 function inspectForLoop(n){
   const h=`<label>节点</label><input value="For 循环" disabled>
@@ -912,7 +937,7 @@ function renderEvalExtras(){
       <input value="${c.param}" oninput="channels['${o}'].param=this.value" title="参数">
       <input type="number" step="0.5" min="0" value="${c.cost}" oninput="channels['${o}'].cost=+this.value; renderEvalExtras()" title="读取耗时(秒)">
       <input value="${c.group||''}" oninput="channels['${o}'].group=this.value; renderEvalExtras()" title="测量组：同组并行、不同组串行；留空=独立串行" placeholder="组">
-      <select style="grid-column:2/6" onchange="channels['${o}'].valueType=this.value; renderEvalExtras()"><option value="scalar" ${c.valueType!=='matrix'?'selected':''}>标量</option><option value="matrix" ${c.valueType==='matrix'?'selected':''}>矩阵</option></select></div>`; });
+      <select style="grid-column:2/6" onchange="channels['${o}'].valueType=this.value; renderEvalExtras()"><option value="scalar" ${c.valueType==='scalar'?'selected':''}>标量</option><option value="vector" ${c.valueType==='vector'?'selected':''}>向量</option><option value="matrix" ${c.valueType==='matrix'?'selected':''}>矩阵</option></select></div>`; });
   h += timingPreview();
   h += `<div class="glab" style="margin-top:6px">自变量（执行器）：设备 / 参数</div>`;
   varKeys.forEach(v=>{ const a=actuators[v];
@@ -1796,7 +1821,7 @@ function renderTuneDemo(){
     <span class="metric">平均评估 <b>${(+s.evals_mean).toFixed(1)}</b></span><span class="metric">平均耗时 <b>${(+s.time_mean).toFixed(1)}s</b></span></div>`;
   h+=`<div class="paxes" style="margin-top:8px">选择 Case <select onchange="tuneDemoCase=+this.value;renderTuneDemo()">${cases.map((x,j)=>`<option value="${j}" ${j===tuneDemoCase?'selected':''}>#${j+1} · seed ${x.seed} · σ=${x.noise}${x.error?' · 失败':''}</option>`).join('')}</select></div>`;
   const vopts=(selected)=>(d.variables||[]).map(v=>`<option value="${v}" ${v===selected?'selected':''}>${v}</option>`).join('');
-  const oopts=(d.objectives||[]).filter(o=>(channels[o]||{}).valueType!=='matrix').map(o=>`<option value="${o}" ${o===tuneDemoObj?'selected':''}>${o}</option>`).join('');
+  const oopts=(d.objectives||[]).filter(o=>(channels[o]||{}).valueType==='scalar').map(o=>`<option value="${o}" ${o===tuneDemoObj?'selected':''}>${o}</option>`).join('');
   h+=`<div class="chart-ctl" style="margin:7px 0"><span>轨迹坐标</span>
     X<select onchange="tuneDemoX=this.value;renderTuneDemo()">${vopts(tuneDemoX)}</select>
     Y<select onchange="tuneDemoY=this.value;renderTuneDemo()">${vopts(tuneDemoY)}</select>

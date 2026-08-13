@@ -21,6 +21,7 @@ class ObjectiveMode(str, Enum):
 
 class ObjectiveValueType(str, Enum):
     SCALAR = "scalar"
+    VECTOR = "vector"
     MATRIX = "matrix"
 
 
@@ -66,8 +67,8 @@ class Objective(BaseModel):
 
     def score(self, y: float) -> float:
         """Map a raw measurement to a 'higher is better' score."""
-        if self.value_type == ObjectiveValueType.MATRIX:
-            raise ValueError("matrix objective cannot be scored directly; derive a scalar feature first")
+        if self.value_type != ObjectiveValueType.SCALAR:
+            raise ValueError(f"{self.value_type.value} objective cannot be scored directly; derive a scalar feature first")
         if self.mode == ObjectiveMode.MINIMIZE:
             return -y
         if self.mode == ObjectiveMode.TARGET:
