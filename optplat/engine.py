@@ -135,7 +135,18 @@ class StageEngine:
             self.events.append("⛔ evaluation budget exhausted → stop")
             raise StopAll
         y = self.evaluator.evaluate(x, stage=stage, channels=channels)
+        # A requested derived channel is backed by freshly read physical
+        # dependencies which are intentionally hidden from the public return.
+        # Merge them into the latest-value cache before refreshing all z values.
+        latest = getattr(self.evaluator, "latest_values", None)
+        if latest:
+            self.last_y.update(latest)
         self.last_y.update(y)
+        # Selective reads must not leave computed objectives stale in the live
+        # state. Refresh z values from the newest available physical y cache.
+        enrich = getattr(self.evaluator, "enrich_available", None)
+        if enrich is not None:
+            enrich(self.last_y)
         self._last_x = dict(x)
         if self.on_eval is not None:
             self.on_eval(dict(x), dict(self.last_y), stage, self.n_evals)

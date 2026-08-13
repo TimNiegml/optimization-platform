@@ -70,3 +70,19 @@ def test_derived_output_expression_dsl_rejects_code_execution():
     base = Evaluator(lambda x: {"y1": 1.0})
     with pytest.raises(ValueError, match="unknown channels"):
         DerivedEvaluator(base, {"z1": "__import__('os')"}, ["y1", "z1"])
+
+
+def test_live_derived_value_refreshes_during_selective_reads():
+    vocs = derived_vocs()
+    engine = StageEngine(vocs, Evaluator(lambda x: {
+        "y1": x["x1"], "y2": 10 + x["x1"],
+    }))
+    seen = []
+    engine.on_eval = lambda x, y, stage, n: seen.append(dict(y))
+    engine.prime()  # establishes y1, y2 and both derived outputs
+    engine.evaluate({"x1": 1.5}, "only-y1", channels={"y1"})
+
+    assert seen[-1]["y1"] == pytest.approx(1.5)
+    assert seen[-1]["y2"] == pytest.approx(10.0)  # latest cached, not re-read
+    assert seen[-1]["z1"] == pytest.approx(11.5)  # refreshed, not stale at 10
+    assert seen[-1]["z2"] == pytest.approx(10.0)

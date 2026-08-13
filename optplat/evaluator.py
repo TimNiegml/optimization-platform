@@ -84,6 +84,7 @@ class DerivedEvaluator:
         self.expressions = {k: v.strip() for k, v in expressions.items() if v and v.strip()}
         self.known = set(known_channels)
         self.dependencies = {k: _expression_names(v) for k, v in self.expressions.items()}
+        self.latest_values: dict = {}
         for name, deps in self.dependencies.items():
             unknown = deps - self.known
             if unknown:
@@ -111,6 +112,29 @@ class DerivedEvaluator:
         values[name] = _eval_expression(self.expressions[name], values)
         return values[name]
 
+    def enrich_available(self, values: dict) -> dict:
+        """Refresh every derived output whose dependencies are available.
+
+        ``StageEngine.last_y`` is the live latest-value cache.  A selective
+        acquisition may read only y1, but z1=y1+y2 must still be refreshed from
+        the new y1 and the latest y2 rather than leaving yesterday's z1 on the
+        live panel.  Outputs with a dependency never measured yet are skipped.
+        """
+        for name in self.expressions:
+            physical = self._physical_dependencies(name, set())
+            if physical <= set(values):
+                # Remove stale intermediate/result values so the whole derived
+                # dependency chain is recalculated from the latest physical y.
+                refreshed = dict(values)
+                for derived in self.expressions:
+                    refreshed.pop(derived, None)
+                try:
+                    self._calculate(name, refreshed, set())
+                except KeyError:
+                    continue
+                values[name] = refreshed[name]
+        return values
+
     def evaluate(self, x: dict[str, float], stage: str = "", channels=None) -> dict[str, float]:
         requested = set(self.known if channels is None else channels)
         physical = set().union(*(self._physical_dependencies(k, set()) for k in requested))
@@ -118,6 +142,7 @@ class DerivedEvaluator:
         for name in requested:
             if name in self.expressions:
                 self._calculate(name, values, set())
+        self.latest_values = dict(values)
         result = {k: values[k] for k in requested if k in values}
         # Keep calculated values in the shared trace/CSV without counting them
         # as instrument reads or charging an extra measurement cost.
