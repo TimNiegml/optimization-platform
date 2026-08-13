@@ -31,6 +31,11 @@ python -m pytest -q           # 回归测试（算法 + 块/图/API + 硬件/归
 1. **Phase 1 · 找光**：`grid_scan`/`line_scan` 扫描到耦合功率阈值（stage 的 `stop.target`），一到首光即停。
 2. **Phase 2 · 优化**：`nelder_mead` / `coordinate_descent` 精调；`quadratic_fit` / `gaussian_fit` 定峰；带 `keep` 约束与失败 `fallback`。
 
+### 代码转画布与显式循环
+
+- Hermes 加载 `skills/code-to-coupling-canvas` 后，可把现有代码解释成步骤、映射为可拖拽流程，并把平台缺失元件整理成后续开发规格。
+- 画布左侧可添加 **For 循环**：设置固定次数，分别连接“循环体”和“退出”边，再把循环体末端连回循环节点。
+
 ### 自定义计算因变量
 
 画布顶部点 **🧮 自定义因变量**，可以用外部接口测得的通道定义计算量，例如

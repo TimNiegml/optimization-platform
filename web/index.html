@@ -206,6 +206,8 @@
     <div class="palItem" style="border-left-color:#64748b" onclick="addObserver('scalar')"><b>🔢 标量观测仪</b><span>数值</span></div>
     <div class="palItem" style="border-left-color:#0ea5e9" onclick="addObserver('matrix')"><b>▦ 矩阵观测仪</b><span>表格</span></div>
     <div class="palItem" style="border-left-color:#a855f7" onclick="addObserver('matrix_plot')"><b>📈 矩阵可视化</b><span>特征曲线</span></div>
+    <h2>流程控制 <span class="info" data-tip="显式重复一段节点固定次数。循环节点需要一条『循环体』边、一条『退出』边，并把循环体末尾连回循环节点。">i</span></h2>
+    <div class="palItem" style="border-left-color:#f97316" onclick="addForLoop()"><b>🔁 For 循环</b><span>固定次数</span></div>
 
     <h2>评估 <span class="info" data-tip="优化时怎么测量目标：选仿真场景；纯函数=直接算，模拟硬件=带噪声/平均/安全限位，更贴近真实台架。">i</span></h2>
     <label>仿真场景 <span class="info" data-tip="选不同的虚拟评估函数：单峰最好上手，多峰考验找光是否卡旁瓣，偏斜峰考验算法选择。">i</span></label>
@@ -498,7 +500,7 @@ async function boot() {
 
 function spec(name){ return catalog.find(a => a.name === name) || {params:{}, single_var:false, label:name}; }
 function labelOf(name){ return spec(name).label || name; }
-function nodeLabel(n){ return !n?'?':(n.type==='observer'?n.label:labelOf(n.algorithm)); }
+function nodeLabel(n){ return !n?'?':(n.type==='observer'?n.label:(n.type==='for_loop'?`For ×${n.iterations}`:(n.type==='start'?'开始':n.type==='end'?'结束':labelOf(n.algorithm)))); }
 function nextColor(){ return NODE_COLORS[nodes.length % NODE_COLORS.length]; }
 
 function addNode(algo, at) {
@@ -530,6 +532,12 @@ function addObserver(kind, at){
   nodes.push(n); render(); select(n.id);
 }
 
+function addForLoop(at){
+  const n={id:'n'+(++seq),type:'for_loop',label:'For 循环',iterations:3,color:'#f97316',
+    x:at?at.x:80+(nodes.length%4)*30,y:at?at.y:70+nodes.length*70};
+  nodes.push(n); render(); select(n.id);
+}
+
 function render() {
   const wrap = document.getElementById('canvasWrap');
   [...wrap.querySelectorAll('.node')].forEach(e => e.remove());
@@ -537,7 +545,11 @@ function render() {
     const el = document.createElement('div');
     el.className = 'node' + (sel===n.id ? ' sel':''); el.setAttribute('data-id', n.id);
     el.style.left = n.x+'px'; el.style.top = n.y+'px'; el.style.borderTopColor = n.color;
-    if(n.type==='observer'){
+    if(n.type==='start'||n.type==='end'){
+      el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">${n.type==='start'?'▶ 开始':'■ 结束'}</span><span class="x">✕</span></div><div class="bd">流程${n.type==='start'?'入口':'出口'}</div><div class="port"></div>`;
+    } else if(n.type==='for_loop'){
+      el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">🔁 For 循环</span><span class="x">✕</span></div><div class="bd">重复 ${n.iterations} 次</div><div class="port"></div>`;
+    } else if(n.type==='observer'){
       const sub=n.observerKind==='scalar'?(n.channels||[]).join(','):(n.matrixChannel||'未选通道');
       el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">${n.label}</span><span class="x">✕</span></div><div class="bd">👁 ${sub}</div><div class="port"></div>`;
     } else {
@@ -597,21 +609,31 @@ function drawEdges() {
     hit.onclick=()=>selectEdge(ed.id); hit.oncontextmenu=e=>{e.preventDefault(); delEdge(ed.id);};
     svg.appendChild(hit);
     const p = mkPath(geo,'edge');
-    p.setAttribute('stroke', on?'var(--text)':(ed.condition?'var(--warn)':'var(--accent)'));
+    const edgeLabel=ed.condition||(ed.role==='body'?'循环体':ed.role==='exit'?'退出':'');
+    p.setAttribute('stroke', on?'var(--text)':(edgeLabel?'var(--warn)':'var(--accent)'));
     p.setAttribute('stroke-width', on?'3.2':'2');
-    p.setAttribute('marker-end', on?'url(#arrowSel)':(ed.condition?'url(#arrowW)':'url(#arrow)'));
+    p.setAttribute('marker-end', on?'url(#arrowSel)':(edgeLabel?'url(#arrowW)':'url(#arrow)'));
     svg.appendChild(p);
-    if(ed.condition){
+    if(edgeLabel){
       const t=document.createElementNS('http://www.w3.org/2000/svg','text');
       t.setAttribute('x',lx); t.setAttribute('y',ly); t.setAttribute('fill', on?'var(--text)':'var(--warn)');
       t.setAttribute('font-size',Math.round(fontScale*0.8)); t.setAttribute('text-anchor','middle');
-      t.setAttribute('class','edgelbl'); t.textContent=ed.condition.slice(0,28); svg.appendChild(t);
+      t.setAttribute('class','edgelbl'); t.textContent=edgeLabel.slice(0,28); svg.appendChild(t);
     }
   });
 }
 function mkPath(d, cls){ const p=document.createElementNS('http://www.w3.org/2000/svg','path'); p.setAttribute('d',d); p.setAttribute('class',cls); p.setAttribute('fill','none'); return p; }
 
-function addEdge(s,t){ if(edges.some(e=>e.source===s&&e.target===t)) return; edges.push({id:'e'+(++seq), source:s, target:t, condition:''}); render(); }
+function addEdge(s,t){
+  if(edges.some(e=>e.source===s&&e.target===t)) return;
+  let role=''; const source=nodes.find(n=>n.id===s);
+  if(source&&source.type==='for_loop'){
+    const used=new Set(edges.filter(e=>e.source===s).map(e=>e.role));
+    role=!used.has('body')?'body':(!used.has('exit')?'exit':'');
+    if(!role){ alert('For 循环只能有一条循环体边和一条退出边。'); return; }
+  }
+  edges.push({id:'e'+(++seq), source:s, target:t, condition:'', role}); render();
+}
 function delEdge(id){ edges=edges.filter(e=>e.id!==id); if(selEdge===id){selEdge=null; inspectEmpty();} render(); }
 function delNode(id){ nodes=nodes.filter(n=>n.id!==id); edges=edges.filter(e=>e.source!==id&&e.target!==id); if(sel===id){sel=null; inspectEmpty();} render(); }
 
@@ -639,7 +661,7 @@ window.addEventListener('keydown', e => {
   }
 });
 
-function select(id){ sel=id; selEdge=null; render(); const n=nodes.find(n=>n.id===id); n&&n.type==='observer'?inspectObserver(n):inspectNode(n); }
+function select(id){ sel=id; selEdge=null; render(); const n=nodes.find(n=>n.id===id); if(!n)return; n.type==='observer'?inspectObserver(n):(n.type==='for_loop'?inspectForLoop(n):((n.type==='start'||n.type==='end')?inspectControl(n):inspectNode(n))); }
 function selectEdge(id){ selEdge=id; sel=null; render(); inspectEdge(edges.find(e=>e.id===id)); }
 function inspectEmpty(){ document.getElementById('inspBody').innerHTML=
   '<p class="hint">点选<b>节点</b>编辑变量/目标/参数；点选<b>连线</b>设条件或删除。<br>连线：点节点右侧圆点 ＋ → 再点目标节点（指回前面的节点＝循环，会自动绕行）。</p>'; }
@@ -738,11 +760,23 @@ function inspectObserver(n){
 window.setObserver=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n[k]=v;if(k==='matrixChannel')n.channels=[v];render();inspectObserver(n);};
 window.toggleObserverChannel=(id,o,on)=>{const n=nodes.find(x=>x.id===id),s=new Set(n.channels||[]);on?s.add(o):s.delete(o);n.channels=[...s];render();inspectObserver(n);};
 
+function inspectForLoop(n){
+  const h=`<label>节点</label><input value="For 循环" disabled>
+    <label>重复次数</label><input type="number" min="0" max="1000" step="1" value="${n.iterations}" onchange="setForIterations('${n.id}',this.value)">
+    <p class="hint">从右侧端口依次连接：第一条自动标为<b>循环体</b>，第二条标为<b>退出</b>；再把循环体最后一个节点连回本节点。</p>`;
+  document.getElementById('inspBody').innerHTML=h;
+}
+window.setForIterations=(id,v)=>{const n=nodes.find(x=>x.id===id);n.iterations=Math.max(0,Math.min(1000,Math.trunc(Number(v)||0)));render();inspectForLoop(n);};
+function inspectControl(n){ document.getElementById('inspBody').innerHTML=`<label>控制节点</label><input value="${n.type==='start'?'开始':'结束'}" disabled><p class="hint">此节点来自 Agent graph，用于明确流程入口或出口。</p>`; }
+
 function inspectEdge(ed){
   if(!ed) return;
   const back = (()=>{ const a=anchors(ed.source), b=anchors(ed.target); return a&&b&&b.left.x<a.right.x-10; })();
+  const fromLoop=(nodes.find(n=>n.id===ed.source)||{}).type==='for_loop';
+  const roleEditor=fromLoop?`<label>For 分支</label><select id="edgeRole"><option value="body" ${ed.role==='body'?'selected':''}>循环体</option><option value="exit" ${ed.role==='exit'?'selected':''}>退出</option></select>`:'';
   const h = `<h2 style="margin-top:0">连线${ed.source===ed.target?'（自循环）':back?'（循环回边）':''}</h2>
     <p class="hint">${nodeLabel(nodes.find(n=>n.id===ed.source))} → ${nodeLabel(nodes.find(n=>n.id===ed.target))}</p>
+    ${roleEditor}
     <label>条件表达式（可空） <span class="info" data-tip="留空=普通顺序边。填表达式则条件成立才走这条边（分支/循环）。例：not (y1>=0.95 and y2>=0.9)">i</span></label>
     <textarea rows="2" id="edgeCond" placeholder="留空=默认边；如 not (y1>=0.95 and y2>=0.9)">${ed.condition||''}</textarea>
     <div class="row" style="margin-top:8px">
@@ -752,7 +786,7 @@ function inspectEdge(ed){
     <p class="hint" style="margin-top:10px">也可选中后按 <b>Delete</b>，或在连线上点<b>右键</b>删除。</p>`;
   document.getElementById('inspBody').innerHTML = h;
 }
-window.saveEdgeCond=(id)=>{ const ed=edges.find(e=>e.id===id); if(ed){ ed.condition=document.getElementById('edgeCond').value.trim(); render(); } };
+window.saveEdgeCond=(id)=>{ const ed=edges.find(e=>e.id===id); if(ed){ ed.condition=document.getElementById('edgeCond').value.trim(); const role=document.getElementById('edgeRole'); if(role)ed.role=role.value; render(); } };
 window.toggleVar=(id,v,on)=>{const n=nodes.find(x=>x.id===id);const s=spec(n.algorithm);
   if(s.single_var){n.variables=on?[v]:[];} else {n.variables=on?[...new Set([...n.variables,v])]:n.variables.filter(x=>x!==v);} render(); if(sel===id) inspectNode(n);};
 // per-axis hyperparameter table (坐标下降每轴步距 / 单纯形每轴初始 simplex)
@@ -885,6 +919,8 @@ function toGraph(){
   lastStages = {'init':{color:'var(--muted)', label:'初始/中间点'}}; stageToNode={};
   const used={};
   const gnodes = nodes.map(n => {
+    if(n.type==='start'||n.type==='end') return {id:n.id,type:n.type,position:{x:n.x,y:n.y}};
+    if(n.type==='for_loop') return {id:n.id,type:'for_loop',data:{iterations:Number(n.iterations)},position:{x:n.x,y:n.y}};
     if(n.type==='observer') return {id:n.id,type:'observer',data:{label:n.label,kind:n.observerKind,
       channels:n.observerKind==='scalar'?(n.channels||[]):[n.matrixChannel]},position:{x:n.x,y:n.y}};
     let base=labelOf(n.algorithm); let sName=base;
@@ -902,7 +938,7 @@ function toGraph(){
     if(n.stopTarget) data.stop={target:n.stopTarget};
     return {id:n.id, type:'algorithm', data, position:{x:n.x,y:n.y}};
   });
-  const gedges = edges.map(e => e.condition ? {source:e.source,target:e.target,condition:e.condition} : {source:e.source,target:e.target});
+  const gedges = edges.map(e => ({source:e.source,target:e.target,...(e.condition?{condition:e.condition}:{}),...(e.role?{role:e.role}:{})}));
   const g = {nodes:gnodes, edges:gedges}; if(untilExpr) g.until=untilExpr; return g;
 }
 function readEvalConfig(){
@@ -1799,18 +1835,22 @@ function adoptCandidate(i){ const r=tuneResult.ranked[i]; if(!r) return; adoptGr
   document.getElementById('conn').textContent='已采用方案 #'+(i+1); }
 function adoptGraph(graph){
   const known=new Set(['algorithm','variables','objective','stage','objective_mode','objective_target','keep','stop']);
-  // skip start/end control nodes (agent-built graphs carry them; autotune ones don't)
-  const algoNodes=(graph.nodes||[]).filter(gn=>{const t=gn.type||(gn.data&&gn.data.algorithm?'algorithm':''); return t!=='start'&&t!=='end';});
+  const algoNodes=graph.nodes||[];
   const keptIds=new Set(algoNodes.map((gn,i)=>gn.id||('n'+(i+1))));
-  nodes=algoNodes.map((gn,i)=>{ const d=gn.data||{}; const params={};
+  nodes=algoNodes.map((gn,i)=>{ const d=gn.data||{}, type=gn.type||(d.algorithm?'algorithm':'');
+    const pos=gn.position||{x:40+i*240,y:100};
+    if(type==='start'||type==='end') return {id:gn.id||('n'+(i+1)),type,color:'#64748b',x:pos.x,y:pos.y};
+    if(type==='for_loop') return {id:gn.id||('n'+(i+1)),type:'for_loop',label:'For 循环',iterations:Number(d.iterations??1),color:'#f97316',x:pos.x,y:pos.y};
+    if(type==='observer') return {id:gn.id||('n'+(i+1)),type:'observer',observerKind:d.kind||'scalar',label:d.label||'观测仪',color:d.kind==='matrix_plot'?'#a855f7':d.kind==='matrix'?'#0ea5e9':'#64748b',channels:d.channels||[],matrixChannel:(d.channels||[])[0]||'',featureAxis:d.feature_axis||'row',x:pos.x,y:pos.y};
+    const params={};
     Object.keys(d).forEach(k=>{ if(!known.has(k)) params[k]=d[k]; });
     return {id:gn.id||('n'+(i+1)), algorithm:d.algorithm, color:NODE_COLORS[i%NODE_COLORS.length],
       variables:d.variables||[], objective:d.objective||objKeys[0],
       objectiveMode:d.objective_mode||'', objectiveTarget:(d.objective_target!=null?d.objective_target:''),
       objectiveWeights:d.objective_weights||null,
-      params, keep:d.keep||'', stopTarget:(d.stop&&d.stop.target)||'', fitInfo:'', x:40+i*240, y:100}; });
+      params, keep:d.keep||'', stopTarget:(d.stop&&d.stop.target)||'', fitInfo:'', x:pos.x, y:pos.y}; });
   edges=(graph.edges||[]).filter(e=>keptIds.has(e.source)&&keptIds.has(e.target))
-    .map((e,i)=>({id:'e'+(i+1), source:e.source, target:e.target, condition:e.condition||''}));
+    .map((e,i)=>({id:'e'+(i+1), source:e.source, target:e.target, condition:e.condition||'', role:e.role||''}));
   untilExpr=graph.until||''; untilRawEdited=false; untilRows=[]; seq=nodes.length+edges.length+1;
   sel=null; selEdge=null; render(); inspectEmpty(); renderUntilRows();
 }

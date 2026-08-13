@@ -264,3 +264,24 @@ def test_matrix_policy_delta_mode_is_safety_clipped():
         "edges": []}
     result = GraphRunner(vocs, ev, graph).run()
     assert result["state"]["x1"] == vocs.variables["x1"].high
+
+
+def test_explicit_for_loop_executes_body_exact_number_of_times():
+    graph = {"nodes": [
+        {"id": "loop", "type": "for_loop", "data": {"iterations": 3}},
+        {"id": "body", "type": "observer", "data": {"channels": ["y1"]}},
+        {"id": "end", "type": "end"}],
+        "edges": [
+            {"source": "loop", "target": "body", "role": "body"},
+            {"source": "body", "target": "loop"},
+            {"source": "loop", "target": "end", "role": "exit"}]}
+    result = _run(graph)
+    assert len(result["observations"]["body"]) == 3
+    assert result["n_evals"] == 4  # prime + three loop-body acquisitions
+
+
+def test_for_loop_requires_explicit_body_and_exit_edges():
+    graph = {"nodes": [{"id": "loop", "type": "for_loop", "data": {"iterations": 2}}],
+             "edges": []}
+    with pytest.raises(ValueError, match="needs one 'body' edge"):
+        _run(graph)

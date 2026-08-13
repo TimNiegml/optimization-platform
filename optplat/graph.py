@@ -29,6 +29,9 @@ Control flow:
   * loop    — an edge may point back to an earlier node; the loop runs while its
               `condition` holds. Bounded by per-node `max_visits` and a global
               `max_steps` — no infinite loops (no runaway motors).
+  * for     — a `for_loop` node has `data.iterations` and exactly one outgoing
+              `role: body` edge plus one `role: exit` edge. The body tail points
+              back to the loop node; the global `max_steps` remains a hard stop.
 """
 from __future__ import annotations
 
@@ -77,6 +80,15 @@ class GraphRunner:
                 return e["target"]
         return None                                   # no outgoing edge -> implicit end
 
+    def _next_for(self, node_id: str, visit: int, iterations: int) -> Optional[str]:
+        """Choose the explicit body/exit branch of a bounded for-loop node."""
+        out = self._out.get(node_id, [])
+        role = "body" if visit <= iterations else "exit"
+        edge = next((e for e in out if e.get("role") == role), None)
+        if edge is None:
+            raise ValueError(f"for_loop {node_id!r} needs one {role!r} edge")
+        return edge["target"]
+
     def run(self) -> dict:
         eng = self.engine
         eng.prime()
@@ -95,6 +107,12 @@ class GraphRunner:
                     eng.events.append("■ end")
                     break
                 visits[cur] = visits.get(cur, 0) + 1
+                if ntype == "for_loop":
+                    iterations = int(node.get("data", {}).get("iterations", 1))
+                    if iterations < 0 or iterations > 1000:
+                        raise ValueError("for_loop iterations must be between 0 and 1000")
+                    cur = self._next_for(cur, visits[cur], iterations)
+                    continue
                 mv = node.get("max_visits", self.default_max_visits)
                 if visits[cur] > mv:
                     eng.events.append(f"   node '{cur}' hit max_visits={mv} → stop")
@@ -126,12 +144,15 @@ def to_mermaid(graph: dict) -> str:
         elif t == "observer":
             d = n.get("data", {})
             lines.append(f'  {nid}{{"👁 {d.get("label", nid)}<br/>{d.get("kind", "scalar")}"}}')
+        elif t == "for_loop":
+            d = n.get("data", {})
+            lines.append(f'  {nid}{{"for × {d.get("iterations", 1)}"}}')
         else:
             d = n.get("data", {})
             label = f'{nid}: {d.get("algorithm","?")}<br/>{",".join(d.get("variables",[]))} → {d.get("objective","")}'
             lines.append(f'  {nid}["{label}"]')
     for e in graph["edges"]:
-        cond = e.get("condition")
+        cond = e.get("condition") or e.get("role")
         if cond:
             lines.append(f'  {e["source"]} -->|{cond}| {e["target"]}')
         else:
