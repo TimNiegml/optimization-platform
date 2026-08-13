@@ -234,3 +234,33 @@ def test_matrix_objective_is_accepted_but_not_directly_optimized():
         "edges": []}
     with pytest.raises(ValueError, match="cannot be optimized directly"):
         GraphRunner(vocs, ev, graph).run()
+
+
+def test_matrix_policy_maps_model_vector_to_selected_axes():
+    vocs = demo_vocs()
+    vocs.objectives["image"] = vocs.objectives["y1"].model_copy(
+        update={"value_type": ObjectiveValueType.MATRIX})
+    ev = Evaluator(lambda x: {**optical_bench(x), "image": [[1.0, 2.0], [3.0, 4.0]]})
+    graph = {"nodes": [{"id": "policy", "type": "algorithm", "data": {
+        "algorithm": "matrix_policy", "variables": ["x1", "x2"], "objective": "y1",
+        "input_channel": "image", "feature_mode": "row_mean",
+        "weights": [[1.0, 0.0], [0.0, -0.5]], "bias": [0.5, 0.5],
+        "output_map": {"x1": 1, "x2": 0}, "action_mode": "absolute"}}], "edges": []}
+    result = GraphRunner(vocs, ev, graph).run()
+    # row means=[1.5,3.5], model output=[2.0,-1.25], explicit cross mapping
+    assert result["state"]["x1"] == pytest.approx(-1.25)
+    assert result["state"]["x2"] == pytest.approx(2.0)
+    assert "x1=output[1]" in result["fits"]["matrix_policy"]
+
+
+def test_matrix_policy_delta_mode_is_safety_clipped():
+    vocs = demo_vocs()
+    vocs.objectives["image"] = vocs.objectives["y1"].model_copy(
+        update={"value_type": ObjectiveValueType.MATRIX})
+    ev = Evaluator(lambda x: {**optical_bench(x), "image": [[100.0]]})
+    graph = {"nodes": [{"id": "policy", "type": "algorithm", "data": {
+        "algorithm": "matrix_policy", "variables": ["x1"], "objective": "y1",
+        "input_channel": "image", "output_map": {"x1": 0}, "action_mode": "delta"}}],
+        "edges": []}
+    result = GraphRunner(vocs, ev, graph).run()
+    assert result["state"]["x1"] == vocs.variables["x1"].high

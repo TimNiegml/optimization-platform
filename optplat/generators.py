@@ -820,6 +820,104 @@ class DampedSensitivity(Generator):
         return
 
 
+class MatrixPolicy(Generator):
+    """Matrix measurement -> model vector -> explicitly mapped actuator values.
+
+    This is a dependency-free reference for a future CNN/Transformer controller:
+    the matrix is converted to features, an affine model produces an output
+    vector, then ``output_map`` assigns vector indices to named x axes.  Replacing
+    ``_infer`` with a registered deep-learning model does not change the graph or
+    the safety-clipped actuator mapping contract.
+    """
+
+    def __init__(self, vocs, variables, objective, input_channel, output_map=None,
+                 weights=None, bias=None, feature_mode="flatten", action_mode="absolute",
+                 gain=1.0, max_actions=1):
+        super().__init__(vocs, variables, objective)
+        if not input_channel or input_channel not in vocs.objectives:
+            raise ValueError("matrix_policy needs a valid input_channel")
+        if vocs.objectives[input_channel].value_type.value != "matrix":
+            raise ValueError(f"matrix_policy input {input_channel!r} is not declared as matrix")
+        self.input_channel = input_channel
+        self.feature_mode = feature_mode
+        self.action_mode = action_mode
+        self.gain = float(gain)
+        self.max_actions = max(1, int(max_actions))
+        self.weights = weights or []
+        self.bias = list(bias or [])
+        mapping = output_map or {v: i for i, v in enumerate(variables)}
+        self.output_map = {str(v): int(i) for v, i in mapping.items()}
+        unknown = set(self.output_map) - set(variables)
+        if unknown:
+            raise ValueError(f"matrix_policy output_map contains unselected axes: {sorted(unknown)}")
+        self._next = None
+        self._actions = 0
+
+    def channels(self) -> set:
+        return {self.input_channel}
+
+    def set_base(self, point):
+        super().set_base(point)
+        self._next = dict(self._base)
+
+    def ask(self):
+        return dict(self._next or self._base)
+
+    def _features(self, matrix):
+        import numpy as np
+        a = np.asarray(matrix, dtype=float)
+        if a.ndim != 2:
+            raise ValueError(f"matrix_policy expects a 2-D matrix, got shape {a.shape}")
+        if self.feature_mode == "row_mean":
+            return a.mean(axis=1)
+        if self.feature_mode == "column_mean":
+            return a.mean(axis=0)
+        if self.feature_mode != "flatten":
+            raise ValueError(f"unknown matrix feature_mode: {self.feature_mode}")
+        return a.reshape(-1)
+
+    def _infer(self, features):
+        import numpy as np
+        f = np.asarray(features, dtype=float)
+        if self.weights:
+            w = np.asarray(self.weights, dtype=float)
+            if w.ndim != 2 or w.shape[1] != f.size:
+                raise ValueError(f"matrix_policy weights need [n_outputs,{f.size}], got {w.shape}")
+            out = w @ f
+        else:
+            out = f.copy()  # useful identity reference; output_map selects elements
+        if self.bias:
+            b = np.asarray(self.bias, dtype=float)
+            if b.size != out.size:
+                raise ValueError(f"matrix_policy bias needs {out.size} values, got {b.size}")
+            out = out + b
+        return out
+
+    def observe(self, x, y):
+        out = self._infer(self._features(y[self.input_channel]))
+        nxt = dict(x)
+        for axis, index in self.output_map.items():
+            if index < 0 or index >= out.size:
+                raise ValueError(f"matrix_policy output index {index} for {axis} outside vector length {out.size}")
+            value = self.gain * float(out[index])
+            if self.action_mode == "delta":
+                value += float(x[axis])
+            elif self.action_mode != "absolute":
+                raise ValueError(f"unknown matrix action_mode: {self.action_mode}")
+            nxt[axis] = self.vocs.variables[axis].clip(value)
+        self._actions += 1
+        self.best_x = dict(nxt)
+        self.best_score = 0.0
+        self._next = nxt
+        self.fit_info = (f"矩阵策略：{self.input_channel} → 向量({out.size}) → "
+                         + ", ".join(f"{v}=output[{i}]" for v, i in self.output_map.items()))
+        if self._actions >= self.max_actions:
+            self.done = True
+
+    def tell(self, x, score):
+        return
+
+
 class SensitivityScan(Generator):
     """灵敏度采集（单轴扫描 → 曲线 + 灵敏度矩阵）。
 

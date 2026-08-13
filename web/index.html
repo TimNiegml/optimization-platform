@@ -500,6 +500,10 @@ function addNode(algo, at) {
     keep: '', stopTarget: '',
     x: at ? at.x : 60 + (nodes.length%4)*30, y: at ? at.y : 60 + nodes.length*70,
   };
+  if(algo==='matrix_policy'){
+    n.params.input_channel=objKeys.find(o=>(channels[o]||{}).valueType==='matrix')||'';
+    n.params.output_map=Object.fromEntries(n.variables.map((v,i)=>[v,i]));
+  }
   nodes.push(n); render(); select(n.id);
 }
 
@@ -661,6 +665,17 @@ function inspectNode(n){
   Object.entries(s.params||{}).forEach(([k,meta]) => {
     if(isSolve && (k==='targets'||k==='sensitivity')) return;      // handled by the solve editor
     if(meta.type==='axis_steps'){ h += renderAxisSteps(n,k,meta); return; }  // per-axis table
+    if(meta.type==='output_map'){ h += renderOutputMap(n,k,meta); return; }
+    if(k==='input_channel'){
+      const matrices=objKeys.filter(o=>(channels[o]||{}).valueType==='matrix');
+      h+=`<label>${meta.label||k}</label><select onchange="setParam('${n.id}','${k}',this.value)">${matrices.map(o=>`<option ${o===n.params[k]?'selected':''}>${o}</option>`).join('')}</select>`;
+      if(!matrices.length) h+='<p class="hint">先在「通道规范」把一个 y 声明为矩阵。</p>';
+      return;
+    }
+    if(['matrix','list','dict'].includes(meta.type)){
+      h+=`<label>${meta.label||k}${meta.hint?` <span class="info" data-tip="${meta.hint}">i</span>`:''}</label><textarea rows="3" onchange="setJsonParam('${n.id}','${k}',this.value)">${escapeHtml(JSON.stringify(n.params[k]??meta.default??[]))}</textarea>`;
+      return;
+    }
     const lab = meta.label ? `${meta.label} <span style="color:var(--muted)">(${k})</span>` : k;
     const tip = meta.hint ? ` <span class="info" data-tip="${meta.hint}">i</span>` : '';
     h += `<label>${lab}${tip}</label><input value="${n.params[k]??meta.default??''}" onchange="setParam('${n.id}','${k}',this.value)">`;
@@ -741,6 +756,14 @@ function renderAxisSteps(n,k,meta){
 }
 window.setAxisStep=(id,k,x,v)=>{ const n=nodes.find(z=>z.id===id); ensureDictParam(n,k);
   if(v===''||v==null) delete n.params[k][x]; else n.params[k][x]=+v; };
+function renderOutputMap(n,k,meta){
+  ensureDictParam(n,k); let h=`<label>${meta.label||k} <span class="info" data-tip="模型输出是向量；这里指定 output[几] 驱动每个已选 x。">i</span></label>`;
+  h+='<div style="overflow-x:auto"><table class="sens"><tr><th>自变量</th><th>模型输出下标</th></tr>'+
+    n.variables.map((v,i)=>`<tr><th>${v}</th><td><input type="number" min="0" step="1" value="${n.params[k][v]!=null?n.params[k][v]:i}" onchange="setOutputMap('${n.id}','${k}','${v}',this.value)"></td></tr>`).join('')+'</table></div>';
+  return h;
+}
+window.setOutputMap=(id,k,v,index)=>{const n=nodes.find(z=>z.id===id);ensureDictParam(n,k);n.params[k][v]=Math.max(0,parseInt(index)||0);};
+window.setJsonParam=(id,k,value)=>{try{nodes.find(x=>x.id===id).params[k]=JSON.parse(value);}catch(e){alert('JSON 格式错误：'+e.message);}};
 window.setF=(id,f,v)=>{nodes.find(x=>x.id===id)[f]=v; render();};
 window.setMode=(id,v)=>{const n=nodes.find(x=>x.id===id); n.objectiveMode=v; render(); inspectNode(n);};
 function compWeights(n){ const w=n.objectiveWeights; if(!w) return null; const nz=Object.entries(w).filter(([k,v])=>+v); return nz.length?Object.fromEntries(nz.map(([k,v])=>[k,+v])):null; }
