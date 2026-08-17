@@ -247,12 +247,22 @@ def surface(req: SurfaceRequest):
 @app.get("/vocs")
 def vocs():
     v = DEVICE.vocs() if DEVICE is not None else demo_vocs()
+    info = DEVICE.info() if DEVICE is not None else None
+    axis_info = {a["name"]: a for a in (info or {}).get("axes", [])}
     return {
-        "variables": {n: {"low": var.low, "high": var.high} for n, var in v.variables.items()},
+        "variables": {n: {"low": var.low, "high": var.high,
+                           "resolution": var.resolution,
+                           "current": axis_info.get(n, {}).get("pos"),
+                           "device": axis_info.get(n, {}).get("device"),
+                           "param": axis_info.get(n, {}).get("param", n)}
+                      for n, var in v.variables.items()},
         "objectives": {n: {"mode": o.mode.value, "cost": o.cost,
+                           "target": o.target,
                            "device": o.device, "param": o.param, "group": o.group,
                            "expression": o.expression, "value_type": o.value_type.value}
                        for n, o in v.objectives.items()},
+        "device": {"source": info["source"], "n_axes": info["n_axes"],
+                   "n_meters": info["n_meters"]} if info else None,
     }
 
 

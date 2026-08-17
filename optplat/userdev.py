@@ -57,11 +57,14 @@ class Axis:
     """A movable input. Override move()/get() to talk to a real motor stage."""
 
     def __init__(self, name: str, low: float, high: float,
-                 pos: Optional[float] = None, resolution: Optional[float] = None):
+                 pos: Optional[float] = None, resolution: Optional[float] = None,
+                 device: Optional[str] = None, param: Optional[str] = None):
         self.name = name
         self.low = low
         self.high = high
         self.resolution = resolution
+        self.device = device
+        self.param = param or name
         self._pos = pos if pos is not None else 0.5 * (low + high)
 
     def move(self, value: float) -> None:
@@ -221,10 +224,10 @@ class DeviceEvaluator:
         import numpy as np
         y = {}
         for k, vals in samples.items():
-            if getattr(self._meters[k], "value_type", "scalar") == "matrix":
+            if getattr(self._meters[k], "value_type", "scalar") != "scalar":
                 shapes = [np.asarray(v).shape for v in vals]
                 if len(set(shapes)) != 1:
-                    raise ValueError(f"matrix channel {k!r} changed shape while averaging: {shapes}")
+                    raise ValueError(f"array channel {k!r} changed shape while averaging: {shapes}")
                 y[k] = np.mean(np.asarray(vals, dtype=float), axis=0).tolist()
             else:
                 y[k] = sum(float(v) for v in vals) / len(vals)
@@ -282,11 +285,17 @@ class DeviceSpec:
         return {"source": self.source,
                 "n_axes": len(self.axes), "n_meters": len(self.meters),
                 "axes": [{"name": a.name, "low": float(a.low), "high": float(a.high),
-                          "pos": float(a.get())} for a in self.axes],
+                          "pos": float(a.get()), "resolution": getattr(a, "resolution", None),
+                          "device": getattr(a, "device", None),
+                          "param": getattr(a, "param", a.name)} for a in self.axes],
                 "meters": [{"name": m.name, "mode": getattr(m, "mode", "maximize"),
                             "target": getattr(m, "target", None),
                             "cost": float(getattr(m, "cost", 0.0) or 0.0),
-                            "group": getattr(m, "group", None)} for m in self.meters]}
+                            "group": getattr(m, "group", None),
+                            "device": getattr(m, "device", None),
+                            "param": getattr(m, "param", None),
+                            "value_type": getattr(m, "value_type", "scalar")}
+                           for m in self.meters]}
 
 
 # ---- loading ----

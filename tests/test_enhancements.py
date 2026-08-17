@@ -48,6 +48,19 @@ def test_external_device_accepts_and_averages_matrix_meter():
     assert result["camera"] == [[2.0, 3.0], [4.0, 5.0]]
 
 
+def test_external_device_accepts_and_averages_vector_meter():
+    from optplat.userdev import Axis, DeviceSpec, Meter
+
+    readings = iter(([1, 2, 3], [3, 4, 5]))
+    axis = Axis("x1", 0, 1, pos=0.25, device="stage", param="A")
+    spec = DeviceSpec([axis], [Meter("spectrum", lambda: next(readings), value_type="vector")])
+    assert spec.vocs().objectives["spectrum"].value_type.value == "vector"
+    assert spec.evaluator(averages=2).evaluate({"x1": 0.5})["spectrum"] == [2.0, 3.0, 4.0]
+    assert spec.info()["axes"][0] == {
+        "name": "x1", "low": 0.0, "high": 1.0, "pos": 0.5,
+        "resolution": None, "device": "stage", "param": "A"}
+
+
 # ---------------- DampedSensitivity ----------------
 SENS = {"y1": {"x1": 0.8, "x2": 0.3}, "y2": {"x1": 0.2, "x2": -0.6}}
 

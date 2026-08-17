@@ -460,7 +460,9 @@ async function boot() {
     try { benches = (await (await fetch(API + '/benches')).json()).benches; } catch(e){ benches=[]; }
     objKeys = Object.keys(vocs.objectives); varKeys = Object.keys(vocs.variables);
     c1dVar=varKeys[0]; c1dObj=objKeys[0]; c2dX=varKeys[0]; c2dY=varKeys[1]||varKeys[0]; c2dObj=objKeys[0];
-    document.getElementById('conn').textContent = '已连接 · ' + catalog.length + ' 种算法';
+    document.getElementById('conn').textContent = vocs.device
+      ? `已加载设备 · ${vocs.device.n_axes} 个自变量 / ${vocs.device.n_meters} 个因变量`
+      : '已连接仿真 · ' + catalog.length + ' 种算法';
     // 按『找光 → 粗调 → 精调 → 求解/表征』分组陈列，跟真实调试顺序一致
     const pal = document.getElementById('palList'); pal.innerHTML = '';
     const GTIP = {'① 找光':'从当前位置往外找到第一束光/有效信号，通常配 stop.target 扫到阈值即停',
@@ -490,8 +492,8 @@ async function boot() {
     benches.forEach(b => benchSmooth[b.name] = !!b.smooth);
     renderLive();
     varKeys.forEach((v,i) => { const V=vocs.variables[v];
-      safetyLimits[v]=[V.low, V.high]; actuators[v]={device:'PI六足', param:'axis'+(i+1)};
-      startPoint[v]=+(0.5*(V.low+V.high)).toFixed(4); tuneStartDomain[v]=[V.low, V.high]; });
+      safetyLimits[v]=[V.low, V.high]; actuators[v]={device:V.device||'', param:V.param||v};
+      startPoint[v]=V.current!=null?+V.current:+(0.5*(V.low+V.high)).toFixed(4); tuneStartDomain[v]=[V.low, V.high]; });
     objKeys.forEach(o => { const m=vocs.objectives[o]||{}; channels[o]={device:m.device||'功率计', param:m.param||o, cost:m.cost!=null?m.cost:0, group:m.group||'', valueType:m.value_type||'scalar'}; });
     derivedRows = objKeys.filter(o=>vocs.objectives[o].expression).map(o=>({name:o, expression:vocs.objectives[o].expression,
       mode:vocs.objectives[o].mode||'maximize', target:vocs.objectives[o].target}));
