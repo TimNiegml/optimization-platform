@@ -86,7 +86,9 @@ class Meter:
                  target: Optional[float] = None, cost: float = 0.0,
                  group: Optional[str] = None, device: Optional[str] = None,
                  param: Optional[str] = None, source: Optional["Source"] = None,
-                 key: Optional[str] = None, value_type: str = "scalar"):
+                 key: Optional[str] = None, value_type: str = "scalar",
+                 display_name: Optional[str] = None, unit: Optional[str] = None,
+                 shape: Optional[tuple | list] = None, dtype: Optional[str] = None):
         self.name = name
         self._read_fn = read_fn
         self.mode = mode
@@ -98,6 +100,10 @@ class Meter:
         self.source = source            # shared acquisition this channel comes from
         self.key = key or name          # this channel's key inside the source reading
         self.value_type = value_type
+        self.display_name = display_name or name
+        self.unit = unit
+        self.shape = list(shape) if shape is not None else None
+        self.dtype = dtype
 
     def get(self):
         if self.source is not None:
@@ -155,14 +161,17 @@ class Source:
     def meter(self, name: str, key: Optional[str] = None, mode: str = "maximize",
               target: Optional[float] = None, cost: Optional[float] = None,
               group: Optional[str] = None, device: Optional[str] = None,
-              param: Optional[str] = None, value_type: str = "scalar") -> Meter:
+              param: Optional[str] = None, value_type: str = "scalar",
+              display_name: Optional[str] = None, unit: Optional[str] = None,
+              shape: Optional[tuple | list] = None, dtype: Optional[str] = None) -> Meter:
         """Expose one channel of this acquisition as an objective y."""
         return Meter(name, mode=mode, target=target,
                      cost=self.cost if cost is None else cost,
                      group=group or self.group,
                      device=device or self.device,
                      param=param or key or name,
-                     source=self, key=key or name, value_type=value_type)
+                     source=self, key=key or name, value_type=value_type,
+                     display_name=display_name, unit=unit, shape=shape, dtype=dtype)
 
 
 # ---- evaluator backed by the user's axes + meters ----
@@ -294,7 +303,11 @@ class DeviceSpec:
                             "group": getattr(m, "group", None),
                             "device": getattr(m, "device", None),
                             "param": getattr(m, "param", None),
-                            "value_type": getattr(m, "value_type", "scalar")}
+                            "value_type": getattr(m, "value_type", "scalar"),
+                            "display_name": getattr(m, "display_name", m.name),
+                            "unit": getattr(m, "unit", None),
+                            "shape": getattr(m, "shape", None),
+                            "dtype": getattr(m, "dtype", None)}
                            for m in self.meters]}
 
 

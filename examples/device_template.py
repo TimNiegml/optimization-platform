@@ -80,9 +80,12 @@ METERS = [
 #
 # camera_source = Source("camera", _read_camera_once, cost=1.0, device="相机/光谱仪")
 # METERS = [
-#     camera_source.meter("y1", "image", value_type="matrix", mode="scan"),
-#     camera_source.meter("y2", "spectrum", value_type="vector", mode="scan"),
-#     camera_source.meter("y3", "power", value_type="scalar", mode="maximize"),
+#     camera_source.meter("y1", "image", value_type="matrix", mode="scan",
+#                         display_name="MTF矩阵", unit="dB", shape=(32, 101), dtype="float64"),
+#     camera_source.meter("y2", "spectrum", value_type="vector", mode="scan",
+#                         display_name="MTF曲线", unit="dB", shape=(101,), dtype="float64"),
+#     camera_source.meter("y3", "power", value_type="scalar", mode="maximize",
+#                         display_name="耦合功率", unit="dBm", dtype="float64"),
 # ]
 
 

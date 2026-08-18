@@ -53,12 +53,16 @@ def test_external_device_accepts_and_averages_vector_meter():
 
     readings = iter(([1, 2, 3], [3, 4, 5]))
     axis = Axis("x1", 0, 1, pos=0.25, device="stage", param="A")
-    spec = DeviceSpec([axis], [Meter("spectrum", lambda: next(readings), value_type="vector")])
+    spec = DeviceSpec([axis], [Meter("spectrum", lambda: next(readings), value_type="vector",
+                                           display_name="光谱", unit="dB", shape=(3,), dtype="float64")])
     assert spec.vocs().objectives["spectrum"].value_type.value == "vector"
     assert spec.evaluator(averages=2).evaluate({"x1": 0.5})["spectrum"] == [2.0, 3.0, 4.0]
     assert spec.info()["axes"][0] == {
         "name": "x1", "low": 0.0, "high": 1.0, "pos": 0.5,
         "resolution": None, "device": "stage", "param": "A"}
+    meter = spec.info()["meters"][0]
+    assert (meter["display_name"], meter["unit"], meter["shape"], meter["dtype"]) == (
+        "光谱", "dB", [3], "float64")
 
 
 # ---------------- DampedSensitivity ----------------

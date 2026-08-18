@@ -56,10 +56,18 @@ class GraphRunner:
             for spec in transforms:
                 output = spec.get("output")
                 if output and output not in known:
+                    declared_type = spec.get("output_type")
                     scalar = spec.get("operation") in SCALAR_OPERATIONS
+                    inputs = spec.get("inputs") or [{"channel": spec.get("input")}]
+                    source_types = [vocs.objectives[i["channel"]].value_type
+                                    for i in inputs if i.get("channel") in vocs.objectives]
+                    array_type = (ObjectiveValueType(declared_type) if declared_type else
+                                  (ObjectiveValueType.MATRIX
+                                  if ObjectiveValueType.MATRIX in source_types
+                                  else ObjectiveValueType.VECTOR))
                     vocs.objectives[output] = Objective(
                         mode=ObjectiveMode.SCAN,
-                        value_type=ObjectiveValueType.SCALAR if scalar else ObjectiveValueType.MATRIX)
+                        value_type=ObjectiveValueType.SCALAR if scalar else array_type)
                     known.add(output)
             evaluator = TransformEvaluator(evaluator, transforms, set(vocs.objectives) - set(s.get("output") for s in transforms))
         self.engine = StageEngine(vocs, evaluator, eval_budget, start_point)

@@ -45,12 +45,19 @@
   #canvasWrap { position:relative; overflow:hidden; background:
      radial-gradient(circle, var(--grid) 1px, transparent 1px) 0 0/22px 22px, var(--bg); }
   svg#edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
-  .node { position:absolute; width:160px; background:var(--panel); border:1px solid var(--line); border-top-width:3px; border-radius:8px; font-size:var(--fs); user-select:none; box-shadow:var(--shadow); }
+  .node { position:absolute; width:200px; background:var(--panel); border:1px solid var(--line); border-top-width:3px; border-radius:8px; font-size:var(--fs); user-select:none; box-shadow:var(--shadow); }
   .node.sel { box-shadow:0 0 0 2px var(--accent), var(--shadow); }
   .node .hd { padding:6px 8px; border-bottom:1px solid var(--line); cursor:move; font-weight:600; display:flex; justify-content:space-between; align-items:center; gap:5px; }
   .node .hd .dot { width:9px; height:9px; border-radius:50%; flex:none; }
   .node .hd .ttl { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .node .bd { padding:6px 8px; color:var(--muted); font-size:.86em; line-height:1.4; }
+  .node .bd { overflow:hidden; text-overflow:ellipsis; }
+  .data-table { width:100%; border-collapse:collapse; font-size:11px; }
+  .data-table th,.data-table td { border-bottom:1px solid var(--line); padding:7px 6px; text-align:left; vertical-align:top; }
+  .data-table th { color:var(--muted); position:sticky; top:0; background:var(--panel); }
+  .name-short { font-weight:600; color:var(--text); max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .name-raw { color:var(--muted); font-family:monospace; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sticky-actions { position:sticky; bottom:-1px; display:flex; justify-content:flex-end; gap:8px; padding:10px; margin:12px -4px -4px; background:var(--panel); border-top:1px solid var(--line); }
   .node .bd .badge { display:inline-block; background:var(--panel2); color:var(--warn); border:1px solid var(--line); border-radius:4px; padding:0 4px; font-size:.9em; margin-top:3px; }
   .node .bd .fit { margin-top:5px; padding:3px 5px; background:var(--panel2); border:1px solid var(--line); border-radius:5px; color:var(--ok); font-size:.82em; line-height:1.35; max-height:52px; overflow:hidden; }
   .node .x { color:var(--muted); cursor:pointer; font-weight:400; }
@@ -170,6 +177,7 @@
     <h1>光器件优化平台 · 画布</h1>
     <span class="hint" id="conn">连接后端中…</span>
     <span class="sp"></span>
+    <button class="ghost sm" onclick="openDataCenter()" data-tip="查看设备加载的自变量、测量通道、数据格式和当前值，并构建向量特征。">🗂 数据中心</button>
     <button class="ghost sm" onclick="openUntil()" data-tip="用表格方式设置『全局达成条件』（各目标 达到/逼近 某值，与/或组合），不用手写表达式。">🎯 目标条件</button>
     <button class="ghost sm" onclick="openTune()" data-tip="自动调优：按当前场景搜索多种算法方案，按质量/时长/稳定性打分排名，一键采用最优方案。">🤖 自动调优</button>
     <button class="ghost sm" onclick="openSens()" data-tip="灵敏度采集：给原点/步距/点数，逐轴扫描测出每对 x→y 的曲线、线性范围与 ∂y/∂x 灵敏度矩阵；矩阵可一键填进阻尼灵敏度求解节点。">📐 灵敏度采集</button>
@@ -342,6 +350,14 @@
   <p class="hint">完整部署步骤、伪代码和排错表见仓库 <b>AGENT_CHAT_TUTORIAL.md</b>。如果提供 Hermes 的 Agent API 与鉴权格式，可以继续实现具体 gateway adapter。</p>
 </div>
 
+<div id="dataCenterModal" class="modal" style="width:min(920px,94vw)">
+  <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
+  <h2>设备与数据中心</h2>
+  <p class="hint">设备文件定义原始通道；这里负责查看格式、试读数据、设置优化起点和构建特征。设置优化起点不会移动硬件。</p>
+  <div id="dataCenterBody"></div>
+  <div class="sticky-actions"><button class="ghost" onclick="closeModals()">取消</button><button onclick="applyDataCenter()">应用配置</button></div>
+</div>
+
 <div id="untilModal" class="modal">
   <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
   <h2>目标达成条件（全局早停 until）</h2>
@@ -449,6 +465,7 @@ let tuneRandomStart = true, tuneStartDomain = {};             // 自动调优随
 let sensVars=[], sensObjs=[], sensOrigins=[{}], lastSens=null;  // 灵敏度采集：选中的 x/y、原点列表、上次结果
 let derivedRows=[];                                             // [{name, expression, mode, target}]
 let lastObservations={};                                        // observer id -> visit snapshots
+let probeData=null;
 
 const NODE_COLORS = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#ec4899','#84cc16'];
 const MODE_LABEL = {'':'默认','maximize':'最大化','minimize':'最小化','target':'逼近目标值','scan':'扫描'};
@@ -494,7 +511,7 @@ async function boot() {
     varKeys.forEach((v,i) => { const V=vocs.variables[v];
       safetyLimits[v]=[V.low, V.high]; actuators[v]={device:V.device||'', param:V.param||v};
       startPoint[v]=V.current!=null?+V.current:+(0.5*(V.low+V.high)).toFixed(4); tuneStartDomain[v]=[V.low, V.high]; });
-    objKeys.forEach(o => { const m=vocs.objectives[o]||{}; channels[o]={device:m.device||'功率计', param:m.param||o, cost:m.cost!=null?m.cost:0, group:m.group||'', valueType:m.value_type||'scalar'}; });
+    objKeys.forEach(o => { const m=vocs.objectives[o]||{}; channels[o]={device:m.device||'功率计', param:m.param||o, cost:m.cost!=null?m.cost:0, group:m.group||'', valueType:m.value_type||'scalar',displayName:m.display_name||o,unit:m.unit||'',shape:m.shape||null,dtype:m.dtype||''}; });
     derivedRows = objKeys.filter(o=>vocs.objectives[o].expression).map(o=>({name:o, expression:vocs.objectives[o].expression,
       mode:vocs.objectives[o].mode||'maximize', target:vocs.objectives[o].target}));
   } catch (e) { document.getElementById('conn').textContent = '后端未连接'; }
@@ -506,7 +523,7 @@ function labelOf(name){ return spec(name).label || name; }
 function nodeLabel(n){ return !n?'?':(n.type==='observer'?n.label:(n.type==='data_transform'?`${n.inputChannel} → ${n.outputChannel}`:(n.type==='for_loop'?`For ×${n.iterations}`:(n.type==='start'?'开始':n.type==='end'?'结束':labelOf(n.algorithm))))); }
 function nextColor(){ return NODE_COLORS[nodes.length % NODE_COLORS.length]; }
 const SCALAR_TRANSFORMS=new Set(['mean','max','min','std','element']);
-function transformChannels(){ return nodes.filter(n=>n.type==='data_transform'&&n.outputChannel).map(n=>({name:n.outputChannel,valueType:SCALAR_TRANSFORMS.has(n.operation)?'scalar':'matrix'})); }
+function transformChannels(){ return nodes.filter(n=>n.type==='data_transform'&&n.outputChannel).map(n=>({name:n.outputChannel,valueType:n.outputType||(SCALAR_TRANSFORMS.has(n.operation)?'scalar':'matrix')})); }
 function availableChannels(type){ const all=objKeys.map(name=>({name,valueType:(channels[name]||{}).valueType||'scalar'})).concat(transformChannels()); return type?all.filter(c=>c.valueType===type):all; }
 
 function addNode(algo, at) {
@@ -562,7 +579,8 @@ function render() {
     if(n.type==='start'||n.type==='end'){
       el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">${n.type==='start'?'▶ 开始':'■ 结束'}</span><span class="x">✕</span></div><div class="bd">流程${n.type==='start'?'入口':'出口'}</div><div class="port"></div>`;
     } else if(n.type==='data_transform'){
-      el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">⇄ 数据变换</span><span class="x">✕</span></div><div class="bd">${n.inputChannel||'?'} → ${n.operation} → ${n.outputChannel||'?'}</div><div class="port"></div>`;
+      const ins=(n.inputs||[{channel:n.inputChannel}]).map(i=>i.channel).join(', ');
+      el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl" title="${escapeHtml(n.label||n.outputChannel)}">⇄ ${escapeHtml(n.label||'数据变换')}</span><span class="x">✕</span></div><div class="bd" title="${escapeHtml(ins+' → '+n.operation+' → '+n.outputChannel)}">${escapeHtml(ins)} → ${n.operation} → ${escapeHtml(n.outputChannel||'?')}</div><div class="port"></div>`;
     } else if(n.type==='for_loop'){
       el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">🔁 For 循环</span><span class="x">✕</span></div><div class="bd">重复 ${n.iterations} 次</div><div class="port"></div>`;
     } else if(n.type==='observer'){
@@ -783,7 +801,7 @@ window.setObserver=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n[k]=v;if(k==='ma
 window.toggleObserverChannel=(id,o,on)=>{const n=nodes.find(x=>x.id===id),s=new Set(n.channels||[]);on?s.add(o):s.delete(o);n.channels=[...s];render();inspectObserver(n);};
 
 function inspectTransform(n){
-  const ops={identity:'原样转换',transpose:'转置',flatten:'展平',row_mean:'每行均值',column_mean:'每列均值',element:'提取单个元素',mean:'整体均值',max:'最大值',min:'最小值',std:'标准差',normalize_minmax:'Min-Max 归一化',select_row:'选择行',select_column:'选择列',roi:'裁剪 ROI'};
+  const ops={identity:'原样转换',transpose:'转置',flatten:'展平',row_mean:'每行均值',column_mean:'每列均值',element:'提取单个元素',mean:'整体均值',max:'最大值',min:'最小值',std:'标准差',normalize_minmax:'Min-Max 归一化',select_row:'选择行',select_column:'选择列',roi:'裁剪 ROI',add:'双输入相加',subtract:'双输入相减',multiply:'双输入相乘',divide:'双输入相除'};
   const inputs=availableChannels().filter(c=>c.name!==n.outputChannel);
   let h=`<label>输入通道</label><select onchange="setTransform('${n.id}','inputChannel',this.value)">${inputs.map(c=>`<option value="${c.name}" ${c.name===n.inputChannel?'selected':''}>${c.name}（${c.valueType}）</option>`).join('')}</select>
     <label>输出通道名</label><input value="${escapeHtml(n.outputChannel)}" onchange="setTransform('${n.id}','outputChannel',this.value.trim())">
@@ -975,7 +993,7 @@ function toGraph(){
   const used={};
   const gnodes = nodes.map(n => {
     if(n.type==='start'||n.type==='end') return {id:n.id,type:n.type,position:{x:n.x,y:n.y}};
-    if(n.type==='data_transform') return {id:n.id,type:'data_transform',data:{label:n.label,input:n.inputChannel,output:n.outputChannel,operation:n.operation,params:n.params||{}},position:{x:n.x,y:n.y}};
+    if(n.type==='data_transform') return {id:n.id,type:'data_transform',data:{label:n.label,input:n.inputChannel,inputs:n.inputs||undefined,output:n.outputChannel,output_type:n.outputType||undefined,operation:n.operation,params:n.params||{}},position:{x:n.x,y:n.y}};
     if(n.type==='for_loop') return {id:n.id,type:'for_loop',data:{iterations:Number(n.iterations)},position:{x:n.x,y:n.y}};
     if(n.type==='observer') return {id:n.id,type:'observer',data:{label:n.label,kind:n.observerKind,
       channels:n.observerKind==='scalar'?(n.channels||[]):[n.matrixChannel]},position:{x:n.x,y:n.y}};
@@ -1451,6 +1469,32 @@ function toggleTheme(){ theme = theme==='light'?'dark':'light'; document.documen
 function showModal(id){ document.getElementById('modalBack').style.display='block'; document.getElementById(id).style.display='block'; }
 function openHelp(){ showModal('helpModal'); }
 function openAgentGuide(){ showModal('agentGuideModal'); }
+function channelMeta(name){ const c=channels[name]||{}, p=probeData&&probeData.channels&&probeData.channels[name]; return {...c,shape:(p&&p.shape)||c.shape,dtype:(p&&p.dtype)||c.dtype||'—',probe:p}; }
+function fmtShape(s){ return s==null?'未知':('['+s.join(' × ')+']'); }
+function renderDataCenter(){
+  const box=document.getElementById('dataCenterBody'); if(!box)return;
+  let h=`<h3>自变量与优化起点</h3><table class="data-table"><tr><th>自变量</th><th>范围</th><th>当前硬件位置</th><th>本次优化起点</th></tr>`;
+  varKeys.forEach(v=>{const V=vocs.variables[v];h+=`<tr><td><b>${escapeHtml(v)}</b><div class="hint">${escapeHtml(V.device||'未标设备')} · ${escapeHtml(V.param||v)}</div></td><td>${V.low} ～ ${V.high}</td><td>${V.current==null?'未知':V.current}</td><td><input type="number" step="any" value="${startPoint[v]}" onchange="startPoint['${v}']=+this.value"></td></tr>`;});
+  h+=`</table><p class="hint">当前硬件位置是只读值；修改“本次优化起点”只影响下一次运行，不会移动设备。</p>`;
+  h+=`<h3>测量通道 <button class="ghost sm" id="probeBtn" onclick="probeChannels()">试读一次</button></h3><table class="data-table"><tr><th>名称</th><th>类型与格式</th><th>来源</th><th>预览摘要</th></tr>`;
+  objKeys.forEach(o=>{const c=channelMeta(o),p=c.probe;h+=`<tr><td title="${escapeHtml(o)}"><div class="name-short">${escapeHtml(c.displayName||o)}</div><div class="name-raw">${escapeHtml(o)}</div></td><td><b>${c.valueType}</b> · ${fmtShape(c.shape)}<div class="hint">${escapeHtml(c.dtype||'dtype 未知')} ${c.unit?'· '+escapeHtml(c.unit):''}</div></td><td>${escapeHtml(c.device||'—')}<div class="hint">${escapeHtml(c.param||'—')}</div></td><td>${p?`min ${Number(p.min).toPrecision(4)} · max ${Number(p.max).toPrecision(4)}<div class="hint">mean ${Number(p.mean).toPrecision(4)}</div>`:'点击“试读一次”获取实际 shape 和数值范围'}</td></tr>`;});
+  h+=`</table><h3>快速构建向量差值</h3><div class="trow2"><div><label>输出名称</label><input id="featName" value="vector_diff"></div><div><label>显示名称</label><input id="featDisplay" value="向量差值"></div></div>`;
+  const vecs=availableChannels().filter(c=>c.valueType==='vector').map(c=>c.name); const opts=vecs.map(v=>`<option value="${v}">${escapeHtml((channels[v]||{}).displayName||v)} · ${escapeHtml(v)}</option>`).join('');
+  h+=`<div class="trow2"><div><label>向量 A</label><select id="featA">${opts}</select><div class="lim"><input id="featAStart" type="number" min="0" value="0" placeholder="start"><input id="featAStop" type="number" min="1" value="10" placeholder="stop"></div></div><div><label>向量 B</label><select id="featB">${opts}</select><div class="lim"><input id="featBStart" type="number" min="0" value="0" placeholder="start"><input id="featBStop" type="number" min="1" value="10" placeholder="stop"></div></div></div>`;
+  h+=vecs.length>=2?`<button class="ghost sm" onclick="createVectorDifference()">创建 A[start:stop] − B[start:stop]</button><span id="featStatus" class="hint" style="margin-left:8px"></span>`:`<p class="hint">至少需要两个 vector 通道。请在 device template 中声明 value_type="vector"。</p>`;
+  box.innerHTML=h;
+}
+function openDataCenter(){ renderDataCenter(); showModal('dataCenterModal'); }
+async function probeChannels(){ const b=document.getElementById('probeBtn');b.disabled=true;b.textContent='读取中…';try{const r=await fetch(API+'/device/probe',{method:'POST'}),d=await r.json();if(!r.ok)throw Error(d.detail||r.statusText);probeData=d;renderDataCenter();}catch(e){alert('试读失败：'+e.message);} }
+function sliceSpec(prefix){return {start:+document.getElementById(prefix+'Start').value,stop:+document.getElementById(prefix+'Stop').value,step:1};}
+function createVectorDifference(){
+  const output=document.getElementById('featName').value.trim(),a=document.getElementById('featA').value,b=document.getElementById('featB').value,sa=sliceSpec('featA'),sb=sliceSpec('featB');
+  if(!/^[A-Za-z_]\w*$/.test(output)){alert('输出名称必须是合法标识符');return;} if(availableChannels().some(c=>c.name===output)){alert('输出名称已存在');return;}
+  const na=sa.stop-sa.start,nb=sb.stop-sb.start;if(na<=0||nb<=0||na!==nb){document.getElementById('featStatus').textContent=`Shape 不匹配：[${na}] vs [${nb}]`;return;}
+  nodes.push({id:'n'+(++seq),type:'data_transform',label:document.getElementById('featDisplay').value.trim()||output,inputChannel:a,inputs:[{channel:a,selector:sa},{channel:b,selector:sb}],outputChannel:output,outputType:'vector',operation:'subtract',params:{},color:'#14b8a6',x:80+(nodes.length%4)*30,y:70+nodes.length*70});
+  render();renderDataCenter();document.getElementById('featStatus').textContent=`已创建 ${output}，Shape [${na}]`;
+}
+function applyDataCenter(){useStartPoint=true;renderEvalExtras();closeModals();document.getElementById('conn').textContent='✅ 数据配置已应用；下一次运行使用所示优化起点';}
 function closeModals(){ document.getElementById('modalBack').style.display='none'; document.querySelectorAll('.modal').forEach(m=>m.style.display='none'); }
 
 // ---------- calculated/derived objectives ----------
@@ -1896,7 +1940,7 @@ function adoptGraph(graph){
   nodes=algoNodes.map((gn,i)=>{ const d=gn.data||{}, type=gn.type||(d.algorithm?'algorithm':'');
     const pos=gn.position||{x:40+i*240,y:100};
     if(type==='start'||type==='end') return {id:gn.id||('n'+(i+1)),type,color:'#64748b',x:pos.x,y:pos.y};
-    if(type==='data_transform') return {id:gn.id||('n'+(i+1)),type,label:d.label||'数据变换',inputChannel:d.input||'',outputChannel:d.output||'',operation:d.operation||'identity',params:d.params||{},color:'#14b8a6',x:pos.x,y:pos.y};
+    if(type==='data_transform') return {id:gn.id||('n'+(i+1)),type,label:d.label||'数据变换',inputChannel:d.input||(d.inputs&&d.inputs[0]&&d.inputs[0].channel)||'',inputs:d.inputs||null,outputChannel:d.output||'',outputType:d.output_type||'',operation:d.operation||'identity',params:d.params||{},color:'#14b8a6',x:pos.x,y:pos.y};
     if(type==='for_loop') return {id:gn.id||('n'+(i+1)),type:'for_loop',label:'For 循环',iterations:Number(d.iterations??1),color:'#f97316',x:pos.x,y:pos.y};
     if(type==='observer') return {id:gn.id||('n'+(i+1)),type:'observer',observerKind:d.kind||'scalar',label:d.label||'观测仪',color:d.kind==='matrix_plot'?'#a855f7':d.kind==='matrix'?'#0ea5e9':'#64748b',channels:d.channels||[],matrixChannel:(d.channels||[])[0]||'',featureAxis:d.feature_axis||'row',x:pos.x,y:pos.y};
     const params={};

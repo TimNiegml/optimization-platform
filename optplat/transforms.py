@@ -9,6 +9,17 @@ from .evaluator import json_value
 
 
 SCALAR_OPERATIONS = {"mean", "max", "min", "std", "element"}
+BINARY_OPERATIONS = {"add", "subtract", "multiply", "divide"}
+
+
+def _select(value, selector: dict | None):
+    arr = np.asarray(value, dtype=float)
+    selector = selector or {}
+    if "indices" in selector:
+        arr = arr[tuple(int(i) for i in selector["indices"])]
+    elif any(k in selector for k in ("start", "stop", "step")):
+        arr = arr[slice(selector.get("start"), selector.get("stop"), selector.get("step"))]
+    return arr
 
 
 def transform_value(value, operation: str, params: dict | None = None):
@@ -66,6 +77,34 @@ def transform_value(value, operation: str, params: dict | None = None):
     return json_value(result)
 
 
+def transform_inputs(values: list, operation: str, selectors: list | None = None,
+                     params: dict | None = None):
+    """Apply a unary transform or a shape-safe element-wise binary transform."""
+    selectors = selectors or [{} for _ in values]
+    selected = [_select(v, selectors[i] if i < len(selectors) else {})
+                for i, v in enumerate(values)]
+    if operation not in BINARY_OPERATIONS:
+        return transform_value(selected[0], operation, params)
+    if len(selected) != 2:
+        raise ValueError(f"{operation} requires exactly two inputs")
+    if selected[0].shape != selected[1].shape:
+        raise ValueError(f"{operation} input shapes do not match: "
+                         f"{selected[0].shape} vs {selected[1].shape}")
+    fn = {"add": np.add, "subtract": np.subtract,
+          "multiply": np.multiply, "divide": np.divide}[operation]
+    with np.errstate(divide="raise", invalid="raise"):
+        try:
+            result = fn(selected[0], selected[1])
+        except FloatingPointError as exc:
+            raise ValueError(f"{operation} produced an invalid numeric result") from exc
+    return json_value(result)
+
+
+def _inputs(spec: dict) -> list[dict]:
+    return list(spec.get("inputs") or [{"channel": spec.get("input"),
+                                        "selector": spec.get("selector", {})}])
+
+
 class TransformEvaluator:
     """Evaluator decorator that exposes transformed channels on demand."""
 
@@ -74,43 +113,50 @@ class TransformEvaluator:
         self.transforms: dict[str, dict] = {}
         known = set(known_channels)
         for spec in transforms:
-            output, source = spec.get("output"), spec.get("input")
-            if not output or not source:
-                raise ValueError("data_transform requires non-empty input and output channels")
+            output, inputs = spec.get("output"), _inputs(spec)
+            if not output or not inputs or any(not i.get("channel") for i in inputs):
+                raise ValueError("data_transform requires non-empty input(s) and output channels")
             if output in known:
                 raise ValueError(f"data_transform output already exists: {output!r}")
-            if source not in known:
-                raise ValueError(f"data_transform {output!r} references unknown input: {source!r}")
+            unknown = [i["channel"] for i in inputs if i["channel"] not in known]
+            if unknown:
+                raise ValueError(f"data_transform {output!r} references unknown input: {unknown[0]!r}")
             self.transforms[output] = dict(spec)
             known.add(output)
         self.known = known
         self.latest_values: dict = {}
 
-    def _physical(self, name: str) -> str:
-        while name in self.transforms:
-            name = self.transforms[name]["input"]
-        return name
+    def _physical(self, name: str) -> set[str]:
+        if name not in self.transforms:
+            return {name}
+        return set().union(*(self._physical(i["channel"])
+                             for i in _inputs(self.transforms[name])))
 
     def _calculate(self, name: str, values: dict):
         if name in values:
             return values[name]
         spec = self.transforms[name]
-        source = spec["input"]
-        if source in self.transforms:
-            self._calculate(source, values)
-        values[name] = transform_value(values[source], spec.get("operation", "identity"), spec.get("params"))
+        inputs = _inputs(spec)
+        for item in inputs:
+            if item["channel"] in self.transforms:
+                self._calculate(item["channel"], values)
+        values[name] = transform_inputs(
+            [values[i["channel"]] for i in inputs], spec.get("operation", "identity"),
+            [i.get("selector", {}) for i in inputs], spec.get("params"))
         return values[name]
 
     def enrich_available(self, values: dict) -> dict:
         for name, spec in self.transforms.items():
-            source = spec["input"]
-            if source in values:
-                values[name] = transform_value(values[source], spec.get("operation", "identity"), spec.get("params"))
+            inputs = _inputs(spec)
+            if all(i["channel"] in values for i in inputs):
+                values[name] = transform_inputs(
+                    [values[i["channel"]] for i in inputs], spec.get("operation", "identity"),
+                    [i.get("selector", {}) for i in inputs], spec.get("params"))
         return values
 
     def evaluate(self, x: dict[str, float], stage: str = "", channels=None) -> dict:
         requested = set(self.known if channels is None else channels)
-        physical = {self._physical(k) for k in requested}
+        physical = set().union(*(self._physical(k) for k in requested))
         values = self.evaluator.evaluate(x, stage=stage, channels=physical)
         for name in requested:
             if name in self.transforms:

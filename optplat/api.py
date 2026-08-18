@@ -27,6 +27,7 @@ import threading
 import time
 from typing import Any, Optional
 
+import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -249,6 +250,7 @@ def vocs():
     v = DEVICE.vocs() if DEVICE is not None else demo_vocs()
     info = DEVICE.info() if DEVICE is not None else None
     axis_info = {a["name"]: a for a in (info or {}).get("axes", [])}
+    meter_info = {m["name"]: m for m in (info or {}).get("meters", [])}
     return {
         "variables": {n: {"low": var.low, "high": var.high,
                            "resolution": var.resolution,
@@ -259,7 +261,11 @@ def vocs():
         "objectives": {n: {"mode": o.mode.value, "cost": o.cost,
                            "target": o.target,
                            "device": o.device, "param": o.param, "group": o.group,
-                           "expression": o.expression, "value_type": o.value_type.value}
+                           "expression": o.expression, "value_type": o.value_type.value,
+                           "display_name": meter_info.get(n, {}).get("display_name", n),
+                           "unit": meter_info.get(n, {}).get("unit"),
+                           "shape": meter_info.get(n, {}).get("shape"),
+                           "dtype": meter_info.get(n, {}).get("dtype")}
                        for n, o in v.objectives.items()},
         "device": {"source": info["source"], "n_axes": info["n_axes"],
                    "n_meters": info["n_meters"]} if info else None,
@@ -390,6 +396,22 @@ def device_info():
     started with OPTPLAT_DEVICE, else {device: None}. The canvas uses /vocs to
     auto-build the right number of x/y; this endpoint is for a status badge."""
     return {"device": DEVICE.info() if DEVICE is not None else None}
+
+
+@app.post("/device/probe")
+def probe_device():
+    """Read every configured channel once at the current hardware position."""
+    if DEVICE is None:
+        raise HTTPException(status_code=400, detail="no external device is loaded")
+    values = DEVICE.evaluator(averages=1).evaluate(DEVICE.current_point(), stage="probe")
+    out = {}
+    for name, value in values.items():
+        arr = np.asarray(value)
+        numeric = np.asarray(value, dtype=float)
+        out[name] = {"value": value, "shape": list(arr.shape), "dtype": str(arr.dtype),
+                     "min": float(numeric.min()), "max": float(numeric.max()),
+                     "mean": float(numeric.mean())}
+    return {"point": DEVICE.current_point(), "channels": out}
 
 
 @app.get("/autotune/space")

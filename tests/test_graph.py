@@ -10,7 +10,7 @@ from optplat.demo import TWO_PHASE_GRAPH, demo_vocs, optical_bench
 from optplat.graph import GraphRunner, to_mermaid
 from optplat.hardware import HardwareEvaluator, SimulatedStage
 from optplat.registry import AlgorithmSpec, algorithm_catalog, register_algorithm
-from optplat.transforms import transform_value
+from optplat.transforms import transform_inputs, transform_value
 
 
 def _run(graph, **kw):
@@ -354,3 +354,26 @@ def test_vector_channel_requires_scalar_element_before_optimization():
             "objective": "spectrum_0", "stop": {"max_iter": 20}}}],
         "edges": [{"source": "pick", "target": "opt"}]}
     assert GraphRunner(vocs, ev, selected).run()["state"]["x1"] > 3.5
+
+
+def test_binary_vector_transform_supports_slices_and_checks_shapes():
+    assert transform_inputs(
+        [[0, 1, 2, 3], [10, 20, 30, 40]], "subtract",
+        [{"start": 1, "stop": 4}, {"start": 0, "stop": 3}]) == [-9.0, -18.0, -27.0]
+    with pytest.raises(ValueError, match="input shapes do not match"):
+        transform_inputs([[1, 2, 3], [1, 2]], "subtract")
+
+
+def test_graph_binary_vector_transform_is_available_to_following_nodes():
+    vocs = demo_vocs()
+    vocs.objectives["a"] = vocs.objectives["y1"].model_copy(
+        update={"value_type": ObjectiveValueType.VECTOR})
+    vocs.objectives["b"] = vocs.objectives["y1"].model_copy(
+        update={"value_type": ObjectiveValueType.VECTOR})
+    ev = Evaluator(lambda x: {**optical_bench(x), "a": [1, 2, 3, 4], "b": [4, 3, 2, 1]})
+    graph = {"nodes": [{"id": "diff", "type": "data_transform", "data": {
+        "operation": "subtract", "output": "delta", "output_type": "vector",
+        "inputs": [{"channel": "a", "selector": {"start": 1, "stop": 4}},
+                   {"channel": "b", "selector": {"start": 0, "stop": 3}}]}}], "edges": []}
+    result = GraphRunner(vocs, ev, graph).run()
+    assert result["objectives"]["delta"] == [-2.0, 0.0, 2.0]
