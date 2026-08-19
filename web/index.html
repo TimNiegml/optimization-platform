@@ -572,7 +572,7 @@ function addObserver(kind, at){
   const matrices=availableChannels('matrix').map(c=>c.name);
   const vectors=availableChannels('vector').map(c=>c.name);
   const n={id:'n'+(++seq),type:'observer',observerKind:kind,label:labels[kind],color:colors[kind],
-    channels:kind==='scalar'?availableChannels('scalar').map(c=>c.name):(kind==='vector_plot'?(vectors[0]?[vectors[0]]:[]):[]),matrixChannel:kind==='vector_plot'?(vectors[0]||''):(matrices[0]||''),featureAxis:'row',
+    channels:kind==='scalar'?availableChannels('scalar').map(c=>c.name):(kind==='vector_plot'?(vectors[0]?[vectors[0]]:[]):[]),matrixChannel:kind==='vector_plot'?(vectors[0]||''):(matrices[0]||''),featureAxis:'row',plotStyle:'line',showPeaks:false,
     x:at?at.x:80+(nodes.length%4)*30,y:at?at.y:70+nodes.length*70};
   nodes.push(n); render(); select(n.id);
 }
@@ -790,7 +790,18 @@ function matrixTable(m){
   return `<div style="overflow:auto;max-height:300px"><table class="sens"><tr><th></th>${m[0].map((_,j)=>`<th>${j}</th>`).join('')}</tr>`+
     m.map((row,i)=>`<tr><th>${i}</th>${row.map(v=>`<td>${typeof v==='number'?Number(v).toPrecision(6):escapeHtml(v)}</td>`).join('')}</tr>`).join('')+'</table></div>';
 }
-function matrixFeaturePlot(m,axis){
+function smoothSvgPath(points){
+  if(points.length<2) return points.length?`M ${points[0][0]} ${points[0][1]}`:'';
+  let d=`M ${points[0][0]} ${points[0][1]}`;
+  for(let i=0;i<points.length-1;i++){
+    const p0=points[Math.max(0,i-1)],p1=points[i],p2=points[i+1],p3=points[Math.min(points.length-1,i+2)];
+    const c1=[p1[0]+(p2[0]-p0[0])/6,p1[1]+(p2[1]-p0[1])/6];
+    const c2=[p2[0]-(p3[0]-p1[0])/6,p2[1]-(p3[1]-p1[1])/6];
+    d+=` C ${c1[0]} ${c1[1]}, ${c2[0]} ${c2[1]}, ${p2[0]} ${p2[1]}`;
+  }
+  return d;
+}
+function matrixFeaturePlot(m,axis,plotStyle='line',showPeaks=false){
   if(!matrixOf(m)) return '<p class="hint">该通道当前不是二维矩阵。</p>';
   const series=axis==='column'?m[0].map((_,j)=>m.map(r=>Number(r[j]))):m.map(r=>r.map(Number));
   const vals=series.flat().filter(Number.isFinite); if(!vals.length) return '<p class="hint">矩阵中没有可绘制的数值。</p>';
@@ -799,7 +810,16 @@ function matrixFeaturePlot(m,axis){
   const X=i=>p.l+(n<2?iw/2:i/(n-1)*iw),Y=v=>p.t+ih-(v-lo)/rg*ih,cs=['#2563eb','#16a34a','#ea580c','#9333ea','#0891b2','#dc2626'];
   let svg=`<svg width="${W}" height="${H}" style="background:var(--chartbg);border:1px solid var(--line);border-radius:6px">`;
   [0,.5,1].forEach(f=>{const v=lo+rg*f,y=Y(v);svg+=`<line x1="${p.l}" y1="${y}" x2="${W-p.r}" y2="${y}" stroke="var(--line)"/><text x="${p.l-4}" y="${y+3}" text-anchor="end" fill="var(--muted)" font-size="9">${v.toPrecision(3)}</text>`;});
-  series.forEach((s,i)=>svg+=`<polyline points="${s.map((v,j)=>`${X(j)},${Y(v)}`).join(' ')}" fill="none" stroke="${cs[i%cs.length]}" stroke-width="1.6"/>`);
+  series.forEach((s,i)=>{
+    const points=s.map((v,j)=>[X(j),Y(v)]),color=cs[i%cs.length];
+    svg+=plotStyle==='spline'
+      ?`<path d="${smoothSvgPath(points)}" fill="none" stroke="${color}" stroke-width="1.8"/>`
+      :`<polyline points="${points.map(p=>p.join(',')).join(' ')}" fill="none" stroke="${color}" stroke-width="1.6"/>`;
+    if(showPeaks&&s.length){
+      const peak=Math.max(...s),peakIndex=s.indexOf(peak),px=X(peakIndex),py=Y(peak);
+      svg+=`<line x1="${px}" y1="${p.t+ih}" x2="${px}" y2="${py}" stroke="${color}" stroke-width="1" stroke-dasharray="4 3"/><circle cx="${px}" cy="${py}" r="3" fill="${color}"><title>${axis==='column'?'列':'行'} ${i} · 峰值索引 ${peakIndex} · ${peak}</title></circle>`;
+    }
+  });
   svg+=`<text x="${p.l+iw/2}" y="${H-5}" text-anchor="middle" fill="var(--muted)" font-size="9">元素索引</text></svg>`;
   return svg+`<div class="legend">${series.map((_,i)=>`<span class="chip"><span class="sw" style="background:${cs[i%cs.length]}"></span>${axis==='column'?'列':'行'} ${i}</span>`).join('')}</div>`;
 }
@@ -820,12 +840,14 @@ function inspectObserver(n){
     const isVector=n.observerKind==='vector_plot', arrays=availableChannels(isVector?'vector':'matrix').map(c=>c.name);
     h+=`<label>${isVector?'向量':'矩阵'}通道</label><select onchange="setObserver('${n.id}','matrixChannel',this.value)">${arrays.map(o=>`<option value="${o}" ${o===n.matrixChannel?'selected':''}>${escapeHtml((channels[o]||{}).displayName||o)} · ${escapeHtml(o)}</option>`).join('')}</select>`;
     if(!arrays.length) h+=`<p class="hint">当前设备没有声明 ${isVector?'vector':'matrix'} 通道。</p>`;
-    if(n.observerKind==='matrix_plot') h+=`<label>Feature 方向</label><select onchange="setObserver('${n.id}','featureAxis',this.value)"><option value="row" ${n.featureAxis==='row'?'selected':''}>每一行作为 feature</option><option value="column" ${n.featureAxis==='column'?'selected':''}>每一列作为 feature</option></select>`;
+    if(n.observerKind==='matrix_plot') h+=`<label>Feature 方向</label><select onchange="setObserver('${n.id}','featureAxis',this.value)"><option value="row" ${n.featureAxis==='row'?'selected':''}>每一行作为 feature</option><option value="column" ${n.featureAxis==='column'?'selected':''}>每一列作为 feature</option></select>
+      <label>曲线样式</label><select onchange="setObserver('${n.id}','plotStyle',this.value)"><option value="line" ${(n.plotStyle||'line')==='line'?'selected':''}>折线图（保留原始采样点形状）</option><option value="spline" ${n.plotStyle==='spline'?'selected':''}>Spline 平滑曲线</option></select>
+      <label style="display:flex;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" style="width:auto" ${n.showPeaks?'checked':''} onchange="setObserver('${n.id}','showPeaks',this.checked)"> 显示各 Feature 峰值虚线</label>`;
   }
   const values=observerValue(n); h+='<h2 style="margin-top:14px">观测结果</h2>';
   if(!values) h+='<p class="hint">运行流程后显示。观测仪会在流程走到此节点时，于当前操作点重新采集。</p>';
   else if(n.observerKind==='scalar') h+=Object.entries(values).map(([k,v])=>`<div class="metric" style="display:block;margin:5px 0">${k} = <b>${typeof v==='number'?Number(v).toPrecision(7):escapeHtml(JSON.stringify(v))}</b></div>`).join('');
-  else { const m=values[n.matrixChannel]; h+=n.observerKind==='vector_plot'?vectorPlot(m):(n.observerKind==='matrix'?matrixTable(m):matrixFeaturePlot(m,n.featureAxis)); }
+  else { const m=values[n.matrixChannel]; h+=n.observerKind==='vector_plot'?vectorPlot(m):(n.observerKind==='matrix'?matrixTable(m):matrixFeaturePlot(m,n.featureAxis,n.plotStyle,n.showPeaks)); }
   const visits=lastObservations[n.id]||[]; if(visits.length>1) h+=`<p class="hint">循环中共观测 ${visits.length} 次，当前显示最后一次。</p>`;
   document.getElementById('inspBody').innerHTML=h;
 }
@@ -1029,7 +1051,8 @@ function toGraph(){
     if(n.type==='data_transform') return {id:n.id,type:'data_transform',data:{label:n.label,input:n.inputChannel,inputs:n.inputs||undefined,output:n.outputChannel,output_type:n.outputType||undefined,operation:n.operation,params:n.params||{}},position:{x:n.x,y:n.y}};
     if(n.type==='for_loop') return {id:n.id,type:'for_loop',data:{iterations:Number(n.iterations)},position:{x:n.x,y:n.y}};
     if(n.type==='observer') return {id:n.id,type:'observer',data:{label:n.label,kind:n.observerKind,
-      channels:n.observerKind==='scalar'?(n.channels||[]):[n.matrixChannel]},position:{x:n.x,y:n.y}};
+      channels:n.observerKind==='scalar'?(n.channels||[]):[n.matrixChannel],feature_axis:n.featureAxis,
+      plot_style:n.plotStyle||'line',show_peaks:!!n.showPeaks},position:{x:n.x,y:n.y}};
     let base=labelOf(n.algorithm); let sName=base;
     used[base]=(used[base]||0)+1; if(used[base]>1) sName=base+'#'+used[base];
     lastStages[sName]={color:n.color, label:sName}; stageToNode[sName]=n.id;
@@ -2019,7 +2042,7 @@ function adoptGraph(graph){
     if(type==='start'||type==='end') return {id:gn.id||('n'+(i+1)),type,color:'#64748b',x:pos.x,y:pos.y};
     if(type==='data_transform') return {id:gn.id||('n'+(i+1)),type,label:d.label||'数据变换',inputChannel:d.input||(d.inputs&&d.inputs[0]&&d.inputs[0].channel)||'',inputs:d.inputs||null,outputChannel:d.output||'',outputType:d.output_type||'',operation:d.operation||'identity',params:d.params||{},color:'#14b8a6',x:pos.x,y:pos.y};
     if(type==='for_loop') return {id:gn.id||('n'+(i+1)),type:'for_loop',label:'For 循环',iterations:Number(d.iterations??1),color:'#f97316',x:pos.x,y:pos.y};
-    if(type==='observer') return {id:gn.id||('n'+(i+1)),type:'observer',observerKind:d.kind||'scalar',label:d.label||'观测仪',color:d.kind==='matrix_plot'?'#a855f7':d.kind==='matrix'?'#0ea5e9':d.kind==='vector_plot'?'#14b8a6':'#64748b',channels:d.channels||[],matrixChannel:(d.channels||[])[0]||'',featureAxis:d.feature_axis||'row',x:pos.x,y:pos.y};
+    if(type==='observer') return {id:gn.id||('n'+(i+1)),type:'observer',observerKind:d.kind||'scalar',label:d.label||'观测仪',color:d.kind==='matrix_plot'?'#a855f7':d.kind==='matrix'?'#0ea5e9':d.kind==='vector_plot'?'#14b8a6':'#64748b',channels:d.channels||[],matrixChannel:(d.channels||[])[0]||'',featureAxis:d.feature_axis||'row',plotStyle:d.plot_style||'line',showPeaks:!!d.show_peaks,x:pos.x,y:pos.y};
     const params={};
     Object.keys(d).forEach(k=>{ if(!known.has(k)) params[k]=d[k]; });
     return {id:gn.id||('n'+(i+1)), algorithm:d.algorithm, color:NODE_COLORS[i%NODE_COLORS.length],
