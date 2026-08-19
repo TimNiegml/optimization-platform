@@ -195,6 +195,17 @@ def test_matrix_observer_preserves_matrix_for_table_and_feature_plot():
     assert result["reads"]["matrix"] == 2  # initial acquisition + observer acquisition
 
 
+def test_vector_observer_preserves_one_dimensional_channel():
+    vocs = demo_vocs()
+    vocs.objectives["spectrum"] = vocs.objectives["y1"].model_copy(
+        update={"value_type": ObjectiveValueType.VECTOR})
+    ev = Evaluator(lambda x: {**optical_bench(x), "spectrum": np.array([1.0, 2.0, 3.0])})
+    graph = {"nodes": [{"id": "eye", "type": "observer", "data": {
+        "kind": "vector_plot", "channels": ["spectrum"]}}], "edges": []}
+    result = GraphRunner(vocs, ev, graph).run()
+    assert result["observations"]["eye"][0]["values"]["spectrum"] == [1.0, 2.0, 3.0]
+
+
 def test_observer_rejects_unknown_channels():
     graph = {"nodes": [{"id": "eye", "type": "observer",
                         "data": {"channels": ["missing"]}}], "edges": []}
