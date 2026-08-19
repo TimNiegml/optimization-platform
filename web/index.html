@@ -337,7 +337,8 @@
   <p><b>拟合阶次</b>：一次=直线（斜率即矩阵）；二次=抛物线，<b>斜率取原点处的导数</b>（曲线弯时比整段直线更接近真实的局部灵敏度）。采集结束会自动<b>回到原点</b>，不会把机构留在最后一个扫描点。流程里也可用<b>灵敏度采集</b>节点做同样的事（单原点）。</p>
 
   <h3>④b 阻尼灵敏度求解（多进多出定值/标定）</h3>
-  <p>已知<b>灵敏度 ∂y/∂x</b> 和各 y 的<b>目标值</b>时，加<b>阻尼灵敏度求解</b>节点：勾选要定值的 y 填目标、勾选要动的 x，再填灵敏度矩阵（行=y、列=x）。它用<b>阻尼最小二乘(SVD 正则伪逆)</b>解 Δx=阻尼·S⁺·(目标−当前)，比 pinv 数值更稳，迭代把多个 y 同时逼到目标；x/y 维度按勾选自动匹配。</p>
+  <p>已知<b>灵敏度 ∂y/∂x</b> 和各 y 的<b>目标值</b>时，加<b>阻尼灵敏度求解</b>节点：勾选要定值的 y 填目标、勾选要动的 x，再填灵敏度矩阵（行=y、列=x）和<b>最大修正次数</b>。达到残差容差会提前结束；否则最多执行规定次数的 Δx 修正（含初始值时，测量点最多为次数+1）。</p>
+  <p><b>阻尼 d</b>控制每轮整体走多远：大则快但可能过冲，小则慢但稳。<b>正则 λ</b>作用在矩阵求逆上，专门压制灵敏度弱、共线或病态方向：大则抗噪稳定，但可能产生更大求解偏差。两者作用不同，不能互相替代。</p>
 
   <h3>⑤ 运行 / 轨迹图 / 拟合公式</h3>
   <p>点 <b>▶ 运行</b> 出指标（含测量耗时/读取次数）+ 轨迹图，三种视图：</p>
@@ -776,7 +777,8 @@ function inspectNode(n){
     }
     const lab = meta.label ? `${meta.label} <span style="color:var(--muted)">(${k})</span>` : k;
     const tip = meta.hint ? ` <span class="info" data-tip="${meta.hint}">i</span>` : '';
-    h += `<label>${lab}${tip}</label><input value="${n.params[k]??meta.default??''}" onchange="setParam('${n.id}','${k}',this.value)">`;
+    const numeric=meta.type==='int'||meta.type==='float';
+    h += `<label>${lab}${tip}</label><input ${numeric?'type="number"':''} ${meta.min!=null?`min="${meta.min}"`:''} ${meta.max!=null?`max="${meta.max}"`:''} ${numeric?`step="${meta.type==='int'?1:'any'}"`:''} value="${n.params[k]??meta.default??''}" onchange="setParam('${n.id}','${k}',this.value)">`;
   });
   h += `<label>keep 约束（可空，如 y1>0.8） <span class="info" data-tip="优化本目标时必须保持的约束，破坏约束的点会被重罚。">i</span></label><input value="${n.keep}" onchange="setF('${n.id}','keep',this.value)">`;
   h += `<label>stop.target（可空，如 y1>0.2） <span class="info" data-tip="本阶段的提前结束条件，达到即停进入下一节点。">i</span></label><input value="${n.stopTarget}" onchange="setF('${n.id}','stopTarget',this.value)">`;
@@ -967,13 +969,13 @@ function renderSolveEditor(n){
   h+=`</table></div>`;
   const rows=ys.filter(o=>o in tg);
   // ---- 灵敏度矩阵表：行=选中的 y，列=选中的 x ----
-  h+=`<label style="margin-top:10px">灵敏度矩阵 ∂y/∂x <span class="info" data-tip="行=选中的目标 y、列=上方勾选的自变量 x；每格填对应偏导 ∂y/∂x（照着表格填即可）。求解用阻尼最小二乘(SVD 正则伪逆)，比 pinv 数值更稳，行列数不等/病态也不发散。">i</span></label>`;
+  h+=`<label style="margin-top:10px">灵敏度矩阵 ∂y/∂x <span class="info" data-tip="行=选中的目标 y、列=上方勾选的自变量 x；每格填对应偏导 ∂y/∂x。正则 λ 抑制矩阵求逆中的弱/病态方向；阻尼 d 则缩放求逆之后的整次修正步长。">i</span></label>`;
   if(!rows.length || !xs.length){ h+=`<p class="hint">先在上表勾选至少一个目标 y，并在上方『变量』勾选至少一个自变量 x。</p>`; return h; }
   h+=`<div style="overflow-x:auto"><table class="sens"><tr><th>∂y/∂x</th>${xs.map(x=>`<th>${x}</th>`).join('')}</tr>`;
   rows.forEach(o=>{ h+=`<tr><th>${o}</th>`+xs.map(x=>{ const val=((sens[o]||{})[x]);
     return `<td><input type="number" step="0.01" value="${val!=null?val:''}" placeholder="0" oninput="setSensCell('${n.id}','${o}','${x}',this.value)"></td>`; }).join('')+`</tr>`; });
   h+=`</table></div>`;
-  h+=`<p class="hint">Δx = 阻尼 · SVD正则伪逆(∂y/∂x) · (y* − 当前 y)，逐轮迭代把选中的 y 同时逼到目标。</p>`;
+  h+=`<div class="sub"><b>次数与两个稳定参数</b><p class="hint" style="margin-bottom:0">Δx = d · S⁺<sub>λ</sub> · (y* − 当前 y)。<br><b>最大修正次数</b>：安全上限，满足残差容差可提前停；测量点最多为次数+1。<br><b>阻尼 d</b>：缩放整步，管“每轮走多远”。<br><b>正则 λ</b>：压制弱/病态方向，管“哪些方向不可信”。</p></div>`;
   return h;
 }
 window.toggleTarget=(id,o,on)=>{ const n=nodes.find(x=>x.id===id); ensureSolve(n);

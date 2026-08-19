@@ -129,6 +129,31 @@ def test_damped_sensitivity_regularised_inverse_is_stable():
     assert max(abs(v) for v in dx) < 1e6                # bounded, not exploded
 
 
+def test_damped_sensitivity_max_solves_counts_actuator_corrections():
+    """One configured solve means one Δx correction plus a verification read."""
+    vocs = demo_vocs()
+    gen = DampedSensitivity(
+        vocs, ["x1"], "y1", sensitivity={"y1": {"x1": 1.0}},
+        targets={"y1": 1.0}, damping=1.0, max_solves=1,
+    )
+    gen.set_base({"x1": 0.0, "x2": 0.0, "x3": 0.0})
+    first = gen.ask()
+    gen.observe(first, {"y1": 0.0})
+    corrected = gen.ask()
+    assert corrected["x1"] > first["x1"]
+    assert not gen.done
+    gen.observe(corrected, {"y1": 0.5})
+    assert gen.done
+    assert gen._solves == 1
+
+
+def test_damped_sensitivity_rejects_invalid_iteration_settings():
+    vocs = demo_vocs()
+    with pytest.raises(ValueError, match="max_solves"):
+        DampedSensitivity(vocs, ["x1"], "y1", sensitivity=[[1.0]],
+                          targets={"y1": 1.0}, max_solves=0)
+
+
 # ---------------- relative scan window + per-axis hyperparameters ----------------
 def test_grid_scan_relative_window_centres_on_start():
     vocs = demo_vocs()

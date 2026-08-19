@@ -728,7 +728,9 @@ class DampedSensitivity(Generator):
 
     Dimensions are free: the node picks which x it drives and which y it targets;
     `sensitivity` and `targets` just have to match those. Iterates until the
-    residual norm falls below `tol` or `max_solves` steps are taken.
+    residual norm falls below `tol` or `max_solves` actuator corrections are taken.
+    The initial measurement and the final verification measurement do not consume
+    that correction count, so at most ``max_solves + 1`` points are evaluated.
     """
 
     def __init__(self, vocs, variables, objective, sensitivity=None, targets=None,
@@ -748,9 +750,15 @@ class DampedSensitivity(Generator):
         self.reg = float(reg)
         self.tol = float(tol)
         self.max_solves = int(max_solves)
+        if not 0 < self.damping <= 1:
+            raise ValueError("damping must be in (0, 1]")
+        if self.reg < 0:
+            raise ValueError("reg must be >= 0")
+        if self.max_solves < 1:
+            raise ValueError("max_solves must be >= 1")
         self._S = self._as_matrix(sensitivity)         # n_y × n_x
         self._next: Optional[dict[str, float]] = None
-        self._solves = 0
+        self._solves = 0                              # actuator corrections applied
 
     def channels(self) -> set:
         """Objective channels this solver must read every step (all its targets)."""
@@ -789,22 +797,22 @@ class DampedSensitivity(Generator):
         dy = np.asarray(resid, float)
         u, s, vt = np.linalg.svd(S, full_matrices=False)
         # damped inverse singular values: σ/(σ²+λ) — bounded even as σ→0
-        d = s / (s * s + self.reg)
+        denom = s * s + self.reg
+        d = np.divide(s, denom, out=np.zeros_like(s), where=denom > 0)
         dx = vt.T @ (d * (u.T @ dy))
         return [float(v) for v in dx]
 
     def observe(self, x: dict[str, float], y: dict[str, float]) -> None:
         import numpy as np
-        self._solves += 1
         resid = [self.targets[o] - float(y.get(o, 0.0)) for o in self.objs]
         err = float(np.linalg.norm(resid))
         score = -err                                   # smaller residual = better
         if score > self.best_score:
             self.best_score = score
             self.best_x = {v: x[v] for v in self.variables}
-        self.fit_info = ("阻尼灵敏度求解：残差‖Δy‖=%.3g，目标 %s（阻尼 d=%.2g, λ=%.1g）"
+        self.fit_info = ("阻尼灵敏度求解：残差‖Δy‖=%.3g，目标 %s（修正 %d/%d，阻尼 d=%.2g, λ=%.1g）"
                          % (err, ", ".join(f"{o}→{self.targets[o]:.4g}" for o in self.objs),
-                            self.damping, self.reg))
+                            self._solves, self.max_solves, self.damping, self.reg))
         if err < self.tol or self._solves >= self.max_solves:
             self.done = True
             return
@@ -813,6 +821,7 @@ class DampedSensitivity(Generator):
         for i, v in enumerate(self.variables):
             nxt[v] = self.vocs.variables[v].clip(x[v] + self.damping * dx[i])
         self._next = nxt
+        self._solves += 1
 
     def tell(self, x: dict[str, float], score: float) -> None:
         # best-x / stopping are handled in observe() with the full y vector; the
