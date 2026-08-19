@@ -97,7 +97,11 @@
   .map2 { display:grid; grid-template-columns:44px 1fr; gap:5px; align-items:center; margin-bottom:4px; }
   .map2 b { font-size:11px; }
   .lim3 { display:grid; grid-template-columns:28px 1fr 1fr 54px; gap:4px; align-items:center; margin-bottom:4px; }
-  .lim4 { display:grid; grid-template-columns:24px 1fr 1fr 46px 46px; gap:4px; align-items:center; margin-bottom:4px; }
+  .lim4 { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:5px; align-items:center; margin-bottom:8px; padding-bottom:7px; border-bottom:1px solid var(--line); }
+  .lim4 > b { grid-column:1/-1; display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lim4 > select { grid-column:1/-1; }
+  .slice-range { display:grid; grid-template-columns:minmax(90px,1fr) minmax(90px,1fr); gap:6px; margin-top:5px; }
+  .slice-range input { min-width:90px; }
   .map3 { display:grid; grid-template-columns:28px 1fr 1fr; gap:4px; align-items:center; margin-bottom:4px; }
   .lim3 b, .map3 b, .lim4 b { font-size:11px; color:var(--text); }
   table.sens { border-collapse:collapse; font-size:11px; }
@@ -967,13 +971,13 @@ function renderEvalExtras(){
   h += `<div class="sub"><div class="glab">通道规范 <span class="info" data-tip="把每个因变量 y 映射到读取设备(如光功率计/偏振分析仪)+参数，标注读取耗时(秒)，并填『测量组』——同组并行测(耗时取最大)、不同组串行测(相加)。每个自变量 x 映射到执行器。引擎只读取某步真正需要的通道。">i</span></div>`;
   h += `<div class="glab" style="margin-top:2px">因变量（读取通道）：设备 / 参数 / 耗时s / <b>测量组</b></div>`;
   objKeys.forEach(o=>{ const c=channels[o]; const expr=(vocs.objectives[o]||{}).expression;
-    if(expr){ h += `<div class="lim4"><b>${o}</b><span style="grid-column:span 3;color:var(--accent);font-family:monospace">= ${expr}</span></div>`; return; }
-    h += `<div class="lim4"><b>${o}</b>
+    if(expr){ h += `<div class="lim4"><b title="${escapeHtml(o)}">${escapeHtml((c.displayName||o)+' · '+o)}</b><span style="grid-column:1/-1;color:var(--accent);font-family:monospace;overflow-wrap:anywhere">= ${escapeHtml(expr)}</span></div>`; return; }
+    h += `<div class="lim4"><b title="${escapeHtml(o)}">${escapeHtml((c.displayName||o)+' · '+o)}</b>
       <input value="${c.device}" oninput="channels['${o}'].device=this.value" title="读取设备">
       <input value="${c.param}" oninput="channels['${o}'].param=this.value" title="参数">
       <input type="number" step="0.5" min="0" value="${c.cost}" oninput="channels['${o}'].cost=+this.value; renderEvalExtras()" title="读取耗时(秒)">
       <input value="${c.group||''}" oninput="channels['${o}'].group=this.value; renderEvalExtras()" title="测量组：同组并行、不同组串行；留空=独立串行" placeholder="组">
-      <select style="grid-column:2/6" onchange="channels['${o}'].valueType=this.value; renderEvalExtras()"><option value="scalar" ${c.valueType==='scalar'?'selected':''}>标量</option><option value="vector" ${c.valueType==='vector'?'selected':''}>向量</option><option value="matrix" ${c.valueType==='matrix'?'selected':''}>矩阵</option></select></div>`; });
+      <select onchange="channels['${o}'].valueType=this.value; renderEvalExtras()"><option value="scalar" ${c.valueType==='scalar'?'selected':''}>标量</option><option value="vector" ${c.valueType==='vector'?'selected':''}>向量</option><option value="matrix" ${c.valueType==='matrix'?'selected':''}>矩阵</option></select></div>`; });
   h += timingPreview();
   h += `<div class="glab" style="margin-top:6px">自变量（执行器）：设备 / 参数</div>`;
   varKeys.forEach(v=>{ const a=actuators[v];
@@ -1497,7 +1501,7 @@ function renderDataCenter(){
   h+='</table></div>';
   h+=`<h3>快速构建向量差值</h3><div class="trow2"><div><label>输出名称</label><input id="featName" value="vector_diff"></div><div><label>显示名称</label><input id="featDisplay" value="向量差值"></div></div>`;
   const vecs=availableChannels().filter(c=>c.valueType==='vector').map(c=>c.name); const opts=vecs.map(v=>`<option value="${v}">${escapeHtml((channels[v]||{}).displayName||v)} · ${escapeHtml(v)}</option>`).join('');
-  h+=`<div class="trow2"><div><label>向量 A</label><select id="featA">${opts}</select><div class="lim"><input id="featAStart" type="number" min="0" value="0" placeholder="start"><input id="featAStop" type="number" min="1" value="10" placeholder="stop"></div></div><div><label>向量 B</label><select id="featB">${opts}</select><div class="lim"><input id="featBStart" type="number" min="0" value="0" placeholder="start"><input id="featBStop" type="number" min="1" value="10" placeholder="stop"></div></div></div>`;
+  h+=`<div class="trow2"><div><label>向量 A</label><select id="featA">${opts}</select><div class="slice-range"><input id="featAStart" type="number" min="0" value="0" placeholder="起始下标"><input id="featAStop" type="number" min="1" value="10" placeholder="结束下标"></div></div><div><label>向量 B</label><select id="featB">${opts}</select><div class="slice-range"><input id="featBStart" type="number" min="0" value="0" placeholder="起始下标"><input id="featBStop" type="number" min="1" value="10" placeholder="结束下标"></div></div></div>`;
   h+=vecs.length>=2?`<button class="ghost sm" onclick="createVectorDifference()">创建 A[start:stop] − B[start:stop]</button><span id="featStatus" class="hint" style="margin-left:8px"></span>`:`<p class="hint">至少需要两个 vector 通道。请在 device template 中声明 value_type="vector"。</p>`;
   box.innerHTML=h;
 }
