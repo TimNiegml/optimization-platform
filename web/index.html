@@ -400,6 +400,12 @@
   <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
   <h2>自动调优 <span class="info" data-tip="按当前『仿真场景』自动搜索多种算法工作流（粗调×精调×拟合 及参数/噪声变异），按质量/时长/稳定性打分排名，采用最优。">i</span></h2>
   <p class="hint">场景取左下『仿真场景』。调三个优先级权重与噪声档后点搜索；结果按效用排名，可一键『采用』到画布。</p>
+  <div class="sub"><div class="glab"><b>参与调优的变量与因变量</b></div><div id="tuneChannelSelect"></div></div>
+  <details style="margin:8px 0"><summary style="cursor:pointer;color:var(--accent)">🧩 从候选自变量中筛选最佳组合（例如 6 选 4）</summary>
+    <p class="hint">先在“灵敏度采集”中测齐候选 x 与目标 y；这里按灵敏度矩阵的满秩性和条件数比较所有组合。条件数越小，四个目标越容易被独立、稳定地求解。</p>
+    <div class="trow2"><div><label>每个组合选择几个自变量</label><input id="subsetN" type="number" min="1" value="4"></div><div style="display:flex;align-items:flex-end"><button class="ghost" onclick="runVariableSubsetTest()">测试所有组合</button></div></div>
+    <div id="subsetBody"></div>
+  </details>
   <div class="trow2">
     <div><label>质量权重 <b id="wQv">1.0</b></label><input id="wQ" type="range" min="0" max="3" step="0.5" value="1" oninput="wQv.textContent=(+this.value).toFixed(1)"></div>
     <div><label>速度权重 <b id="wTv">0.5</b></label><input id="wT" type="range" min="0" max="3" step="0.5" value="0.5" oninput="wTv.textContent=(+this.value).toFixed(1)"></div>
@@ -477,6 +483,7 @@ let untilExpr = '', untilRows = [], untilRawEdited = false;
 let startPoint = {}, useStartPoint = false, twoDMap = null;   // 自定义起始点 + 2D图坐标映射
 let tuneRandomStart = true, tuneStartDomain = {};             // 自动调优随机初始点 + 定义域
 let sensVars=[], sensObjs=[], sensOrigins=[{}], lastSens=null;  // 灵敏度采集：选中的 x/y、原点列表、上次结果
+let tuneVars=[], tuneObjs=[], subsetTargets={}, subsetResult=null;
 let derivedRows=[];                                             // [{name, expression, mode, target}]
 let lastObservations={};                                        // observer id -> visit snapshots
 let probeData=null;
@@ -1800,9 +1807,32 @@ async function openTune(){
   const t=untilExpr||document.getElementById('tuneTarget').value;
   document.getElementById('tuneTarget').value=t||'y1>=0.95 and y2>=0.9';
   if(!tuneSpace){ try{ tuneSpace=(await (await fetch(API+'/autotune/space')).json()).phases; initVarState(); }catch(e){ tuneSpace=null; } }
+  if(!tuneVars.length) tuneVars=varKeys.slice();
+  if(!tuneObjs.length) tuneObjs=availableChannels('scalar').slice(0,Math.min(4,availableChannels('scalar').length)).map(c=>c.name);
   const rc=document.getElementById('tuneRandom'); if(rc) rc.checked=tuneRandomStart;
-  renderStartDomain(); renderVarTable(); showModal('tuneModal');
+  renderTuneChannelSelect(); renderStartDomain(); renderVarTable(); showModal('tuneModal');
 }
+function renderTuneChannelSelect(){
+  const box=document.getElementById('tuneChannelSelect');if(!box)return;const scalar=availableChannels('scalar').map(c=>c.name);
+  box.innerHTML=`<div class="trow2"><div><label>候选自变量（已选 ${tuneVars.length}/${varKeys.length}）</label><div class="toolbar" style="margin-bottom:4px"><button class="ghost sm" onclick="setTuneVars(true)">全选</button><button class="ghost sm" onclick="setTuneVars(false)">清空</button></div><div class="check-list">${varKeys.map(v=>`<label class="channel-opt"><input type="checkbox" style="width:auto" ${tuneVars.includes(v)?'checked':''} onchange="toggleTuneVar('${v}',this.checked)"> ${escapeHtml(v)}</label>`).join('')}</div></div>
+  <div><label>目标因变量（已选 ${tuneObjs.length}/${scalar.length}）</label><input placeholder="搜索因变量…" oninput="filterChecks('tuneObjChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setTuneObjs(true)">全选</button><button class="ghost sm" onclick="setTuneObjs(false)">清空</button></div><div id="tuneObjChecks" class="check-list">${scalar.map(o=>`<label class="channel-opt" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><input type="checkbox" style="width:auto" ${tuneObjs.includes(o)?'checked':''} onchange="toggleTuneObj('${o}',this.checked)"> ${escapeHtml((channels[o]||{}).displayName||o)} <span class="hint">${escapeHtml(o)}</span></label>`).join('')}</div></div></div>
+  <div class="glab">组合求解目标值</div><div class="trow2">${tuneObjs.map((o,i)=>`<div><label>${escapeHtml((channels[o]||{}).displayName||o)} · ${escapeHtml(o)}</label><input class="subset-target" data-objective="${escapeHtml(o)}" type="number" step="any" value="${subsetTargets[o]??0}" oninput="subsetTargets['${o}']=+this.value"></div>`).join('')}</div>`;
+}
+window.toggleTuneVar=(v,on)=>{tuneVars=on?[...new Set([...tuneVars,v])]:tuneVars.filter(x=>x!==v);renderTuneChannelSelect();};
+window.toggleTuneObj=(o,on)=>{tuneObjs=on?[...new Set([...tuneObjs,o])]:tuneObjs.filter(x=>x!==o);renderTuneChannelSelect();};
+window.setTuneVars=on=>{tuneVars=on?varKeys.slice():[];renderTuneChannelSelect();};
+window.setTuneObjs=on=>{tuneObjs=on?availableChannels('scalar').map(c=>c.name):[];renderTuneChannelSelect();};
+async function runVariableSubsetTest(){
+  const box=document.getElementById('subsetBody');
+  if(!lastSens){box.innerHTML='<p style="color:var(--danger)">请先打开“灵敏度采集”，选择这些 x/y 并完成一次采集。</p>';return;}
+  if(!tuneVars.length||!tuneObjs.length){box.innerHTML='<p style="color:var(--danger)">请至少选择一个自变量和一个因变量。</p>';return;}
+  const targets=Object.fromEntries([...document.querySelectorAll('.subset-target')].map(e=>[e.dataset.objective,+e.value]));
+  box.innerHTML='<p class="hint">正在评估组合…</p>';
+  const body={sensitivity:lastSens.matrix,objectives:tuneObjs,candidates:tuneVars,select_n:+document.getElementById('subsetN').value,targets};
+  try{const r=await fetch(API+'/autotune/variable-subsets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json();if(!r.ok)throw Error(d.detail||r.statusText);subsetResult=d;renderSubsetResults();}catch(e){box.innerHTML=`<p style="color:var(--danger)">${escapeHtml(e.message)}</p>`;}
+}
+function renderSubsetResults(){const rows=(subsetResult&&subsetResult.ranked)||[],box=document.getElementById('subsetBody');if(!rows.length){box.innerHTML='<p class="hint">没有可比较的组合。</p>';return;}box.innerHTML=`<p><b>共测试 ${rows.length} 个组合</b>；推荐 ${rows[0].variables.join(', ')}</p><div style="max-height:280px;overflow:auto"><table class="data-table"><tr><th>#</th><th>自变量组合</th><th>秩</th><th>条件数↓</th><th>操作</th></tr>${rows.map((r,i)=>`<tr><td>${i+1}</td><td>${r.variables.map(escapeHtml).join(', ')}</td><td>${r.rank}/${tuneObjs.length}${r.full_rank?' ✅':' ❌'}</td><td>${r.condition==null?'∞':Number(r.condition).toPrecision(5)}</td><td><button class="ghost sm" onclick="adoptSubset(${i})">采用</button></td></tr>`).join('')}</table></div>`;}
+window.adoptSubset=i=>{const row=subsetResult&&subsetResult.ranked[i];if(!row)return;adoptGraph(row.graph);closeModals();document.getElementById('conn').textContent='已采用变量组合：'+row.variables.join(', ');};
 function renderStartDomain(){
   const box=document.getElementById('startDomainBox'); if(!box) return;
   if(!tuneRandomStart){ box.innerHTML=''; return; }
@@ -1851,7 +1881,10 @@ function buildVariationSpec(){
 }
 async function runTune(){
   const btn=document.getElementById('tuneRun'); btn.disabled=true; btn.textContent='搜索中…';
+  if(!tuneVars.length||!tuneObjs.length){document.getElementById('tuneBody').innerHTML='<p style="color:var(--danger)">请至少选择一个自变量和一个标量因变量。</p>';btn.disabled=false;btn.textContent='▶ 开始搜索';return;}
   const spec={ bench:document.getElementById('evBench').value,
+    landscape_vars:tuneVars.slice(), landscape_obj:tuneObjs[0], quality_obj:tuneObjs[0],
+    balance_vars:[], balance_obj:null,
     target:(document.getElementById('tuneTarget').value.trim()||null),
     weights:{quality:+document.getElementById('wQ').value, time:+document.getElementById('wT').value, stability:+document.getElementById('wS').value},
     noise_levels:document.getElementById('tuneNoise').value.split(',').map(s=>+s.trim()).filter(s=>!isNaN(s)),

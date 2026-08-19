@@ -495,6 +495,26 @@ class AutotuneDemoRequest(BaseModel):
     graph: dict
 
 
+class VariableSubsetRequest(BaseModel):
+    sensitivity: dict
+    objectives: list[str]
+    candidates: list[str]
+    select_n: int
+    targets: Optional[dict[str, float]] = None
+
+
+@app.post("/autotune/variable-subsets")
+def autotune_variable_subsets(req: VariableSubsetRequest):
+    """Rank k-of-n actuator choices for the selected multi-output solve."""
+    from .autotune import rank_variable_subsets
+    try:
+        ranked = rank_variable_subsets(req.sensitivity, req.objectives, req.candidates,
+                                       req.select_n, req.targets)
+        return {"ranked": ranked, "n_combinations": len(ranked)}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"{type(exc).__name__}: {exc}")
+
+
 @app.post("/autotune/demo")
 def autotune_demo(req: AutotuneDemoRequest):
     """Replay one ranked strategy over all seeded random-start cases."""

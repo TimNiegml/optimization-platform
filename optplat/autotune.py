@@ -21,6 +21,7 @@ implementation body of the future MCP `autotune` tool.
 from __future__ import annotations
 
 import itertools
+import math
 import statistics
 from typing import Optional
 
@@ -34,6 +35,56 @@ from .hardware import HardwareEvaluator, SimulatedMeter, SimulatedStage
 from .models import build_model
 from .registry import REGISTRY
 from .vocs import VOCS
+
+
+def rank_variable_subsets(sensitivity: dict, objectives: list[str],
+                          candidates: list[str], select_n: int,
+                          targets: Optional[dict[str, float]] = None) -> list[dict]:
+    """Rank actuator subsets for a multi-output sensitivity solve.
+
+    Columns are normalized before conditioning so unlike physical units do not
+    dominate the comparison. Full-rank, low-condition subsets rank first.
+    """
+    import numpy as np
+    if not objectives or not candidates:
+        raise ValueError("objectives and candidate variables must not be empty")
+    if select_n < 1 or select_n > len(candidates):
+        raise ValueError("select_n must be between 1 and the candidate variable count")
+    if select_n < len(objectives):
+        raise ValueError("select_n must be at least the objective count")
+    missing = [(o, x) for o in objectives for x in candidates
+               if o not in sensitivity or x not in sensitivity[o]]
+    if missing:
+        raise ValueError(f"sensitivity matrix is missing {missing[0][0]}/{missing[0][1]}")
+    rows = []
+    for variables in itertools.combinations(candidates, select_n):
+        matrix = np.asarray([[float(sensitivity[o][x]) for x in variables]
+                             for o in objectives], dtype=float)
+        norms = np.linalg.norm(matrix, axis=0)
+        normalized = matrix / np.where(norms > 1e-12, norms, 1.0)
+        singular = np.linalg.svd(normalized, compute_uv=False)
+        rank = int(np.linalg.matrix_rank(normalized))
+        full_rank = rank == len(objectives)
+        smallest = float(singular[-1]) if len(singular) else 0.0
+        condition = float(singular[0] / smallest) if smallest > 1e-12 else math.inf
+        score = (1.0 / condition) if full_rank and math.isfinite(condition) else 0.0
+        selected_sensitivity = {o: {x: float(sensitivity[o][x]) for x in variables}
+                                for o in objectives}
+        graph = {"nodes": [{"id": "subset_solve", "type": "algorithm", "data": {
+            "algorithm": "damped_sensitivity", "variables": list(variables),
+            "objective": objectives[0], "targets": {o: float((targets or {}).get(o, 0.0))
+                                                       for o in objectives},
+            "sensitivity": selected_sensitivity}}], "edges": []}
+        rows.append({"variables": list(variables), "rank": rank,
+                     "full_rank": full_rank, "condition": condition,
+                     "min_singular": smallest, "score": score,
+                     "sensitivity": selected_sensitivity, "graph": graph})
+    rows.sort(key=lambda r: (not r["full_rank"], r["condition"], -r["min_singular"], r["variables"]))
+    for i, row in enumerate(rows, 1):
+        row["position"] = i
+        if not math.isfinite(row["condition"]):
+            row["condition"] = None
+    return rows
 
 # Which registry `category` belongs to which pipeline phase. A NEW algorithm
 # only has to declare its category — it then joins the right phase automatically,
