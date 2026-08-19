@@ -102,6 +102,10 @@
   .lim4 > select { grid-column:1/-1; }
   .slice-range { display:grid; grid-template-columns:minmax(90px,1fr) minmax(90px,1fr); gap:6px; margin-top:5px; }
   .slice-range input { min-width:90px; }
+  .expr-builder { min-width:360px; }
+  .expr-tools { display:flex; gap:4px; flex-wrap:wrap; margin-top:5px; }
+  .expr-tools button { padding:3px 7px; font-family:ui-monospace,monospace; font-size:11px; }
+  .expr-preview { margin-top:5px; padding:5px 7px; border-radius:5px; background:var(--panel2); color:var(--accent); font-family:ui-monospace,monospace; overflow-wrap:anywhere; }
   .map3 { display:grid; grid-template-columns:28px 1fr 1fr; gap:4px; align-items:center; margin-bottom:4px; }
   .lim3 b, .map3 b, .lim4 b { font-size:11px; color:var(--text); }
   table.sens { border-collapse:collapse; font-size:11px; }
@@ -1526,19 +1530,32 @@ function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<'
 function renderDerivedRows(){
   const box=document.getElementById('derivedRows'); if(!box) return;
   if(!derivedRows.length){ box.innerHTML='<p class="hint">尚未定义。示例：z1 = y1+y2；z2 = max(y1,y2,y3)-min(y1,y2,y3)。</p>'; return; }
-  box.innerHTML=`<div style="overflow-x:auto"><table class="sens"><tr><th>名称</th><th>表达式</th><th>默认模式</th><th>目标值</th><th></th></tr>`+
-    derivedRows.map((r,i)=>`<tr><td><input value="${escapeHtml(r.name||'')}" oninput="derivedRows[${i}].name=this.value.trim()" placeholder="z1"></td>
-      <td><input value="${escapeHtml(r.expression||'')}" oninput="derivedRows[${i}].expression=this.value" placeholder="y1+y2" style="min-width:240px;font-family:monospace"></td>
+  const channelOptions=objKeys.map(o=>`<option value="${escapeHtml(o)}">${escapeHtml((channels[o]||{}).displayName||o)} · ${escapeHtml(o)}</option>`).join('');
+  box.innerHTML=`<p class="hint">先选择已有因变量并点击“插入”，再点击运算符；系统会插到当前光标位置，无需手敲长名称。</p><div style="overflow-x:auto"><table class="sens"><tr><th>名称</th><th>表达式与快速构建</th><th>默认模式</th><th>目标值</th><th></th></tr>`+
+    derivedRows.map((r,i)=>`<tr><td><input value="${escapeHtml(r.name||'')}" oninput="derivedRows[${i}].name=this.value.trim();updateDerivedPreview(${i})" placeholder="z1"></td>
+      <td class="expr-builder"><input id="derivedExpr${i}" value="${escapeHtml(r.expression||'')}" oninput="derivedRows[${i}].expression=this.value;updateDerivedPreview(${i})" placeholder="点击下方通道与运算符构建" style="min-width:340px;font-family:monospace">
+        <div class="row" style="margin-top:5px"><select id="derivedChannel${i}" style="min-width:220px">${channelOptions}</select><button class="ghost sm" onclick="insertSelectedDerivedChannel(${i})">插入因变量</button></div>
+        <div class="expr-tools">${['+','−','×','÷','**','(',')','abs( )','min( , )','max( , )'].map(t=>`<button type="button" class="ghost" onclick="insertDerivedTool(${i},'${t}')">${t}</button>`).join('')}</div>
+        <div id="derivedPreview${i}" class="expr-preview">${escapeHtml((r.name||('z'+(i+1)))+' = '+(r.expression||'…'))}</div></td>
       <td><select onchange="derivedRows[${i}].mode=this.value"><option value="maximize" ${r.mode==='maximize'?'selected':''}>最大化</option><option value="minimize" ${r.mode==='minimize'?'selected':''}>最小化</option><option value="target" ${r.mode==='target'?'selected':''}>逼近目标</option><option value="scan" ${r.mode==='scan'?'selected':''}>扫描</option></select></td>
       <td><input type="number" step="any" value="${r.target==null?'':r.target}" oninput="derivedRows[${i}].target=this.value===''?null:+this.value" placeholder="仅逼近模式"></td>
       <td><button class="ghost sm" onclick="derivedRows.splice(${i},1);renderDerivedRows()">✕</button></td></tr>`).join('')+'</table></div>';
 }
+function insertAtCursor(input,text,cursorBack=0){const a=input.selectionStart??input.value.length,b=input.selectionEnd??a;input.value=input.value.slice(0,a)+text+input.value.slice(b);const p=a+text.length-cursorBack;input.focus();input.setSelectionRange(p,p);input.dispatchEvent(new Event('input',{bubbles:true}));}
+window.insertSelectedDerivedChannel=i=>{const s=document.getElementById('derivedChannel'+i),input=document.getElementById('derivedExpr'+i);if(s&&input)insertAtCursor(input,s.value);};
+window.insertDerivedTool=(i,t)=>{const input=document.getElementById('derivedExpr'+i);if(!input)return;const tools={'+':' + ','−':' - ','×':' * ','÷':' / ','**':' ** ','(':'(',')':')','abs( )':'abs()', 'min( , )':'min(,)', 'max( , )':'max(,)'};const backs={'abs( )':1,'min( , )':2,'max( , )':2};insertAtCursor(input,tools[t],backs[t]||0);};
+window.updateDerivedPreview=i=>{const el=document.getElementById('derivedPreview'+i),r=derivedRows[i];if(el)el.textContent=(r.name||('z'+(i+1)))+' = '+(r.expression||'…');};
 function applyDerived(){
   const base=Object.keys(vocs.objectives).filter(o=>!(vocs.objectives[o]||{}).expression), seen=new Set(base);
   for(const r of derivedRows){
     if(!/^[A-Za-z_]\w*$/.test(r.name||'')){ alert('因变量名称必须是字母或下划线开头的标识符：'+r.name); return; }
     if(seen.has(r.name)){ alert('因变量名称重复或与外部通道重名：'+r.name); return; }
     if(!(r.expression||'').trim()){ alert(r.name+' 的表达式不能为空'); return; }
+    if(!/^[A-Za-z0-9_+*/%().,\s-]+$/.test(r.expression)){ alert(r.name+' 的表达式含有不支持的字符'); return; }
+    let depth=0; for(const c of r.expression){if(c==='(')depth++;if(c===')'&&--depth<0)break;} if(depth!==0){alert(r.name+' 的括号不匹配');return;}
+    const refText=r.expression.replace(/\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g,'');
+    const refs=(refText.match(/[A-Za-z_]\w*/g)||[]).filter(x=>!['abs','min','max'].includes(x));
+    const unknown=refs.filter(x=>!seen.has(x)); if(unknown.length){alert(r.name+' 引用了未知因变量：'+[...new Set(unknown)].join(', '));return;}
     if(r.mode==='target' && r.target==null){ alert(r.name+' 使用逼近目标模式时必须填写目标值'); return; }
     seen.add(r.name);
   }
