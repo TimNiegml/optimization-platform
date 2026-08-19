@@ -170,8 +170,10 @@
   .palGroup { font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.04em;
     margin:10px 0 4px; padding-bottom:3px; border-bottom:1px solid var(--line); cursor:help; }
   .palGroup:first-child { margin-top:0; }
-  #liveBox .lvRow { display:grid; grid-template-columns:34px 1fr 74px; gap:6px; align-items:center;
+  #liveBox .lvRow { display:grid; grid-template-columns:minmax(60px,34%) minmax(34px,1fr) minmax(58px,76px); gap:6px; align-items:center;
     font-size:11px; margin-bottom:3px; }
+  #liveBox .lvRow > * { min-width:0; }
+  #liveBox .lvName { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #liveBox .lvBar { height:7px; background:var(--line); border-radius:4px; position:relative; overflow:hidden; }
   #liveBox .lvFill { position:absolute; top:0; bottom:0; border-radius:4px; transition:left .12s linear, width .12s linear; }
   #liveBox .lvVal { font-family:var(--mono,monospace); text-align:right; font-variant-numeric:tabular-nums; }
@@ -1077,7 +1079,7 @@ function renderLive(){
   varKeys.forEach(v=>{
     const val=d.x[v]; if(val==null) return;
     const [lo,hi]=R[v]; const f=Math.max(0,Math.min(1,(val-lo)/((hi-lo)||1)));
-    h+=`<div class="lvRow" data-tip="${v} ∈ [${lo}, ${hi}]"><b>${v}</b>
+    h+=`<div class="lvRow" data-tip="${escapeHtml(v)} ∈ [${lo}, ${hi}]"><b class="lvName" title="${escapeHtml(v)}">${escapeHtml(v)}</b>
       <div class="lvBar"><div class="lvFill" style="left:${(f*100).toFixed(1)}%;width:4px;background:var(--accent)"></div></div>
       <span class="lvVal">${(+val).toPrecision(5)}</span></div>`;
   });
@@ -1087,7 +1089,8 @@ function renderLive(){
     if(typeof val!=='number') return; // matrices belong in observer table/feature plot
     const sp=liveSpan[o]||{lo:val,hi:val};
     const f=sp.hi>sp.lo ? (val-sp.lo)/(sp.hi-sp.lo) : 1;
-    h+=`<div class="lvRow" data-tip="本次运行内 ${o} 的范围 ${sp.lo.toPrecision(4)} ~ ${sp.hi.toPrecision(4)}"><b>${o}</b>
+    const label=(channels[o]||{}).displayName||o;
+    h+=`<div class="lvRow" data-tip="本次运行内 ${escapeHtml(o)} 的范围 ${sp.lo.toPrecision(4)} ~ ${sp.hi.toPrecision(4)}"><b class="lvName" title="${escapeHtml(label+' · '+o)}">${escapeHtml(label)}</b>
       <div class="lvBar"><div class="lvFill" style="left:0;width:${(Math.max(0.02,f)*100).toFixed(1)}%;background:var(--ok)"></div></div>
       <span class="lvVal">${(+val).toPrecision(5)}</span></div>`;
   });
