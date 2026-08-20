@@ -74,7 +74,7 @@ class CoordinateDescent(Generator):
     """
 
     def __init__(self, vocs, variables, objective, init_step_frac=0.25, tol_frac=1e-3,
-                 steps=None):
+                 steps=None, refine_step=True, shrink_factor=0.5, shrink_patience=1):
         super().__init__(vocs, variables, objective)
         steps = steps or {}
         # per-axis step: an explicit ABSOLUTE value per axis overrides the fraction
@@ -87,6 +87,12 @@ class CoordinateDescent(Generator):
             v: tol_frac * (vocs.variables[v].high - vocs.variables[v].low)
             for v in variables
         }
+        self.refine_step = bool(refine_step)
+        self.shrink_factor = float(shrink_factor)
+        self.shrink_patience = max(1, int(shrink_patience))
+        if not 0 < self.shrink_factor < 1:
+            raise ValueError("shrink_factor must be in (0, 1)")
+        self._stalled_sweeps = 0
         self._base_val: Optional[float] = None
         self._queue: list[dict[str, float]] = []
         self._sweep_best: tuple[float, dict[str, float]] = (float("-inf"), {})
@@ -127,9 +133,17 @@ class CoordinateDescent(Generator):
         if not self._queue:                   # sweep finished -> decide
             if self._sweep_best[0] > self._base_val:
                 self._base_val, self._base = self._sweep_best
+                self._stalled_sweeps = 0
             else:                             # no improvement: refine
+                self._stalled_sweeps += 1
+                if not self.refine_step:
+                    self.done = True
+                    return
+                if self._stalled_sweeps < self.shrink_patience:
+                    return
                 for v in self._step:
-                    self._step[v] *= 0.5
+                    self._step[v] *= self.shrink_factor
+                self._stalled_sweeps = 0
                 if all(self._step[v] < self._tol[v] for v in self._step):
                     self.done = True
 
@@ -256,7 +270,8 @@ class GridScan(Generator):
     "y1 > first_light"), otherwise it stops when the grid is exhausted.
     """
 
-    def __init__(self, vocs, variables, objective, n_per_axis=7, span_frac=0.0):
+    def __init__(self, vocs, variables, objective, n_per_axis=7, span_frac=0.0,
+                 search_ranges=None):
         super().__init__(vocs, variables, objective)
         self.n_per_axis = n_per_axis
         # span_frac == 0 → absolute full-range raster (the default). span_frac > 0 →
@@ -265,6 +280,7 @@ class GridScan(Generator):
         # stage origin, so a local scan around where we already are is what a real
         # alignment does; the window is clipped into the variable bounds.
         self.span_frac = span_frac
+        self.search_ranges = search_ranges or {}
         self._grid: list[dict[str, float]] = []
 
     def _build_grid(self) -> None:
@@ -274,7 +290,14 @@ class GridScan(Generator):
         for v in self.variables:
             var = self.vocs.variables[v]
             n = self.n_per_axis
-            if self.span_frac and self.span_frac > 0:          # relative window around base
+            explicit = self.search_ranges.get(v)
+            if explicit is not None:
+                if not isinstance(explicit, (list, tuple)) or len(explicit) != 2:
+                    raise ValueError(f"search_ranges[{v!r}] must be [low, high]")
+                lo, hi = var.clip(float(explicit[0])), var.clip(float(explicit[1]))
+                if lo > hi:
+                    raise ValueError(f"search_ranges[{v!r}] low must be <= high")
+            elif self.span_frac and self.span_frac > 0:        # relative window around base
                 half = 0.5 * self.span_frac * (var.high - var.low)
                 c = self._base[v]
                 lo, hi = var.clip(c - half), var.clip(c + half)
@@ -640,13 +663,21 @@ class GradientAscent(Generator):
     """
 
     def __init__(self, vocs, variables, objective,
-                 probe_frac=0.02, step_frac=0.15, tol_frac=1e-3, max_line=6):
+                 probe_frac=0.02, step_frac=0.15, tol_frac=1e-3, max_line=6,
+                 shrink_on_fail=True, shrink_factor=0.5, grow_factor=1.5):
         super().__init__(vocs, variables, objective)
         self.range = {v: vocs.variables[v].high - vocs.variables[v].low for v in variables}
         self.h = {v: probe_frac * self.range[v] for v in variables}
         self.lr = step_frac
         self.tol = tol_frac
         self.max_line = max_line
+        self.shrink_on_fail = bool(shrink_on_fail)
+        self.shrink_factor = float(shrink_factor)
+        self.grow_factor = float(grow_factor)
+        if not 0 < self.shrink_factor < 1:
+            raise ValueError("shrink_factor must be in (0, 1)")
+        if self.grow_factor < 1:
+            raise ValueError("grow_factor must be >= 1")
         self._phase = "base"
         self._base_val: Optional[float] = None
         self._dir: dict[str, float] = {}
@@ -697,10 +728,13 @@ class GradientAscent(Generator):
         if score > self._base_val + 1e-12:                # improved → accept, grow step
             self._base = {v: x[v] for v in self.variables}
             self._base_val = score
-            self.lr = min(self.lr * 1.5, 0.5)
+            self.lr = min(self.lr * self.grow_factor, 0.5)
             self._probe_i = 0; self._slope = {}; self._phase = "probe"
         else:                                             # no gain → shrink & retry
-            self.lr *= 0.5; self._line_tries += 1
+            if not self.shrink_on_fail:
+                self.done = True
+                return
+            self.lr *= self.shrink_factor; self._line_tries += 1
             if self.lr < self.tol or self._line_tries >= self.max_line:
                 self.done = True
 

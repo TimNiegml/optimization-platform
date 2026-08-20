@@ -16,6 +16,7 @@ from optplat.evaluator import Evaluator, read_seconds
 from optplat.generators import (
     CoordinateDescent,
     DampedSensitivity,
+    GradientAscent,
     GridScan,
     NelderMead,
 )
@@ -176,12 +177,56 @@ def test_grid_scan_absolute_by_default():
     assert min(xs) == vocs.variables["x1"].low and max(xs) == vocs.variables["x1"].high
 
 
+def test_grid_scan_explicit_axis_range_overrides_relative_window():
+    vocs = demo_vocs()
+    g = GridScan(vocs, ["x1"], "y1", n_per_axis=3, span_frac=0.1,
+                 search_ranges={"x1": [1.0, 2.0]})
+    g.set_base({"x1": 4.0, "x2": 0.0, "x3": 0.0})
+    xs = [g.ask()["x1"] for _ in range(3)]
+    assert xs == pytest.approx([1.0, 1.5, 2.0])
+
+
 def test_coordinate_descent_per_axis_step():
     vocs = demo_vocs()
     g = CoordinateDescent(vocs, ["x1", "x2"], "y1", steps={"x1": 0.5})
     assert g._step["x1"] == 0.5                          # explicit per-axis override
     assert g._step["x2"] == pytest.approx(
         0.25 * (vocs.variables["x2"].high - vocs.variables["x2"].low))   # frac fallback
+
+
+def test_coordinate_descent_can_stop_without_reducing_step():
+    vocs = demo_vocs()
+    g = CoordinateDescent(vocs, ["x1"], "y1", steps={"x1": 0.5}, refine_step=False)
+    g.set_base({"x1": 0.0, "x2": 0.0, "x3": 0.0})
+    p = g.ask(); g.tell(p, 1.0)
+    for _ in range(2):
+        p = g.ask(); g.tell(p, 0.0)
+    assert g.done
+    assert g._step["x1"] == pytest.approx(0.5)
+
+
+def test_coordinate_descent_shrink_patience_and_factor():
+    vocs = demo_vocs()
+    g = CoordinateDescent(vocs, ["x1"], "y1", steps={"x1": 1.0},
+                          shrink_patience=2, shrink_factor=0.25)
+    g.set_base({"x1": 0.0, "x2": 0.0, "x3": 0.0})
+    p = g.ask(); g.tell(p, 1.0)
+    for _ in range(2):
+        p = g.ask(); g.tell(p, 0.0)
+    assert g._step["x1"] == pytest.approx(1.0)
+    for _ in range(2):
+        p = g.ask(); g.tell(p, 0.0)
+    assert g._step["x1"] == pytest.approx(0.25)
+
+
+def test_gradient_can_stop_on_first_failed_line_step_without_shrinking():
+    vocs = demo_vocs()
+    g = GradientAscent(vocs, ["x1"], "y1", shrink_on_fail=False)
+    g.set_base({"x1": 0.0, "x2": 0.0, "x3": 0.0})
+    p = g.ask(); g.tell(p, 0.0)       # base
+    p = g.ask(); g.tell(p, 1.0)       # non-zero measured gradient
+    p = g.ask(); g.tell(p, 0.0)       # line step fails
+    assert g.done
 
 
 def test_nelder_mead_per_axis_simplex():

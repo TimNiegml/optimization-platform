@@ -764,7 +764,16 @@ function inspectNode(n){
   Object.entries(s.params||{}).forEach(([k,meta]) => {
     if(isSolve && (k==='targets'||k==='sensitivity')) return;      // handled by the solve editor
     if(meta.type==='axis_steps'){ h += renderAxisSteps(n,k,meta); return; }  // per-axis table
+    if(meta.type==='axis_ranges'){ h += renderAxisRanges(n,k,meta); return; }
     if(meta.type==='output_map'){ h += renderOutputMap(n,k,meta); return; }
+    if(meta.type==='bool'){
+      h+=`<label style="display:flex;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" style="width:auto" ${n.params[k]?'checked':''} onchange="setBoolParam('${n.id}','${k}',this.checked)"> ${meta.label||k}${meta.hint?` <span class="info" data-tip="${meta.hint}">i</span>`:''}</label>`;
+      return;
+    }
+    if(meta.type==='enum'){
+      h+=`<label>${meta.label||k}${meta.hint?` <span class="info" data-tip="${meta.hint}">i</span>`:''}</label><select onchange="setParam('${n.id}','${k}',this.value)">${(meta.options||[]).map(o=>`<option value="${o}" ${o===(n.params[k]??meta.default)?'selected':''}>${o}</option>`).join('')}</select>`;
+      return;
+    }
     if(k==='input_channel'){
       const matrices=objKeys.filter(o=>(channels[o]||{}).valueType==='matrix');
       h+=`<label>${meta.label||k}</label><select onchange="setParam('${n.id}','${k}',this.value)">${matrices.map(o=>`<option ${o===n.params[k]?'selected':''}>${o}</option>`).join('')}</select>`;
@@ -933,6 +942,18 @@ function renderAxisSteps(n,k,meta){
 }
 window.setAxisStep=(id,k,x,v)=>{ const n=nodes.find(z=>z.id===id); ensureDictParam(n,k);
   if(v===''||v==null) delete n.params[k][x]; else n.params[k][x]=+v; };
+function renderAxisRanges(n,k,meta){
+  ensureDictParam(n,k); const d=n.params[k]||{};
+  let h=`<label>${meta.label||k}${meta.hint?` <span class="info" data-tip="${meta.hint}">i</span>`:''}</label>`;
+  if(!n.variables.length) return h+'<p class="hint">先在上方勾选变量。</p>';
+  h+='<div style="overflow-x:auto"><table class="sens"><tr><th>启用</th><th>轴</th><th>下限</th><th>上限</th></tr>';
+  n.variables.forEach(x=>{ const vr=vocs.variables[x],on=Array.isArray(d[x]),r=on?d[x]:[vr.low,vr.high];
+    h+=`<tr><td><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleAxisRange('${n.id}','${k}','${x}',this.checked)"></td><th>${escapeHtml(x)}</th><td><input type="number" value="${r[0]}" min="${vr.low}" max="${vr.high}" ${on?'':'disabled'} onchange="setAxisRangeBound('${n.id}','${k}','${x}',0,this.value)"></td><td><input type="number" value="${r[1]}" min="${vr.low}" max="${vr.high}" ${on?'':'disabled'} onchange="setAxisRangeBound('${n.id}','${k}','${x}',1,this.value)"></td></tr>`; });
+  return h+'</table></div><p class="hint">勾选后该轴使用这里的绝对范围；未勾选则使用相对窗口，若相对窗口为 0 则使用设备全量程。</p>';
+}
+window.toggleAxisRange=(id,k,x,on)=>{const n=nodes.find(z=>z.id===id);ensureDictParam(n,k);const v=vocs.variables[x];if(on)n.params[k][x]=[v.low,v.high];else delete n.params[k][x];inspectNode(n);};
+window.setAxisRangeBound=(id,k,x,i,value)=>{const n=nodes.find(z=>z.id===id);ensureDictParam(n,k);const v=vocs.variables[x],old=n.params[k][x]||[v.low,v.high],r=[...old];r[i]=Math.max(v.low,Math.min(v.high,Number(value)));if(r[0]>r[1]){alert('搜索范围下限不能大于上限');inspectNode(n);return;}n.params[k][x]=r;};
+window.setBoolParam=(id,k,on)=>{const n=nodes.find(z=>z.id===id);n.params[k]=!!on;render();inspectNode(n);};
 function renderOutputMap(n,k,meta){
   ensureDictParam(n,k); let h=`<label>${meta.label||k} <span class="info" data-tip="模型输出是向量；这里指定 output[几] 驱动每个已选 x。">i</span></label>`;
   h+='<div style="overflow-x:auto"><table class="sens"><tr><th>自变量</th><th>模型输出下标</th></tr>'+
