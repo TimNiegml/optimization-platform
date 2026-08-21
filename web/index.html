@@ -60,6 +60,7 @@
   .sticky-actions { position:sticky; bottom:-1px; display:flex; justify-content:flex-end; gap:8px; padding:10px; margin:12px -4px -4px; background:var(--panel); border-top:1px solid var(--line); }
   .check-list { max-height:180px; overflow:auto; border:1px solid var(--line); border-radius:6px; padding:6px; background:var(--panel2); }
   .check-list .channel-opt { display:block; margin:2px 0; padding:3px 4px; color:var(--text); border-radius:4px; }
+  .check-list table .channel-opt { display:table-row; }
   .check-list .channel-opt:hover { background:var(--panel); }
   .node .bd .badge { display:inline-block; background:var(--panel2); color:var(--warn); border:1px solid var(--line); border-radius:4px; padding:0 4px; font-size:.9em; margin-top:3px; }
   .node .bd .fit { margin-top:5px; padding:3px 5px; background:var(--panel2); border:1px solid var(--line); border-radius:5px; color:var(--ok); font-size:.82em; line-height:1.35; max-height:52px; overflow:hidden; }
@@ -792,6 +793,7 @@ function inspectNode(n){
   h += `<label>keep 约束（可空，如 y1>0.8） <span class="info" data-tip="优化本目标时必须保持的约束，破坏约束的点会被重罚。">i</span></label><input value="${n.keep}" onchange="setF('${n.id}','keep',this.value)">`;
   h += `<label>stop.target（可空，如 y1>0.2） <span class="info" data-tip="本阶段的提前结束条件，达到即停进入下一节点。">i</span></label><input value="${n.stopTarget}" onchange="setF('${n.id}','stopTarget',this.value)">`;
   document.getElementById('inspBody').innerHTML = h;
+  if(isSolve) restoreCheckList('solveTargetChecks');
 }
 
 function observerValue(n){ const visits=lastObservations[n.id]||[]; return visits.length?visits[visits.length-1].values:null; }
@@ -841,12 +843,22 @@ function vectorPlot(v){
   const X=i=>p.l+(vals.length<2?iw/2:i/(vals.length-1)*iw),Y=x=>p.t+ih-(x-lo)/rg*ih;
   return `<svg width="${W}" height="${H}" style="background:var(--chartbg);border:1px solid var(--line);border-radius:6px"><polyline points="${vals.map((x,i)=>`${X(i)},${Y(x)}`).join(' ')}" fill="none" stroke="#14b8a6" stroke-width="1.8"/><text x="${p.l+iw/2}" y="${H-5}" text-anchor="middle" fill="var(--muted)" font-size="9">元素索引（${vals.length} 项）</text></svg><p class="hint">min ${lo.toPrecision(5)} · max ${hi.toPrecision(5)} · mean ${(vals.reduce((a,b)=>a+b,0)/vals.length).toPrecision(5)}</p>`;
 }
-function filterChecks(id,q){q=(q||'').toLowerCase();document.querySelectorAll(`#${id} .channel-opt`).forEach(el=>el.style.display=(el.dataset.name||'').toLowerCase().includes(q)?'block':'none');}
+const checkFilters={};
+function filterChecks(id,q){
+  q=(q||'').toLowerCase();checkFilters[id]=q;
+  let shown=0,total=0;
+  document.querySelectorAll(`#${id} .channel-opt`).forEach(el=>{total++;const on=(el.dataset.name||'').toLowerCase().includes(q);el.style.display=on?'':'none';if(on)shown++;});
+  const stat=document.querySelector(`[data-filter-count="${id}"]`);if(stat)stat.textContent=q?`筛选到 ${shown}/${total}`:`共 ${total} 项`;
+}
+function filterValue(id){return escapeHtml(checkFilters[id]||'');}
+function visibleCheckValues(id){return [...document.querySelectorAll(`#${id} .channel-opt`)].filter(el=>el.style.display!=='none').map(el=>el.dataset.value).filter(v=>v!=null);}
+function updateSelectedCount(id,n,total){const el=document.getElementById(id);if(el)el.textContent=`已选 ${n}/${total}`;}
+function restoreCheckList(id,top=0){filterChecks(id,checkFilters[id]||'');const el=document.getElementById(id);if(el)el.scrollTop=top;}
 function inspectObserver(n){
   const picked=new Set(n.channels||[]); let h=`<label>名称</label><input value="${escapeHtml(n.label)}" onchange="setObserver('${n.id}','label',this.value)">`;
   if(n.observerKind==='scalar'){
     const scalars=availableChannels('scalar').map(c=>c.name);
-    h+=`<label>观测通道（${picked.size}/${scalars.length}）</label><input placeholder="搜索通道…" oninput="filterChecks('observerChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setObserverChannels('${n.id}',true)">全选</button><button class="ghost sm" onclick="setObserverChannels('${n.id}',false)">清空</button></div><div id="observerChecks" class="check-list">`+scalars.map(o=>`<label class="channel-opt" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><input type="checkbox" style="width:auto" ${picked.has(o)?'checked':''} onchange="toggleObserverChannel('${n.id}','${o}',this.checked)"> ${escapeHtml((channels[o]||{}).displayName||o)} <span class="hint">${escapeHtml(o)}</span></label>`).join('')+'</div>';
+    h+=`<label>观测通道（<span id="observerSelectedCount">已选 ${picked.size}/${scalars.length}</span>）</label><input value="${filterValue('observerChecks')}" placeholder="搜索通道…" oninput="filterChecks('observerChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setObserverChannels('${n.id}',true)">全选筛选结果</button><button class="ghost sm" onclick="setObserverChannels('${n.id}',false)">清空筛选结果</button><span class="hint" data-filter-count="observerChecks"></span></div><div id="observerChecks" class="check-list">`+scalars.map(o=>`<label class="channel-opt" data-value="${escapeHtml(o)}" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><input type="checkbox" style="width:auto" ${picked.has(o)?'checked':''} onchange="toggleObserverChannel('${n.id}','${o}',this.checked)"> ${escapeHtml((channels[o]||{}).displayName||o)} <span class="hint">${escapeHtml(o)}</span></label>`).join('')+'</div>';
   } else {
     const isVector=n.observerKind==='vector_plot', arrays=availableChannels(isVector?'vector':'matrix').map(c=>c.name);
     h+=`<label>${isVector?'向量':'矩阵'}通道</label><select onchange="setObserver('${n.id}','matrixChannel',this.value)">${arrays.map(o=>`<option value="${o}" ${o===n.matrixChannel?'selected':''}>${escapeHtml((channels[o]||{}).displayName||o)} · ${escapeHtml(o)}</option>`).join('')}</select>`;
@@ -861,10 +873,11 @@ function inspectObserver(n){
   else { const m=values[n.matrixChannel]; h+=n.observerKind==='vector_plot'?vectorPlot(m):(n.observerKind==='matrix'?matrixTable(m):matrixFeaturePlot(m,n.featureAxis,n.plotStyle,n.showPeaks)); }
   const visits=lastObservations[n.id]||[]; if(visits.length>1) h+=`<p class="hint">循环中共观测 ${visits.length} 次，当前显示最后一次。</p>`;
   document.getElementById('inspBody').innerHTML=h;
+  if(n.observerKind==='scalar') restoreCheckList('observerChecks');
 }
 window.setObserver=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n[k]=v;if(k==='matrixChannel')n.channels=[v];render();inspectObserver(n);};
-window.toggleObserverChannel=(id,o,on)=>{const n=nodes.find(x=>x.id===id),s=new Set(n.channels||[]);on?s.add(o):s.delete(o);n.channels=[...s];render();inspectObserver(n);};
-window.setObserverChannels=(id,on)=>{const n=nodes.find(x=>x.id===id);n.channels=on?availableChannels('scalar').map(c=>c.name):[];render();inspectObserver(n);};
+window.toggleObserverChannel=(id,o,on)=>{const n=nodes.find(x=>x.id===id),s=new Set(n.channels||[]);on?s.add(o):s.delete(o);n.channels=[...s];updateSelectedCount('observerSelectedCount',s.size,availableChannels('scalar').length);render();};
+window.setObserverChannels=(id,on)=>{const n=nodes.find(x=>x.id===id),s=new Set(n.channels||[]),vals=visibleCheckValues('observerChecks');vals.forEach(o=>on?s.add(o):s.delete(o));n.channels=[...s];document.querySelectorAll('#observerChecks .channel-opt').forEach(el=>{if(vals.includes(el.dataset.value))el.querySelector('input[type=checkbox]').checked=on;});updateSelectedCount('observerSelectedCount',s.size,availableChannels('scalar').length);render();};
 
 function inspectTransform(n){
   const ops={identity:'原样转换',transpose:'转置',flatten:'展平',row_mean:'每行均值',column_mean:'每列均值',element:'提取单个元素',mean:'整体均值',max:'最大值',min:'最小值',std:'标准差',normalize_minmax:'Min-Max 归一化',select_row:'选择行',select_column:'选择列',roi:'裁剪 ROI',add:'双输入相加',subtract:'双输入相减',multiply:'双输入相乘',divide:'双输入相除'};
@@ -981,10 +994,10 @@ function renderSolveEditor(n){
   const tg=n.params.targets, sens=n.params.sensitivity;
   const ys=Object.keys(vocs.objectives), xs=n.variables;
   // ---- 因变量目标表：勾选要定值的 y，并逐行填目标值 ----
-  let h=`<label>因变量目标表 y* <span class="info" data-tip="勾选要驱动到目标值的因变量 y，逐行填目标值。可选多个 → 多进多出定值/标定。求解会把选中的 y 同时逼到各自目标。">i</span></label>`;
-  h+=`<div style="overflow-x:auto"><table class="sens"><tr><th>选</th><th>y</th><th>目标值 y*</th></tr>`;
+  let h=`<label>因变量目标表 y*（<span id="solveTargetCount">已选 ${Object.keys(tg).length}/${ys.length}</span>） <span class="info" data-tip="勾选要驱动到目标值的因变量 y，逐行填目标值。可选多个 → 多进多出定值/标定。求解会把选中的 y 同时逼到各自目标。">i</span></label>`;
+  h+=`<input value="${filterValue('solveTargetChecks')}" placeholder="搜索因变量…" oninput="filterChecks('solveTargetChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setSolveTargets('${n.id}',true)">全选筛选结果</button><button class="ghost sm" onclick="setSolveTargets('${n.id}',false)">清空筛选结果</button><span class="hint" data-filter-count="solveTargetChecks"></span></div><div id="solveTargetChecks" class="check-list" style="padding:0"><table class="sens" style="width:100%"><tr><th>选</th><th>y</th><th>目标值 y*</th></tr>`;
   ys.forEach(o=>{ const on=(o in tg);
-    h+=`<tr><td><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleTarget('${n.id}','${o}',this.checked)"></td>
+    h+=`<tr class="channel-opt" data-value="${escapeHtml(o)}" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><td><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleTarget('${n.id}','${o}',this.checked)"></td>
       <th>${o}</th>
       <td><input type="number" step="0.1" value="${on?tg[o]:''}" ${on?'':'disabled'} placeholder="目标值" oninput="setTargetVal('${n.id}','${o}',this.value)"></td></tr>`; });
   h+=`</table></div>`;
@@ -999,10 +1012,11 @@ function renderSolveEditor(n){
   h+=`<div class="sub"><b>次数与两个稳定参数</b><p class="hint" style="margin-bottom:0">Δx = d · S⁺<sub>λ</sub> · (y* − 当前 y)。<br><b>最大修正次数</b>：安全上限，满足残差容差可提前停；测量点最多为次数+1。<br><b>阻尼 d</b>：缩放整步，管“每轮走多远”。<br><b>正则 λ</b>：压制弱/病态方向，管“哪些方向不可信”。</p></div>`;
   return h;
 }
-window.toggleTarget=(id,o,on)=>{ const n=nodes.find(x=>x.id===id); ensureSolve(n);
+window.toggleTarget=(id,o,on)=>{ const n=nodes.find(x=>x.id===id),top=(document.getElementById('solveTargetChecks')||{}).scrollTop||0; ensureSolve(n);
   if(on){ if(n.params.targets[o]==null) n.params.targets[o]=0; }
   else { delete n.params.targets[o]; delete n.params.sensitivity[o]; }
-  render(); inspectNode(n); };
+  render(); inspectNode(n); restoreCheckList('solveTargetChecks',top); };
+window.setSolveTargets=(id,on)=>{const n=nodes.find(x=>x.id===id),top=(document.getElementById('solveTargetChecks')||{}).scrollTop||0;ensureSolve(n);visibleCheckValues('solveTargetChecks').forEach(o=>{if(on){if(n.params.targets[o]==null)n.params.targets[o]=0;}else{delete n.params.targets[o];delete n.params.sensitivity[o];}});render();inspectNode(n);restoreCheckList('solveTargetChecks',top);};
 window.setTargetVal=(id,o,v)=>{ const n=nodes.find(x=>x.id===id); ensureSolve(n); n.params.targets[o]=(v===''?0:+v); };
 window.setSensCell=(id,o,x,v)=>{ const n=nodes.find(x=>x.id===id); ensureSolve(n);
   (n.params.sensitivity[o]=n.params.sensitivity[o]||{})[x]=(v===''?0:+v); };
@@ -1713,15 +1727,16 @@ function openSens(){
 }
 function renderSensForm(){
   const scalarObjs=availableChannels('scalar').map(c=>c.name);
-  document.getElementById('sensVars').innerHTML = `<span class="hint">已选 ${sensVars.length}/${varKeys.length}</span><div class="check-list">`+varKeys.map(v =>
+  document.getElementById('sensVars').innerHTML = `<span class="hint" id="sensVarCount">已选 ${sensVars.length}/${varKeys.length}</span><div class="check-list">`+varKeys.map(v =>
     `<label class="channel-opt"><input type="checkbox" style="width:auto" ${sensVars.includes(v)?'checked':''} onchange="toggleSensVar('${v}',this.checked)"> ${escapeHtml(v)}</label>`).join('')+'</div>';
-  document.getElementById('sensObjs').innerHTML = `<span class="hint">已选 ${sensObjs.length}/${scalarObjs.length}</span><input placeholder="搜索因变量…" oninput="filterChecks('sensObjChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setSensObjs(true)">全选</button><button class="ghost sm" onclick="setSensObjs(false)">清空</button></div><div id="sensObjChecks" class="check-list">`+scalarObjs.map(o =>
-    `<label class="channel-opt" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><input type="checkbox" style="width:auto" ${sensObjs.includes(o)?'checked':''} onchange="toggleSensObj('${o}',this.checked)"> ${escapeHtml((channels[o]||{}).displayName||o)} <span class="hint">${escapeHtml(o)}</span></label>`).join('')+'</div>';
+  document.getElementById('sensObjs').innerHTML = `<span class="hint" id="sensObjCount">已选 ${sensObjs.length}/${scalarObjs.length}</span><input value="${filterValue('sensObjChecks')}" placeholder="搜索因变量…" oninput="filterChecks('sensObjChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setSensObjs(true)">全选筛选结果</button><button class="ghost sm" onclick="setSensObjs(false)">清空筛选结果</button><span class="hint" data-filter-count="sensObjChecks"></span></div><div id="sensObjChecks" class="check-list">`+scalarObjs.map(o =>
+    `<label class="channel-opt" data-value="${escapeHtml(o)}" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><input type="checkbox" style="width:auto" ${sensObjs.includes(o)?'checked':''} onchange="toggleSensObj('${o}',this.checked)"> ${escapeHtml((channels[o]||{}).displayName||o)} <span class="hint">${escapeHtml(o)}</span></label>`).join('')+'</div>';
+  restoreCheckList('sensObjChecks');
   renderSensOrigins();
 }
-window.toggleSensVar=(v,on)=>{ sensVars = on ? [...new Set([...sensVars,v])] : sensVars.filter(x=>x!==v); renderSensForm(); };
-window.toggleSensObj=(o,on)=>{ sensObjs = on ? [...new Set([...sensObjs,o])] : sensObjs.filter(x=>x!==o); renderSensForm(); };
-window.setSensObjs=on=>{sensObjs=on?availableChannels('scalar').map(c=>c.name):[];renderSensForm();};
+window.toggleSensVar=(v,on)=>{ sensVars = on ? [...new Set([...sensVars,v])] : sensVars.filter(x=>x!==v); updateSelectedCount('sensVarCount',sensVars.length,varKeys.length); };
+window.toggleSensObj=(o,on)=>{ sensObjs = on ? [...new Set([...sensObjs,o])] : sensObjs.filter(x=>x!==o); updateSelectedCount('sensObjCount',sensObjs.length,availableChannels('scalar').length); };
+window.setSensObjs=on=>{const s=new Set(sensObjs),vals=visibleCheckValues('sensObjChecks');vals.forEach(o=>on?s.add(o):s.delete(o));sensObjs=[...s];document.querySelectorAll('#sensObjChecks .channel-opt').forEach(el=>{if(vals.includes(el.dataset.value))el.querySelector('input[type=checkbox]').checked=on;});updateSelectedCount('sensObjCount',sensObjs.length,availableChannels('scalar').length);};
 function sensDefault(v){ const V=vocs.variables[v]; return (V.low+V.high)/2; }
 window.sensAddOrigin=()=>{ sensOrigins.push({}); renderSensOrigins(); };
 window.sensDelOrigin=(i)=>{ sensOrigins.splice(i,1); if(!sensOrigins.length) sensOrigins=[{}]; renderSensOrigins(); };
@@ -1860,14 +1875,16 @@ async function openTune(){
 }
 function renderTuneChannelSelect(){
   const box=document.getElementById('tuneChannelSelect');if(!box)return;const scalar=availableChannels('scalar').map(c=>c.name);
-  box.innerHTML=`<div class="trow2"><div><label>候选自变量（已选 ${tuneVars.length}/${varKeys.length}）</label><div class="toolbar" style="margin-bottom:4px"><button class="ghost sm" onclick="setTuneVars(true)">全选</button><button class="ghost sm" onclick="setTuneVars(false)">清空</button></div><div class="check-list">${varKeys.map(v=>`<label class="channel-opt"><input type="checkbox" style="width:auto" ${tuneVars.includes(v)?'checked':''} onchange="toggleTuneVar('${v}',this.checked)"> ${escapeHtml(v)}</label>`).join('')}</div></div>
-  <div><label>目标因变量（已选 ${tuneObjs.length}/${scalar.length}）</label><input placeholder="搜索因变量…" oninput="filterChecks('tuneObjChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setTuneObjs(true)">全选</button><button class="ghost sm" onclick="setTuneObjs(false)">清空</button></div><div id="tuneObjChecks" class="check-list">${scalar.map(o=>`<label class="channel-opt" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><input type="checkbox" style="width:auto" ${tuneObjs.includes(o)?'checked':''} onchange="toggleTuneObj('${o}',this.checked)"> ${escapeHtml((channels[o]||{}).displayName||o)} <span class="hint">${escapeHtml(o)}</span></label>`).join('')}</div></div></div>
-  <div class="glab">组合求解目标值</div><div class="trow2">${tuneObjs.map((o,i)=>`<div><label>${escapeHtml((channels[o]||{}).displayName||o)} · ${escapeHtml(o)}</label><input class="subset-target" data-objective="${escapeHtml(o)}" type="number" step="any" value="${subsetTargets[o]??0}" oninput="subsetTargets['${o}']=+this.value"></div>`).join('')}</div>`;
+  box.innerHTML=`<div class="trow2"><div><label>候选自变量（<span id="tuneVarCount">已选 ${tuneVars.length}/${varKeys.length}</span>）</label><div class="toolbar" style="margin-bottom:4px"><button class="ghost sm" onclick="setTuneVars(true)">全选</button><button class="ghost sm" onclick="setTuneVars(false)">清空</button></div><div id="tuneVarChecks" class="check-list">${varKeys.map(v=>`<label class="channel-opt" data-value="${escapeHtml(v)}"><input type="checkbox" style="width:auto" ${tuneVars.includes(v)?'checked':''} onchange="toggleTuneVar('${v}',this.checked)"> ${escapeHtml(v)}</label>`).join('')}</div></div>
+  <div><label>目标因变量（<span id="tuneObjCount">已选 ${tuneObjs.length}/${scalar.length}</span>）</label><input value="${filterValue('tuneObjChecks')}" placeholder="搜索因变量…" oninput="filterChecks('tuneObjChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setTuneObjs(true)">全选筛选结果</button><button class="ghost sm" onclick="setTuneObjs(false)">清空筛选结果</button><span class="hint" data-filter-count="tuneObjChecks"></span></div><div id="tuneObjChecks" class="check-list">${scalar.map(o=>`<label class="channel-opt" data-value="${escapeHtml(o)}" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><input type="checkbox" style="width:auto" ${tuneObjs.includes(o)?'checked':''} onchange="toggleTuneObj('${o}',this.checked)"> ${escapeHtml((channels[o]||{}).displayName||o)} <span class="hint">${escapeHtml(o)}</span></label>`).join('')}</div></div></div>
+  <div class="glab">组合求解目标值</div><div id="tuneTargetInputs" class="trow2"></div>`;
+  restoreCheckList('tuneObjChecks');renderTuneTargets();
 }
-window.toggleTuneVar=(v,on)=>{tuneVars=on?[...new Set([...tuneVars,v])]:tuneVars.filter(x=>x!==v);renderTuneChannelSelect();};
-window.toggleTuneObj=(o,on)=>{tuneObjs=on?[...new Set([...tuneObjs,o])]:tuneObjs.filter(x=>x!==o);renderTuneChannelSelect();};
-window.setTuneVars=on=>{tuneVars=on?varKeys.slice():[];renderTuneChannelSelect();};
-window.setTuneObjs=on=>{tuneObjs=on?availableChannels('scalar').map(c=>c.name):[];renderTuneChannelSelect();};
+function renderTuneTargets(){const el=document.getElementById('tuneTargetInputs');if(el)el.innerHTML=tuneObjs.map(o=>`<div><label>${escapeHtml((channels[o]||{}).displayName||o)} · ${escapeHtml(o)}</label><input class="subset-target" data-objective="${escapeHtml(o)}" type="number" step="any" value="${subsetTargets[o]??0}" oninput="subsetTargets['${o}']=+this.value"></div>`).join('');}
+window.toggleTuneVar=(v,on)=>{tuneVars=on?[...new Set([...tuneVars,v])]:tuneVars.filter(x=>x!==v);updateSelectedCount('tuneVarCount',tuneVars.length,varKeys.length);};
+window.toggleTuneObj=(o,on)=>{tuneObjs=on?[...new Set([...tuneObjs,o])]:tuneObjs.filter(x=>x!==o);updateSelectedCount('tuneObjCount',tuneObjs.length,availableChannels('scalar').length);renderTuneTargets();};
+window.setTuneVars=on=>{tuneVars=on?varKeys.slice():[];document.querySelectorAll('#tuneVarChecks input[type=checkbox]').forEach(x=>x.checked=on);updateSelectedCount('tuneVarCount',tuneVars.length,varKeys.length);};
+window.setTuneObjs=on=>{const s=new Set(tuneObjs),vals=visibleCheckValues('tuneObjChecks');vals.forEach(o=>on?s.add(o):s.delete(o));tuneObjs=[...s];document.querySelectorAll('#tuneObjChecks .channel-opt').forEach(el=>{if(vals.includes(el.dataset.value))el.querySelector('input[type=checkbox]').checked=on;});updateSelectedCount('tuneObjCount',tuneObjs.length,availableChannels('scalar').length);renderTuneTargets();};
 async function runVariableSubsetTest(){
   const box=document.getElementById('subsetBody');
   if(!lastSens){box.innerHTML='<p style="color:var(--danger)">请先打开“灵敏度采集”，选择这些 x/y 并完成一次采集。</p>';return;}
