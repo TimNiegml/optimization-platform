@@ -18,7 +18,7 @@ from typing import Iterable, Optional
 
 from asteval import Interpreter
 
-from .evaluator import Evaluator
+from .evaluator import Evaluator, with_derived_outputs
 from .generators import (
     CoordinateDescent,
     FormulaMethod,
@@ -40,7 +40,7 @@ class StageEngine:
     def __init__(self, vocs: VOCS, evaluator: Evaluator, eval_budget: int = 5000,
                  start_point: Optional[dict[str, float]] = None):
         self.vocs = vocs
-        self.evaluator = evaluator
+        self.evaluator = with_derived_outputs(evaluator, vocs)
         self.eval_budget = eval_budget
         self.state: dict[str, float] = dict(start_point) if start_point else vocs.initial_point()
         self.last_y: dict[str, float] = {}
@@ -48,6 +48,7 @@ class StageEngine:
         self.n_evals = 0
         self.events: list[str] = []
         self.fits: dict[str, str] = {}            # stage name -> fitted-formula summary
+        self.observations: dict[str, list[dict]] = {}  # observer node id -> visit snapshots
         self.global_until: Optional[str] = None   # driver sets this; checked per-eval
         # 观察者钩子（可选）：每完成一次测量就被调用一次 on_eval(x, y, stage, n_evals)。
         # 纯旁观——不改变任何执行语义，只是让"实时看着 x/y 在动"这类界面成为可能
@@ -120,6 +121,12 @@ class StageEngine:
         a multi-objective trade-off.
         """
         weights = step.get("objective_weights")
+        selected = set(weights or {obj_name})
+        arrays = [k for k in selected if k in self.vocs.objectives
+                  and self.vocs.objectives[k].value_type.value != "scalar"]
+        if arrays:
+            raise ValueError(f"array channels cannot be optimized directly: {arrays}; "
+                             "use an element target, observer, or scalar derived feature")
         if weights:
             objs = {k: self.vocs.objectives[k] for k in weights if k in self.vocs.objectives}
             return lambda y: sum(w * objs[k].score(y[k]) for k, w in weights.items() if k in objs)
@@ -134,7 +141,18 @@ class StageEngine:
             self.events.append("⛔ evaluation budget exhausted → stop")
             raise StopAll
         y = self.evaluator.evaluate(x, stage=stage, channels=channels)
+        # A requested derived channel is backed by freshly read physical
+        # dependencies which are intentionally hidden from the public return.
+        # Merge them into the latest-value cache before refreshing all z values.
+        latest = getattr(self.evaluator, "latest_values", None)
+        if latest:
+            self.last_y.update(latest)
         self.last_y.update(y)
+        # Selective reads must not leave computed objectives stale in the live
+        # state. Refresh z values from the newest available physical y cache.
+        enrich = getattr(self.evaluator, "enrich_available", None)
+        if enrich is not None:
+            enrich(self.last_y)
         self._last_x = dict(x)
         if self.on_eval is not None:
             self.on_eval(dict(x), dict(self.last_y), stage, self.n_evals)
@@ -149,6 +167,24 @@ class StageEngine:
     def prime(self) -> None:
         """Measure the starting point so conditions have values to read."""
         self.evaluate(dict(self.state), "init")
+
+    def observe(self, node_id: str, data: dict) -> None:
+        """Take a read-only workflow snapshot at the current operating point.
+
+        Observer nodes deliberately go through ``evaluate``: on real hardware
+        this means the displayed value is a fresh acquisition with the same
+        safety, averaging, cost accounting and channel-selection semantics as
+        optimization stages.  They never move the operating point.
+        """
+        channels = set(data.get("channels") or self.vocs.objectives)
+        unknown = channels - set(self.vocs.objectives)
+        if unknown:
+            raise ValueError(f"observer {node_id!r} references unknown channels: {sorted(unknown)}")
+        values = self.evaluate(dict(self.state), f"observer:{node_id}", channels)
+        snap = {"visit": len(self.observations.get(node_id, [])) + 1,
+                "kind": data.get("kind", "scalar"), "values": values}
+        self.observations.setdefault(node_id, []).append(snap)
+        self.events.append(f"👁 observer '{data.get('label') or node_id}' captured {sorted(values)}")
 
     # ---- run one algorithm stage against the current operating point ----
     def run_stage(self, step: dict) -> None:
@@ -213,6 +249,7 @@ class StageEngine:
             "events": self.events,
             "history": self.evaluator.history,
             "fits": self.fits,
+            "observations": self.observations,
             "reads": getattr(self.evaluator, "reads", {}),
             "sim_seconds": getattr(self.evaluator, "sim_seconds", 0.0),
         }

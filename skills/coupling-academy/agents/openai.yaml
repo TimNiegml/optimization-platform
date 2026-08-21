@@ -1,0 +1,4 @@
+interface:
+  display_name: "耦合学院"
+  short_description: "通过分级实操课程熟悉光器件优化平台并获得即时判题反馈"
+  default_prompt: "请启动耦合学院，根据我的水平带我逐步完成平台练习并检查结果。"

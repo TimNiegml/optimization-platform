@@ -27,12 +27,13 @@ import threading
 import time
 from typing import Any, Optional
 
+import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from .autotune import TuneSpec, run_autotune
+from .autotune import TuneSpec, demonstrate_candidate, run_autotune
 from .demo import BENCHES, bench_func, demo_vocs, optical_bench
 from .evaluator import Evaluator
 from .graph import GraphRunner
@@ -170,6 +171,7 @@ def _result(res: dict) -> dict[str, Any]:
         "events": res["events"],
         "history": res["history"],
         "fits": res.get("fits", {}),
+        "observations": res.get("observations", {}),
         "reads": res.get("reads", {}),
         "sim_seconds": res.get("sim_seconds", 0.0),
     }
@@ -246,11 +248,27 @@ def surface(req: SurfaceRequest):
 @app.get("/vocs")
 def vocs():
     v = DEVICE.vocs() if DEVICE is not None else demo_vocs()
+    info = DEVICE.info() if DEVICE is not None else None
+    axis_info = {a["name"]: a for a in (info or {}).get("axes", [])}
+    meter_info = {m["name"]: m for m in (info or {}).get("meters", [])}
     return {
-        "variables": {n: {"low": var.low, "high": var.high} for n, var in v.variables.items()},
+        "variables": {n: {"low": var.low, "high": var.high,
+                           "resolution": var.resolution,
+                           "current": axis_info.get(n, {}).get("pos"),
+                           "device": axis_info.get(n, {}).get("device"),
+                           "param": axis_info.get(n, {}).get("param", n)}
+                      for n, var in v.variables.items()},
         "objectives": {n: {"mode": o.mode.value, "cost": o.cost,
-                           "device": o.device, "param": o.param, "group": o.group}
+                           "target": o.target,
+                           "device": o.device, "param": o.param, "group": o.group,
+                           "expression": o.expression, "value_type": o.value_type.value,
+                           "display_name": meter_info.get(n, {}).get("display_name", n),
+                           "unit": meter_info.get(n, {}).get("unit"),
+                           "shape": meter_info.get(n, {}).get("shape"),
+                           "dtype": meter_info.get(n, {}).get("dtype")}
                        for n, o in v.objectives.items()},
+        "device": {"source": info["source"], "n_axes": info["n_axes"],
+                   "n_meters": info["n_meters"]} if info else None,
     }
 
 
@@ -380,6 +398,22 @@ def device_info():
     return {"device": DEVICE.info() if DEVICE is not None else None}
 
 
+@app.post("/device/probe")
+def probe_device():
+    """Read every configured channel once at the current hardware position."""
+    if DEVICE is None:
+        raise HTTPException(status_code=400, detail="no external device is loaded")
+    values = DEVICE.evaluator(averages=1).evaluate(DEVICE.current_point(), stage="probe")
+    out = {}
+    for name, value in values.items():
+        arr = np.asarray(value)
+        numeric = np.asarray(value, dtype=float)
+        out[name] = {"value": value, "shape": list(arr.shape), "dtype": str(arr.dtype),
+                     "min": float(numeric.min()), "max": float(numeric.max()),
+                     "mean": float(numeric.mean())}
+    return {"point": DEVICE.current_point(), "channels": out}
+
+
 @app.get("/autotune/space")
 def autotune_space():
     """Per-phase algorithms + their auto-derived 变异档位 — the canvas renders an
@@ -456,6 +490,40 @@ def autotune(spec: TuneSpec):
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
 
 
+class AutotuneDemoRequest(BaseModel):
+    spec: TuneSpec
+    graph: dict
+
+
+class VariableSubsetRequest(BaseModel):
+    sensitivity: dict
+    objectives: list[str]
+    candidates: list[str]
+    select_n: int
+    targets: Optional[dict[str, float]] = None
+
+
+@app.post("/autotune/variable-subsets")
+def autotune_variable_subsets(req: VariableSubsetRequest):
+    """Rank k-of-n actuator choices for the selected multi-output solve."""
+    from .autotune import rank_variable_subsets
+    try:
+        ranked = rank_variable_subsets(req.sensitivity, req.objectives, req.candidates,
+                                       req.select_n, req.targets)
+        return {"ranked": ranked, "n_combinations": len(ranked)}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"{type(exc).__name__}: {exc}")
+
+
+@app.post("/autotune/demo")
+def autotune_demo(req: AutotuneDemoRequest):
+    """Replay one ranked strategy over all seeded random-start cases."""
+    try:
+        return demonstrate_candidate(req.spec, req.graph)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+
 # ============================ live workspace (agent ↔ canvas) ============================
 class WorkspacePatch(BaseModel):
     graph: Optional[dict] = None
@@ -495,6 +563,14 @@ async def workspace_stream(sid: str, request: Request):
                 last = rev
                 yield {"event": "update", "data": json.dumps(WORKSPACE.snapshot(sid))}
     return EventSourceResponse(gen())
+
+
+@app.get("/workspace/{sid}/messages/wait")
+def workspace_wait_messages(sid: str, timeout: float = 25.0, mark_read: bool = True):
+    """Long-poll inbox for an external Hermes/Agent gateway process."""
+    messages = WORKSPACE.wait_user_messages(sid, timeout, mark_read)
+    return {"session": sid, "messages": messages, "count": len(messages),
+            "timed_out": not bool(messages)}
 
 
 # Mount the agent-facing MCP endpoint (streamable-HTTP) at /mcp.

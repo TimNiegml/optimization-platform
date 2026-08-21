@@ -8,6 +8,7 @@ import math
 import os
 
 import pytest
+import numpy as np
 
 from optplat.autotune import TuneSpec, _random_start, run_autotune
 from optplat.demo import demo_vocs, linear_sens_bench, nonlinear_sens_bench
@@ -15,6 +16,7 @@ from optplat.evaluator import Evaluator, read_seconds
 from optplat.generators import (
     CoordinateDescent,
     DampedSensitivity,
+    GradientAscent,
     GridScan,
     NelderMead,
 )
@@ -25,6 +27,43 @@ from optplat.userdev import load_device
 from optplat.workspace import WorkspaceStore
 
 _DEVICE = os.path.join(os.path.dirname(__file__), "..", "examples", "device_template.py")
+
+
+def test_dataframe_like_measurement_is_normalized_without_pandas_dependency():
+    class FrameLike:
+        def to_numpy(self):
+            return np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    ev = Evaluator(lambda x: {"table": FrameLike()})
+    assert ev.evaluate({}, channels={"table"})["table"] == [[1.0, 2.0], [3.0, 4.0]]
+
+
+def test_external_device_accepts_and_averages_matrix_meter():
+    from optplat.userdev import Axis, DeviceSpec, Meter
+
+    readings = iter(([[1, 2], [3, 4]], [[3, 4], [5, 6]]))
+    spec = DeviceSpec([Axis("x1", 0, 1)], [
+        Meter("camera", lambda: next(readings), value_type="matrix")])
+    assert spec.vocs().objectives["camera"].value_type.value == "matrix"
+    result = spec.evaluator(averages=2).evaluate({"x1": 0.5}, channels={"camera"})
+    assert result["camera"] == [[2.0, 3.0], [4.0, 5.0]]
+
+
+def test_external_device_accepts_and_averages_vector_meter():
+    from optplat.userdev import Axis, DeviceSpec, Meter
+
+    readings = iter(([1, 2, 3], [3, 4, 5]))
+    axis = Axis("x1", 0, 1, pos=0.25, device="stage", param="A")
+    spec = DeviceSpec([axis], [Meter("spectrum", lambda: next(readings), value_type="vector",
+                                           display_name="光谱", unit="dB", shape=(3,), dtype="float64")])
+    assert spec.vocs().objectives["spectrum"].value_type.value == "vector"
+    assert spec.evaluator(averages=2).evaluate({"x1": 0.5})["spectrum"] == [2.0, 3.0, 4.0]
+    assert spec.info()["axes"][0] == {
+        "name": "x1", "low": 0.0, "high": 1.0, "pos": 0.5,
+        "resolution": None, "device": "stage", "param": "A"}
+    meter = spec.info()["meters"][0]
+    assert (meter["display_name"], meter["unit"], meter["shape"], meter["dtype"]) == (
+        "光谱", "dB", [3], "float64")
 
 
 # ---------------- DampedSensitivity ----------------
@@ -91,6 +130,31 @@ def test_damped_sensitivity_regularised_inverse_is_stable():
     assert max(abs(v) for v in dx) < 1e6                # bounded, not exploded
 
 
+def test_damped_sensitivity_max_solves_counts_actuator_corrections():
+    """One configured solve means one Δx correction plus a verification read."""
+    vocs = demo_vocs()
+    gen = DampedSensitivity(
+        vocs, ["x1"], "y1", sensitivity={"y1": {"x1": 1.0}},
+        targets={"y1": 1.0}, damping=1.0, max_solves=1,
+    )
+    gen.set_base({"x1": 0.0, "x2": 0.0, "x3": 0.0})
+    first = gen.ask()
+    gen.observe(first, {"y1": 0.0})
+    corrected = gen.ask()
+    assert corrected["x1"] > first["x1"]
+    assert not gen.done
+    gen.observe(corrected, {"y1": 0.5})
+    assert gen.done
+    assert gen._solves == 1
+
+
+def test_damped_sensitivity_rejects_invalid_iteration_settings():
+    vocs = demo_vocs()
+    with pytest.raises(ValueError, match="max_solves"):
+        DampedSensitivity(vocs, ["x1"], "y1", sensitivity=[[1.0]],
+                          targets={"y1": 1.0}, max_solves=0)
+
+
 # ---------------- relative scan window + per-axis hyperparameters ----------------
 def test_grid_scan_relative_window_centres_on_start():
     vocs = demo_vocs()
@@ -113,12 +177,56 @@ def test_grid_scan_absolute_by_default():
     assert min(xs) == vocs.variables["x1"].low and max(xs) == vocs.variables["x1"].high
 
 
+def test_grid_scan_explicit_axis_range_overrides_relative_window():
+    vocs = demo_vocs()
+    g = GridScan(vocs, ["x1"], "y1", n_per_axis=3, span_frac=0.1,
+                 search_ranges={"x1": [1.0, 2.0]})
+    g.set_base({"x1": 4.0, "x2": 0.0, "x3": 0.0})
+    xs = [g.ask()["x1"] for _ in range(3)]
+    assert xs == pytest.approx([1.0, 1.5, 2.0])
+
+
 def test_coordinate_descent_per_axis_step():
     vocs = demo_vocs()
     g = CoordinateDescent(vocs, ["x1", "x2"], "y1", steps={"x1": 0.5})
     assert g._step["x1"] == 0.5                          # explicit per-axis override
     assert g._step["x2"] == pytest.approx(
         0.25 * (vocs.variables["x2"].high - vocs.variables["x2"].low))   # frac fallback
+
+
+def test_coordinate_descent_can_stop_without_reducing_step():
+    vocs = demo_vocs()
+    g = CoordinateDescent(vocs, ["x1"], "y1", steps={"x1": 0.5}, refine_step=False)
+    g.set_base({"x1": 0.0, "x2": 0.0, "x3": 0.0})
+    p = g.ask(); g.tell(p, 1.0)
+    for _ in range(2):
+        p = g.ask(); g.tell(p, 0.0)
+    assert g.done
+    assert g._step["x1"] == pytest.approx(0.5)
+
+
+def test_coordinate_descent_shrink_patience_and_factor():
+    vocs = demo_vocs()
+    g = CoordinateDescent(vocs, ["x1"], "y1", steps={"x1": 1.0},
+                          shrink_patience=2, shrink_factor=0.25)
+    g.set_base({"x1": 0.0, "x2": 0.0, "x3": 0.0})
+    p = g.ask(); g.tell(p, 1.0)
+    for _ in range(2):
+        p = g.ask(); g.tell(p, 0.0)
+    assert g._step["x1"] == pytest.approx(1.0)
+    for _ in range(2):
+        p = g.ask(); g.tell(p, 0.0)
+    assert g._step["x1"] == pytest.approx(0.25)
+
+
+def test_gradient_can_stop_on_first_failed_line_step_without_shrinking():
+    vocs = demo_vocs()
+    g = GradientAscent(vocs, ["x1"], "y1", shrink_on_fail=False)
+    g.set_base({"x1": 0.0, "x2": 0.0, "x3": 0.0})
+    p = g.ask(); g.tell(p, 0.0)       # base
+    p = g.ask(); g.tell(p, 1.0)       # non-zero measured gradient
+    p = g.ask(); g.tell(p, 0.0)       # line step fails
+    assert g.done
 
 
 def test_nelder_mead_per_axis_simplex():

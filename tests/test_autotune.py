@@ -1,9 +1,11 @@
 """AutoTuner (L1) + ModelProvider tests."""
 from optplat.autotune import (
     TuneSpec,
+    demonstrate_candidate,
     default_variation,
     generate_candidates,
     phase_algorithms,
+    rank_variable_subsets,
     run_autotune,
 )
 from optplat.demo import optical_bench
@@ -22,6 +24,29 @@ def test_generate_candidates_are_three_phase_graphs():
         # nodes chain via edges; at least one algorithm node
         assert all(n["type"] == "algorithm" for n in g["nodes"])
         assert c["label"]
+
+
+def test_rank_variable_subsets_finds_well_conditioned_four_of_six():
+    objectives = [f"y{i}" for i in range(1, 5)]
+    variables = [f"x{i}" for i in range(1, 7)]
+    # x1..x4 independently control the four outputs; x5/x6 are nearly duplicate
+    # weak directions and should not displace the identity columns.
+    cols = {
+        "x1": [1, 0, 0, 0], "x2": [0, 1, 0, 0],
+        "x3": [0, 0, 1, 0], "x4": [0, 0, 0, 1],
+        "x5": [1, 1, 0, 0], "x6": [0, 0, 0.01, 0.01],
+    }
+    sensitivity = {o: {x: cols[x][i] for x in variables}
+                   for i, o in enumerate(objectives)}
+    ranked = rank_variable_subsets(sensitivity, objectives, variables, 4,
+                                   targets={o: 1.0 for o in objectives})
+    assert len(ranked) == 15
+    assert ranked[0]["variables"] == ["x1", "x2", "x3", "x4"]
+    assert ranked[0]["full_rank"] and ranked[0]["condition"] == 1.0
+    assert any(row["condition"] is None for row in ranked if not row["full_rank"])
+    node = ranked[0]["graph"]["nodes"][0]["data"]
+    assert node["variables"] == ["x1", "x2", "x3", "x4"]
+    assert node["targets"] == {o: 1.0 for o in objectives}
 
 
 def test_variation_is_registry_driven():
@@ -64,6 +89,19 @@ def test_run_autotune_ranks_and_scores():
         assert {"quality", "time", "stability", "utility", "pareto", "graph"} <= set(r)
     assert any(r["pareto"] for r in res["ranked"])
     assert top["quality"] > 0.9                       # best workflow solves single_peak
+
+
+def test_candidate_demo_replays_each_seed_with_history_and_summary():
+    spec = TuneSpec(bench="single_peak", n_trials=2, noise_levels=[0.0, 0.02],
+                    max_candidates=2, seed=11, random_start=True)
+    ranked = run_autotune(spec)["ranked"]
+    demo = demonstrate_candidate(spec, ranked[0]["graph"])
+    assert len(demo["cases"]) == 4
+    assert demo["summary"]["n_cases"] == 4
+    assert demo["summary"]["n_success"] == 4
+    assert all(c["history"] and c["start"] and c["final_state"] for c in demo["cases"])
+    assert {c["seed"] for c in demo["cases"]} == {11, 18, 31, 38}
+    assert 0 <= demo["summary"]["reached_rate"] <= 1
 
 
 def test_weights_shift_ranking_toward_speed():

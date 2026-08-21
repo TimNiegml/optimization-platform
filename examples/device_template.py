@@ -24,8 +24,10 @@ from optplat.userdev import Axis, Meter, Source
 
 # ---- 1) 定义轴（自变量 x）。真实台架里 move/get 换成电机调用 ----
 # 这里用带内部状态的模拟轴：move 记录位置，get 读回位置。
-x1 = Axis("x1", low=-2.0, high=6.0, pos=5.0)     # pos = 上电时的当前位置（起点从这来）
-x2 = Axis("x2", low=-5.0, high=3.0, pos=-3.0)
+x1 = Axis("x1", low=-2.0, high=6.0, pos=5.0,
+          device="六轴位移台", param="axis_1")     # pos = 上电时的当前位置（起点从这来）
+x2 = Axis("x2", low=-5.0, high=3.0, pos=-3.0,
+          device="六轴位移台", param="axis_2")
 
 AXES = [x1, x2]
 
@@ -69,6 +71,21 @@ METERS = [
 #     pm.meter("y1", "power1", mode="maximize"),     # y1 取 power1
 #     pm.meter("y3", "power2", mode="target", target=0.0),   # y3 取 power2
 #     Meter("y2", _read_balance, mode="target", target=0.0, cost=2.0),  # 另一台仪器照旧
+# ]
+
+# 同一次采集返回矩阵、向量和标量时，写法完全相同：
+# def _read_camera_once():
+#     result = camera.measure()
+#     return {"image": result.image, "spectrum": result.spectrum, "power": result.power}
+#
+# camera_source = Source("camera", _read_camera_once, cost=1.0, device="相机/光谱仪")
+# METERS = [
+#     camera_source.meter("y1", "image", value_type="matrix", mode="scan",
+#                         display_name="MTF矩阵", unit="dB", shape=(32, 101), dtype="float64"),
+#     camera_source.meter("y2", "spectrum", value_type="vector", mode="scan",
+#                         display_name="MTF曲线", unit="dB", shape=(101,), dtype="float64"),
+#     camera_source.meter("y3", "power", value_type="scalar", mode="maximize",
+#                         display_name="耦合功率", unit="dBm", dtype="float64"),
 # ]
 
 

@@ -1,0 +1,12 @@
+{
+  "$comment": "耦合学院复用 optplat MCP。将地址和 token 替换为平台实际配置；Hermes 加载本 Skill 后仍需连接同一服务器。",
+  "mcpServers": {
+    "optplat": {
+      "type": "http",
+      "url": "https://REPLACE-WITH-PLATFORM-HOST/mcp",
+      "headers": {
+        "Authorization": "Bearer REPLACE-WITH-OPTPLAT_TOKEN"
+      }
+    }
+  }
+}

@@ -121,6 +121,19 @@ def test_bayes_span_frac_zero_searches_the_full_range():
     assert max(pts) - min(pts) > 0.5 * (v.variables["x1"].high - v.variables["x1"].low)
 
 
+def test_bayes_explicit_axis_range_overrides_relative_window():
+    pytest.importorskip("optuna")
+    from optplat.bayes import BayesianGenerator
+    v = demo_vocs()
+    g = BayesianGenerator(v, ["x1"], "y1", n_calls=12, seed=0, span_frac=0.8,
+                          search_ranges={"x1": [1.25, 1.75]})
+    g.set_base({"x1": 4.0, "x2": 0.0, "x3": 0.5})
+    pts = []
+    while not g.done:
+        p = g.ask(); pts.append(p["x1"]); g.tell(p, 0.0)
+    assert all(1.25 <= x <= 1.75 for x in pts)
+
+
 def test_bayes_exploration_knobs_are_accepted_and_run():
     pytest.importorskip("optuna")
     from optplat.bayes import BayesianGenerator

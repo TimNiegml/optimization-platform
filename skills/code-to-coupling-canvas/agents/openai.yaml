@@ -1,0 +1,4 @@
+interface:
+  display_name: "代码到耦合画布"
+  short_description: "解析代码并转成可拖拽流程，同时识别平台缺失组件并生成修改规格"
+  default_prompt: "请解析这段代码，拆成步骤并映射到耦合平台画布；标出缺失组件并生成修改提示词。"

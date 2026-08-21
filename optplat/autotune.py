@@ -21,6 +21,7 @@ implementation body of the future MCP `autotune` tool.
 from __future__ import annotations
 
 import itertools
+import math
 import statistics
 from typing import Optional
 
@@ -34,6 +35,56 @@ from .hardware import HardwareEvaluator, SimulatedMeter, SimulatedStage
 from .models import build_model
 from .registry import REGISTRY
 from .vocs import VOCS
+
+
+def rank_variable_subsets(sensitivity: dict, objectives: list[str],
+                          candidates: list[str], select_n: int,
+                          targets: Optional[dict[str, float]] = None) -> list[dict]:
+    """Rank actuator subsets for a multi-output sensitivity solve.
+
+    Columns are normalized before conditioning so unlike physical units do not
+    dominate the comparison. Full-rank, low-condition subsets rank first.
+    """
+    import numpy as np
+    if not objectives or not candidates:
+        raise ValueError("objectives and candidate variables must not be empty")
+    if select_n < 1 or select_n > len(candidates):
+        raise ValueError("select_n must be between 1 and the candidate variable count")
+    if select_n < len(objectives):
+        raise ValueError("select_n must be at least the objective count")
+    missing = [(o, x) for o in objectives for x in candidates
+               if o not in sensitivity or x not in sensitivity[o]]
+    if missing:
+        raise ValueError(f"sensitivity matrix is missing {missing[0][0]}/{missing[0][1]}")
+    rows = []
+    for variables in itertools.combinations(candidates, select_n):
+        matrix = np.asarray([[float(sensitivity[o][x]) for x in variables]
+                             for o in objectives], dtype=float)
+        norms = np.linalg.norm(matrix, axis=0)
+        normalized = matrix / np.where(norms > 1e-12, norms, 1.0)
+        singular = np.linalg.svd(normalized, compute_uv=False)
+        rank = int(np.linalg.matrix_rank(normalized))
+        full_rank = rank == len(objectives)
+        smallest = float(singular[-1]) if len(singular) else 0.0
+        condition = float(singular[0] / smallest) if smallest > 1e-12 else math.inf
+        score = (1.0 / condition) if full_rank and math.isfinite(condition) else 0.0
+        selected_sensitivity = {o: {x: float(sensitivity[o][x]) for x in variables}
+                                for o in objectives}
+        graph = {"nodes": [{"id": "subset_solve", "type": "algorithm", "data": {
+            "algorithm": "damped_sensitivity", "variables": list(variables),
+            "objective": objectives[0], "targets": {o: float((targets or {}).get(o, 0.0))
+                                                       for o in objectives},
+            "sensitivity": selected_sensitivity}}], "edges": []}
+        rows.append({"variables": list(variables), "rank": rank,
+                     "full_rank": full_rank, "condition": condition,
+                     "min_singular": smallest, "score": score,
+                     "sensitivity": selected_sensitivity, "graph": graph})
+    rows.sort(key=lambda r: (not r["full_rank"], r["condition"], -r["min_singular"], r["variables"]))
+    for i, row in enumerate(rows, 1):
+        row["position"] = i
+        if not math.isfinite(row["condition"]):
+            row["condition"] = None
+    return rows
 
 # Which registry `category` belongs to which pipeline phase. A NEW algorithm
 # only has to declare its category — it then joins the right phase automatically,
@@ -340,6 +391,53 @@ def evaluate_candidate(spec: TuneSpec, vocs: VOCS, model_fn, costs, graph: dict)
         stability = max(0.0, 1.0 - (sd / abs(mean) if mean else 0.0))
     return {"quality": q, "time": tm, "stability": stability, "evals": ev_mean,
             "detail": {"quality_all": qs, "success_rate": (statistics.fmean(succ) if succ else 0.0)}}
+
+
+def demonstrate_candidate(spec: TuneSpec, graph: dict) -> dict:
+    """Replay one strategy over the exact seeded autotune cases with traces.
+
+    Search results stay compact; detailed histories are generated only when a
+    user clicks “演示”. Each case corresponds to one noise-level/trial pair and
+    exposes its random start, 2-D x trajectory, objective convergence and final
+    score, plus an aggregate summary across cases.
+    """
+    vocs = demo_vocs()
+    costs = {name: o.cost for name, o in vocs.objectives.items()}
+    model_fn = build_model(spec.model) if spec.model else build_model(
+        {"kind": "analytic", "bench": spec.bench})
+    qobj = spec.quality_obj or spec.landscape_obj
+    cases = []
+    for noise in spec.noise_levels:
+        for trial in range(spec.n_trials):
+            seed = spec.seed + trial * 7 + int(noise * 1000)
+            start = _random_start(vocs, spec, seed) if spec.random_start else vocs.initial_point()
+            try:
+                ev = _make_evaluator(vocs, model_fn, costs, noise, seed)
+                res = GraphRunner(vocs, ev, graph, eval_budget=spec.eval_budget,
+                                  start_point=start).run()
+                history = [{k: v for k, v in row.items()
+                            if k == "stage" or k in vocs.variables or k in vocs.objectives}
+                           for row in res.get("history", [])]
+                cases.append({"trial": trial + 1, "noise": noise, "seed": seed,
+                              "start": start, "final_state": res["state"],
+                              "objectives": res["objectives"], "quality": float(res["objectives"].get(qobj, 0)),
+                              "reached": bool(_reached(spec.target, res)), "n_evals": res["n_evals"],
+                              "sim_seconds": res.get("sim_seconds", 0), "history": history})
+            except Exception as exc:
+                cases.append({"trial": trial + 1, "noise": noise, "seed": seed,
+                              "start": start, "error": f"{type(exc).__name__}: {exc}", "history": []})
+    ok = [c for c in cases if "error" not in c]
+    qualities = [c["quality"] for c in ok]
+    return {"cases": cases, "summary": {
+        "n_cases": len(cases), "n_success": len(ok),
+        "quality_mean": statistics.fmean(qualities) if qualities else 0.0,
+        "quality_min": min(qualities) if qualities else 0.0,
+        "quality_max": max(qualities) if qualities else 0.0,
+        "reached_rate": statistics.fmean([1.0 if c["reached"] else 0.0 for c in ok]) if ok else 0.0,
+        "evals_mean": statistics.fmean([c["n_evals"] for c in ok]) if ok else 0.0,
+        "time_mean": statistics.fmean([c["sim_seconds"] for c in ok]) if ok else 0.0,
+    }, "variables": list(vocs.variables), "objectives": list(vocs.objectives),
+       "quality_obj": qobj}
 
 
 def _norm(vals: list[float], higher_better: bool) -> list[float]:

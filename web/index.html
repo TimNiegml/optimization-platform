@@ -45,12 +45,23 @@
   #canvasWrap { position:relative; overflow:hidden; background:
      radial-gradient(circle, var(--grid) 1px, transparent 1px) 0 0/22px 22px, var(--bg); }
   svg#edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
-  .node { position:absolute; width:160px; background:var(--panel); border:1px solid var(--line); border-top-width:3px; border-radius:8px; font-size:var(--fs); user-select:none; box-shadow:var(--shadow); }
+  .node { position:absolute; width:200px; background:var(--panel); border:1px solid var(--line); border-top-width:3px; border-radius:8px; font-size:var(--fs); user-select:none; box-shadow:var(--shadow); }
   .node.sel { box-shadow:0 0 0 2px var(--accent), var(--shadow); }
   .node .hd { padding:6px 8px; border-bottom:1px solid var(--line); cursor:move; font-weight:600; display:flex; justify-content:space-between; align-items:center; gap:5px; }
   .node .hd .dot { width:9px; height:9px; border-radius:50%; flex:none; }
   .node .hd .ttl { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .node .bd { padding:6px 8px; color:var(--muted); font-size:.86em; line-height:1.4; }
+  .node .bd { overflow:hidden; text-overflow:ellipsis; }
+  .data-table { width:100%; border-collapse:collapse; font-size:11px; }
+  .data-table th,.data-table td { border-bottom:1px solid var(--line); padding:7px 6px; text-align:left; vertical-align:top; }
+  .data-table th { color:var(--muted); position:sticky; top:0; background:var(--panel); }
+  .name-short { font-weight:600; color:var(--text); max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .name-raw { color:var(--muted); font-family:monospace; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sticky-actions { position:sticky; bottom:-1px; display:flex; justify-content:flex-end; gap:8px; padding:10px; margin:12px -4px -4px; background:var(--panel); border-top:1px solid var(--line); }
+  .check-list { max-height:180px; overflow:auto; border:1px solid var(--line); border-radius:6px; padding:6px; background:var(--panel2); }
+  .check-list .channel-opt { display:block; margin:2px 0; padding:3px 4px; color:var(--text); border-radius:4px; }
+  .check-list table .channel-opt { display:table-row; }
+  .check-list .channel-opt:hover { background:var(--panel); }
   .node .bd .badge { display:inline-block; background:var(--panel2); color:var(--warn); border:1px solid var(--line); border-radius:4px; padding:0 4px; font-size:.9em; margin-top:3px; }
   .node .bd .fit { margin-top:5px; padding:3px 5px; background:var(--panel2); border:1px solid var(--line); border-radius:5px; color:var(--ok); font-size:.82em; line-height:1.35; max-height:52px; overflow:hidden; }
   .node .x { color:var(--muted); cursor:pointer; font-weight:400; }
@@ -87,7 +98,15 @@
   .map2 { display:grid; grid-template-columns:44px 1fr; gap:5px; align-items:center; margin-bottom:4px; }
   .map2 b { font-size:11px; }
   .lim3 { display:grid; grid-template-columns:28px 1fr 1fr 54px; gap:4px; align-items:center; margin-bottom:4px; }
-  .lim4 { display:grid; grid-template-columns:24px 1fr 1fr 46px 46px; gap:4px; align-items:center; margin-bottom:4px; }
+  .lim4 { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:5px; align-items:center; margin-bottom:8px; padding-bottom:7px; border-bottom:1px solid var(--line); }
+  .lim4 > b { grid-column:1/-1; display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lim4 > select { grid-column:1/-1; }
+  .slice-range { display:grid; grid-template-columns:minmax(90px,1fr) minmax(90px,1fr); gap:6px; margin-top:5px; }
+  .slice-range input { min-width:90px; }
+  .expr-builder { min-width:360px; }
+  .expr-tools { display:flex; gap:4px; flex-wrap:wrap; margin-top:5px; }
+  .expr-tools button { padding:3px 7px; font-family:ui-monospace,monospace; font-size:11px; }
+  .expr-preview { margin-top:5px; padding:5px 7px; border-radius:5px; background:var(--panel2); color:var(--accent); font-family:ui-monospace,monospace; overflow-wrap:anywhere; }
   .map3 { display:grid; grid-template-columns:28px 1fr 1fr; gap:4px; align-items:center; margin-bottom:4px; }
   .lim3 b, .map3 b, .lim4 b { font-size:11px; color:var(--text); }
   table.sens { border-collapse:collapse; font-size:11px; }
@@ -152,8 +171,10 @@
   .palGroup { font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.04em;
     margin:10px 0 4px; padding-bottom:3px; border-bottom:1px solid var(--line); cursor:help; }
   .palGroup:first-child { margin-top:0; }
-  #liveBox .lvRow { display:grid; grid-template-columns:34px 1fr 74px; gap:6px; align-items:center;
+  #liveBox .lvRow { display:grid; grid-template-columns:minmax(60px,34%) minmax(34px,1fr) minmax(58px,76px); gap:6px; align-items:center;
     font-size:11px; margin-bottom:3px; }
+  #liveBox .lvRow > * { min-width:0; }
+  #liveBox .lvName { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #liveBox .lvBar { height:7px; background:var(--line); border-radius:4px; position:relative; overflow:hidden; }
   #liveBox .lvFill { position:absolute; top:0; bottom:0; border-radius:4px; transition:left .12s linear, width .12s linear; }
   #liveBox .lvVal { font-family:var(--mono,monospace); text-align:right; font-variant-numeric:tabular-nums; }
@@ -170,12 +191,15 @@
     <h1>光器件优化平台 · 画布</h1>
     <span class="hint" id="conn">连接后端中…</span>
     <span class="sp"></span>
+    <button class="ghost sm" onclick="openDataCenter()" data-tip="查看设备加载的自变量、测量通道、数据格式和当前值，并构建向量特征。">🗂 数据中心</button>
     <button class="ghost sm" onclick="openUntil()" data-tip="用表格方式设置『全局达成条件』（各目标 达到/逼近 某值，与/或组合），不用手写表达式。">🎯 目标条件</button>
     <button class="ghost sm" onclick="openTune()" data-tip="自动调优：按当前场景搜索多种算法方案，按质量/时长/稳定性打分排名，一键采用最优方案。">🤖 自动调优</button>
     <button class="ghost sm" onclick="openSens()" data-tip="灵敏度采集：给原点/步距/点数，逐轴扫描测出每对 x→y 的曲线、线性范围与 ∂y/∂x 灵敏度矩阵；矩阵可一键填进阻尼灵敏度求解节点。">📐 灵敏度采集</button>
+    <button class="ghost sm" onclick="openDerived()" data-tip="用外部测量通道计算新的因变量，例如 z1=y1+y2、z2=max(y1,y2)-min(y1,y2)；可直接用于优化、约束和灵敏度矩阵。">🧮 自定义因变量</button>
     <span class="fs-ctl" data-tip="调节画布里节点与连线的字体大小。">字号 <input id="fsRange" type="range" min="10" max="22" step="1" value="13"></span>
     <button class="ghost sm" onclick="toggleTheme()" id="themeBtn" data-tip="切换浅色 / 深色主题。">🌙</button>
     <button class="ghost sm" onclick="openHelp()" data-tip="打开使用说明：节点、连线、目标、轨迹图、表达式怎么用。">帮助 ?</button>
+    <button class="ghost sm" onclick="openAgentGuide()" data-tip="说明 MCP 为什么不能主动唤醒 Hermes，以及如何用常驻 Agent gateway 实现平台聊天框直接驱动 Agent。">Agent 对话教程</button>
     <button id="runBtn" onclick="run()">▶ 运行</button>
   </header>
 
@@ -200,6 +224,14 @@
 
     <h2>算法节点 <span class="info" data-tip="点一下把算法加到画布作为一个节点。第一阶段先用『网格/线扫描』找光，第二阶段再精调/拟合/贝叶斯。每个节点有自己的颜色，和轨迹图对应。">i</span></h2>
     <div id="palList"></div>
+    <h2>观测仪 <span class="info" data-tip="插在两个算法节点之间，在当前位置重新采集指定输出。点选观测仪后，右栏显示标量、矩阵表或矩阵特征曲线。">i</span></h2>
+    <div class="palItem" style="border-left-color:#64748b" onclick="addObserver('scalar')"><b>🔢 标量观测仪</b><span>数值</span></div>
+    <div class="palItem" style="border-left-color:#14b8a6" onclick="addObserver('vector_plot')"><b>〽 向量观测仪</b><span>1D 曲线</span></div>
+    <div class="palItem" style="border-left-color:#0ea5e9" onclick="addObserver('matrix')"><b>▦ 矩阵观测仪</b><span>表格</span></div>
+    <div class="palItem" style="border-left-color:#a855f7" onclick="addObserver('matrix_plot')"><b>📈 矩阵可视化</b><span>特征曲线</span></div>
+    <div class="palItem" style="border-left-color:#14b8a6" onclick="addTransform()"><b>⇄ 数据变换</b><span>矩阵/特征/标量</span></div>
+    <h2>流程控制 <span class="info" data-tip="显式重复一段节点固定次数。循环节点需要一条『循环体』边、一条『退出』边，并把循环体末尾连回循环节点。">i</span></h2>
+    <div class="palItem" style="border-left-color:#f97316" onclick="addForLoop()"><b>🔁 For 循环</b><span>固定次数</span></div>
 
     <h2>评估 <span class="info" data-tip="优化时怎么测量目标：选仿真场景；纯函数=直接算，模拟硬件=带噪声/平均/安全限位，更贴近真实台架。">i</span></h2>
     <label>仿真场景 <span class="info" data-tip="选不同的虚拟评估函数：单峰最好上手，多峰考验找光是否卡旁瓣，偏斜峰考验算法选择。">i</span></label>
@@ -306,7 +338,8 @@
   <p><b>拟合阶次</b>：一次=直线（斜率即矩阵）；二次=抛物线，<b>斜率取原点处的导数</b>（曲线弯时比整段直线更接近真实的局部灵敏度）。采集结束会自动<b>回到原点</b>，不会把机构留在最后一个扫描点。流程里也可用<b>灵敏度采集</b>节点做同样的事（单原点）。</p>
 
   <h3>④b 阻尼灵敏度求解（多进多出定值/标定）</h3>
-  <p>已知<b>灵敏度 ∂y/∂x</b> 和各 y 的<b>目标值</b>时，加<b>阻尼灵敏度求解</b>节点：勾选要定值的 y 填目标、勾选要动的 x，再填灵敏度矩阵（行=y、列=x）。它用<b>阻尼最小二乘(SVD 正则伪逆)</b>解 Δx=阻尼·S⁺·(目标−当前)，比 pinv 数值更稳，迭代把多个 y 同时逼到目标；x/y 维度按勾选自动匹配。</p>
+  <p>已知<b>灵敏度 ∂y/∂x</b> 和各 y 的<b>目标值</b>时，加<b>阻尼灵敏度求解</b>节点：勾选要定值的 y 填目标、勾选要动的 x，再填灵敏度矩阵（行=y、列=x）和<b>最大修正次数</b>。达到残差容差会提前结束；否则最多执行规定次数的 Δx 修正（含初始值时，测量点最多为次数+1）。</p>
+  <p><b>阻尼 d</b>控制每轮整体走多远：大则快但可能过冲，小则慢但稳。<b>正则 λ</b>作用在矩阵求逆上，专门压制灵敏度弱、共线或病态方向：大则抗噪稳定，但可能产生更大求解偏差。两者作用不同，不能互相替代。</p>
 
   <h3>⑤ 运行 / 轨迹图 / 拟合公式</h3>
   <p>点 <b>▶ 运行</b> 出指标（含测量耗时/读取次数）+ 轨迹图，三种视图：</p>
@@ -320,6 +353,25 @@
   <h3>⑥ 其它</h3>
   <ul><li>右上：<b>字号</b>放大画布字体、<b>🌙/☀</b>切换深浅主题、关键处 <span class="info">i</span> 悬浮有提示。</li>
       <li>左上『方案』可<b>保存/加载</b>整条流程 JSON。</li></ul>
+</div>
+
+<div id="agentGuideModal" class="modal">
+  <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
+  <h2>平台 ↔ Agent 双向对话</h2>
+  <p><b>MCP 是 Agent 主动调用平台的协议。</b>平台可以保存画布消息，但不能反向唤醒一个已经空闲的 Hermes 会话。</p>
+  <h3>人在 Hermes 中使用</h3>
+  <ol><li>画布与 Hermes 工具统一使用同一个 session。</li><li>要求 Agent 每轮先调用 <code>poll_messages(session)</code>。</li><li>处理后调用 <code>push_to_canvas(note=回复)</code>，回复会实时回到这里。</li></ol>
+  <h3>直接在平台聊天框唤起 Agent</h3>
+  <p>需要一个常驻 Agent gateway。它持续调用 <code>wait_for_messages</code>（或 REST <code>/workspace/{session}/messages/wait</code>），收到消息后调用模型和 MCP 工具，再把回复推回画布。</p>
+  <p class="hint">完整部署步骤、伪代码和排错表见仓库 <b>AGENT_CHAT_TUTORIAL.md</b>。如果提供 Hermes 的 Agent API 与鉴权格式，可以继续实现具体 gateway adapter。</p>
+</div>
+
+<div id="dataCenterModal" class="modal" style="width:min(920px,94vw)">
+  <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
+  <h2>设备与数据中心</h2>
+  <p class="hint">设备文件定义原始通道；这里负责查看格式、试读数据、设置优化起点和构建特征。设置优化起点不会移动硬件。</p>
+  <div id="dataCenterBody"></div>
+  <div class="sticky-actions"><button class="ghost" onclick="closeModals()">取消</button><button onclick="applyDataCenter()">应用配置</button></div>
 </div>
 
 <div id="untilModal" class="modal">
@@ -350,6 +402,12 @@
   <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
   <h2>自动调优 <span class="info" data-tip="按当前『仿真场景』自动搜索多种算法工作流（粗调×精调×拟合 及参数/噪声变异），按质量/时长/稳定性打分排名，采用最优。">i</span></h2>
   <p class="hint">场景取左下『仿真场景』。调三个优先级权重与噪声档后点搜索；结果按效用排名，可一键『采用』到画布。</p>
+  <div class="sub"><div class="glab"><b>参与调优的变量与因变量</b></div><div id="tuneChannelSelect"></div></div>
+  <details style="margin:8px 0"><summary style="cursor:pointer;color:var(--accent)">🧩 从候选自变量中筛选最佳组合（例如 6 选 4）</summary>
+    <p class="hint">先在“灵敏度采集”中测齐候选 x 与目标 y；这里按灵敏度矩阵的满秩性和条件数比较所有组合。条件数越小，四个目标越容易被独立、稳定地求解。</p>
+    <div class="trow2"><div><label>每个组合选择几个自变量</label><input id="subsetN" type="number" min="1" value="4"></div><div style="display:flex;align-items:flex-end"><button class="ghost" onclick="runVariableSubsetTest()">测试所有组合</button></div></div>
+    <div id="subsetBody"></div>
+  </details>
   <div class="trow2">
     <div><label>质量权重 <b id="wQv">1.0</b></label><input id="wQ" type="range" min="0" max="3" step="0.5" value="1" oninput="wQv.textContent=(+this.value).toFixed(1)"></div>
     <div><label>速度权重 <b id="wTv">0.5</b></label><input id="wT" type="range" min="0" max="3" step="0.5" value="0.5" oninput="wTv.textContent=(+this.value).toFixed(1)"></div>
@@ -374,6 +432,7 @@
     <div id="varTable" style="margin-top:6px"></div>
   </details>
   <div id="tuneBody" style="margin-top:12px"></div>
+  <div id="tuneDemo" style="margin-top:14px"></div>
 </div>
 
 <div id="sensModal" class="modal">
@@ -401,6 +460,15 @@
   <div id="sensBody" style="margin-top:12px"></div>
 </div>
 
+<div id="derivedModal" class="modal">
+  <button class="ghost close" onclick="closeModals()">关闭 ✕</button>
+  <h2>自定义因变量</h2>
+  <p class="hint">用已测通道计算新因变量。支持 <code>+ - * / **</code>、括号以及 <code>abs / min / max</code>；可引用前面定义的自定义因变量。保存后，它会和 y1/y2 一样出现在优化目标、条件、灵敏度采集与矩阵求解中。</p>
+  <div id="derivedRows"></div>
+  <button class="ghost sm" onclick="addDerivedRow()">＋ 添加因变量</button>
+  <div class="row" style="margin-top:12px"><button onclick="applyDerived()">应用</button></div>
+</div>
+
 <script>
 const API = location.origin;
 let catalog = [], benches = [], vocs = {variables:{}, objectives:{}};
@@ -417,6 +485,10 @@ let untilExpr = '', untilRows = [], untilRawEdited = false;
 let startPoint = {}, useStartPoint = false, twoDMap = null;   // 自定义起始点 + 2D图坐标映射
 let tuneRandomStart = true, tuneStartDomain = {};             // 自动调优随机初始点 + 定义域
 let sensVars=[], sensObjs=[], sensOrigins=[{}], lastSens=null;  // 灵敏度采集：选中的 x/y、原点列表、上次结果
+let tuneVars=[], tuneObjs=[], subsetTargets={}, subsetResult=null;
+let derivedRows=[];                                             // [{name, expression, mode, target}]
+let lastObservations={};                                        // observer id -> visit snapshots
+let probeData=null;
 
 const NODE_COLORS = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#ec4899','#84cc16'];
 const MODE_LABEL = {'':'默认','maximize':'最大化','minimize':'最小化','target':'逼近目标值','scan':'扫描'};
@@ -428,7 +500,9 @@ async function boot() {
     try { benches = (await (await fetch(API + '/benches')).json()).benches; } catch(e){ benches=[]; }
     objKeys = Object.keys(vocs.objectives); varKeys = Object.keys(vocs.variables);
     c1dVar=varKeys[0]; c1dObj=objKeys[0]; c2dX=varKeys[0]; c2dY=varKeys[1]||varKeys[0]; c2dObj=objKeys[0];
-    document.getElementById('conn').textContent = '已连接 · ' + catalog.length + ' 种算法';
+    document.getElementById('conn').textContent = vocs.device
+      ? `已加载设备 · ${vocs.device.n_axes} 个自变量 / ${vocs.device.n_meters} 个因变量`
+      : '已连接仿真 · ' + catalog.length + ' 种算法';
     // 按『找光 → 粗调 → 精调 → 求解/表征』分组陈列，跟真实调试顺序一致
     const pal = document.getElementById('palList'); pal.innerHTML = '';
     const GTIP = {'① 找光':'从当前位置往外找到第一束光/有效信号，通常配 stop.target 扫到阈值即停',
@@ -458,16 +532,22 @@ async function boot() {
     benches.forEach(b => benchSmooth[b.name] = !!b.smooth);
     renderLive();
     varKeys.forEach((v,i) => { const V=vocs.variables[v];
-      safetyLimits[v]=[V.low, V.high]; actuators[v]={device:'PI六足', param:'axis'+(i+1)};
-      startPoint[v]=+(0.5*(V.low+V.high)).toFixed(4); tuneStartDomain[v]=[V.low, V.high]; });
-    objKeys.forEach(o => { const m=vocs.objectives[o]||{}; channels[o]={device:m.device||'功率计', param:m.param||o, cost:m.cost!=null?m.cost:0, group:m.group||''}; });
+      safetyLimits[v]=[V.low, V.high]; actuators[v]={device:V.device||'', param:V.param||v};
+      startPoint[v]=V.current!=null?+V.current:+(0.5*(V.low+V.high)).toFixed(4); tuneStartDomain[v]=[V.low, V.high]; });
+    objKeys.forEach(o => { const m=vocs.objectives[o]||{}; channels[o]={device:m.device||'功率计', param:m.param||o, cost:m.cost!=null?m.cost:0, group:m.group||'', valueType:m.value_type||'scalar',displayName:m.display_name||o,unit:m.unit||'',shape:m.shape||null,dtype:m.dtype||''}; });
+    derivedRows = objKeys.filter(o=>vocs.objectives[o].expression).map(o=>({name:o, expression:vocs.objectives[o].expression,
+      mode:vocs.objectives[o].mode||'maximize', target:vocs.objectives[o].target}));
   } catch (e) { document.getElementById('conn').textContent = '后端未连接'; }
   renderEvalExtras(); inspectEmpty(); renderUntilRows();
 }
 
 function spec(name){ return catalog.find(a => a.name === name) || {params:{}, single_var:false, label:name}; }
 function labelOf(name){ return spec(name).label || name; }
+function nodeLabel(n){ return !n?'?':(n.type==='observer'?n.label:(n.type==='data_transform'?`${n.inputChannel} → ${n.outputChannel}`:(n.type==='for_loop'?`For ×${n.iterations}`:(n.type==='start'?'开始':n.type==='end'?'结束':labelOf(n.algorithm))))); }
 function nextColor(){ return NODE_COLORS[nodes.length % NODE_COLORS.length]; }
+const SCALAR_TRANSFORMS=new Set(['mean','max','min','std','element']);
+function transformChannels(){ return nodes.filter(n=>n.type==='data_transform'&&n.outputChannel).map(n=>({name:n.outputChannel,valueType:n.outputType||(SCALAR_TRANSFORMS.has(n.operation)?'scalar':'matrix')})); }
+function availableChannels(type){ const all=objKeys.map(name=>({name,valueType:(channels[name]||{}).valueType||'scalar'})).concat(transformChannels()); return type?all.filter(c=>c.valueType===type):all; }
 
 function addNode(algo, at) {
   const s = spec(algo);
@@ -481,6 +561,35 @@ function addNode(algo, at) {
     keep: '', stopTarget: '',
     x: at ? at.x : 60 + (nodes.length%4)*30, y: at ? at.y : 60 + nodes.length*70,
   };
+  if(algo==='matrix_policy'){
+    n.params.input_channel=objKeys.find(o=>(channels[o]||{}).valueType==='matrix')||'';
+    n.params.output_map=Object.fromEntries(n.variables.map((v,i)=>[v,i]));
+  }
+  nodes.push(n); render(); select(n.id);
+}
+
+function addObserver(kind, at){
+  const labels={scalar:'标量观测仪',vector_plot:'向量观测仪',matrix:'矩阵观测仪',matrix_plot:'矩阵可视化观测仪'};
+  const colors={scalar:'#64748b',vector_plot:'#14b8a6',matrix:'#0ea5e9',matrix_plot:'#a855f7'};
+  const matrices=availableChannels('matrix').map(c=>c.name);
+  const vectors=availableChannels('vector').map(c=>c.name);
+  const n={id:'n'+(++seq),type:'observer',observerKind:kind,label:labels[kind],color:colors[kind],
+    channels:kind==='scalar'?availableChannels('scalar').map(c=>c.name):(kind==='vector_plot'?(vectors[0]?[vectors[0]]:[]):[]),matrixChannel:kind==='vector_plot'?(vectors[0]||''):(matrices[0]||''),featureAxis:'row',plotStyle:'line',showPeaks:false,
+    x:at?at.x:80+(nodes.length%4)*30,y:at?at.y:70+nodes.length*70};
+  nodes.push(n); render(); select(n.id);
+}
+
+function addForLoop(at){
+  const n={id:'n'+(++seq),type:'for_loop',label:'For 循环',iterations:3,color:'#f97316',
+    x:at?at.x:80+(nodes.length%4)*30,y:at?at.y:70+nodes.length*70};
+  nodes.push(n); render(); select(n.id);
+}
+
+function addTransform(at){
+  const source=availableChannels('matrix')[0]||availableChannels()[0]||{name:'',valueType:'matrix'};
+  const n={id:'n'+(++seq),type:'data_transform',label:'数据变换',inputChannel:source.name,
+    outputChannel:'feature_'+seq,operation:'mean',params:{index:0,row_start:0,row_end:1,column_start:0,column_end:1},
+    color:'#14b8a6',x:at?at.x:80+(nodes.length%4)*30,y:at?at.y:70+nodes.length*70};
   nodes.push(n); render(); select(n.id);
 }
 
@@ -491,12 +600,24 @@ function render() {
     const el = document.createElement('div');
     el.className = 'node' + (sel===n.id ? ' sel':''); el.setAttribute('data-id', n.id);
     el.style.left = n.x+'px'; el.style.top = n.y+'px'; el.style.borderTopColor = n.color;
+    if(n.type==='start'||n.type==='end'){
+      el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">${n.type==='start'?'▶ 开始':'■ 结束'}</span><span class="x">✕</span></div><div class="bd">流程${n.type==='start'?'入口':'出口'}</div><div class="port"></div>`;
+    } else if(n.type==='data_transform'){
+      const ins=(n.inputs||[{channel:n.inputChannel}]).map(i=>i.channel).join(', ');
+      el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl" title="${escapeHtml(n.label||n.outputChannel)}">⇄ ${escapeHtml(n.label||'数据变换')}</span><span class="x">✕</span></div><div class="bd" title="${escapeHtml(ins+' → '+n.operation+' → '+n.outputChannel)}">${escapeHtml(ins)} → ${n.operation} → ${escapeHtml(n.outputChannel||'?')}</div><div class="port"></div>`;
+    } else if(n.type==='for_loop'){
+      el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">🔁 For 循环</span><span class="x">✕</span></div><div class="bd">重复 ${n.iterations} 次</div><div class="port"></div>`;
+    } else if(n.type==='observer'){
+      const sub=n.observerKind==='scalar'?(n.channels||[]).join(','):(n.matrixChannel||'未选通道');
+      el.innerHTML=`<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">${n.label}</span><span class="x">✕</span></div><div class="bd">👁 ${sub}</div><div class="port"></div>`;
+    } else {
     let mode = n.objectiveMode ? `<span class="badge">${MODE_LABEL[n.objectiveMode]}${n.objectiveMode==='target'&&n.objectiveTarget!==''?'='+n.objectiveTarget:''}</span>` : '';
     const comp = compWeights(n);
     const target = comp ? `组合(${Object.entries(comp).map(([k,w])=>`${w}·${k}`).join('+')})` : n.objective;
     let fit = n.fitInfo ? `<div class="fit" title="${n.fitInfo.replace(/"/g,'&quot;')}">📐 ${n.fitInfo}</div>` : '';
     el.innerHTML = `<div class="hd"><span class="dot" style="background:${n.color}"></span><span class="ttl">${labelOf(n.algorithm)}</span><span class="x">✕</span></div>
       <div class="bd">${n.variables.join(',')} → ${target}${mode&&!comp?'<br>'+mode:''}${fit}</div><div class="port"></div>`;
+    }
     el.querySelector('.hd').onmousedown = e => { if(!e.target.classList.contains('x')) startDrag(e, n); };
     el.querySelector('.hd .x').onclick = e => { e.stopPropagation(); delNode(n.id); };
     el.onclick = e => { if (connectFrom && connectFrom!==n.id) { addEdge(connectFrom, n.id); endConnect(); } else select(n.id); };
@@ -546,21 +667,31 @@ function drawEdges() {
     hit.onclick=()=>selectEdge(ed.id); hit.oncontextmenu=e=>{e.preventDefault(); delEdge(ed.id);};
     svg.appendChild(hit);
     const p = mkPath(geo,'edge');
-    p.setAttribute('stroke', on?'var(--text)':(ed.condition?'var(--warn)':'var(--accent)'));
+    const edgeLabel=ed.condition||(ed.role==='body'?'循环体':ed.role==='exit'?'退出':'');
+    p.setAttribute('stroke', on?'var(--text)':(edgeLabel?'var(--warn)':'var(--accent)'));
     p.setAttribute('stroke-width', on?'3.2':'2');
-    p.setAttribute('marker-end', on?'url(#arrowSel)':(ed.condition?'url(#arrowW)':'url(#arrow)'));
+    p.setAttribute('marker-end', on?'url(#arrowSel)':(edgeLabel?'url(#arrowW)':'url(#arrow)'));
     svg.appendChild(p);
-    if(ed.condition){
+    if(edgeLabel){
       const t=document.createElementNS('http://www.w3.org/2000/svg','text');
       t.setAttribute('x',lx); t.setAttribute('y',ly); t.setAttribute('fill', on?'var(--text)':'var(--warn)');
       t.setAttribute('font-size',Math.round(fontScale*0.8)); t.setAttribute('text-anchor','middle');
-      t.setAttribute('class','edgelbl'); t.textContent=ed.condition.slice(0,28); svg.appendChild(t);
+      t.setAttribute('class','edgelbl'); t.textContent=edgeLabel.slice(0,28); svg.appendChild(t);
     }
   });
 }
 function mkPath(d, cls){ const p=document.createElementNS('http://www.w3.org/2000/svg','path'); p.setAttribute('d',d); p.setAttribute('class',cls); p.setAttribute('fill','none'); return p; }
 
-function addEdge(s,t){ if(edges.some(e=>e.source===s&&e.target===t)) return; edges.push({id:'e'+(++seq), source:s, target:t, condition:''}); render(); }
+function addEdge(s,t){
+  if(edges.some(e=>e.source===s&&e.target===t)) return;
+  let role=''; const source=nodes.find(n=>n.id===s);
+  if(source&&source.type==='for_loop'){
+    const used=new Set(edges.filter(e=>e.source===s).map(e=>e.role));
+    role=!used.has('body')?'body':(!used.has('exit')?'exit':'');
+    if(!role){ alert('For 循环只能有一条循环体边和一条退出边。'); return; }
+  }
+  edges.push({id:'e'+(++seq), source:s, target:t, condition:'', role}); render();
+}
 function delEdge(id){ edges=edges.filter(e=>e.id!==id); if(selEdge===id){selEdge=null; inspectEmpty();} render(); }
 function delNode(id){ nodes=nodes.filter(n=>n.id!==id); edges=edges.filter(e=>e.source!==id&&e.target!==id); if(sel===id){sel=null; inspectEmpty();} render(); }
 
@@ -588,7 +719,7 @@ window.addEventListener('keydown', e => {
   }
 });
 
-function select(id){ sel=id; selEdge=null; render(); inspectNode(nodes.find(n=>n.id===id)); }
+function select(id){ sel=id; selEdge=null; render(); const n=nodes.find(n=>n.id===id); if(!n)return; n.type==='observer'?inspectObserver(n):(n.type==='data_transform'?inspectTransform(n):(n.type==='for_loop'?inspectForLoop(n):((n.type==='start'||n.type==='end')?inspectControl(n):inspectNode(n)))); }
 function selectEdge(id){ selEdge=id; sel=null; render(); inspectEdge(edges.find(e=>e.id===id)); }
 function inspectEmpty(){ document.getElementById('inspBody').innerHTML=
   '<p class="hint">点选<b>节点</b>编辑变量/目标/参数；点选<b>连线</b>设条件或删除。<br>连线：点节点右侧圆点 ＋ → 再点目标节点（指回前面的节点＝循环，会自动绕行）。</p>'; }
@@ -607,16 +738,23 @@ function inspectNode(n){
     h += renderSolveEditor(n);
   } else {
     h += `<label>目标</label><select onchange="setF('${n.id}','objective',this.value)">`;
-    Object.keys(vocs.objectives).forEach(o => h += `<option ${o===n.objective?'selected':''}>${o}</option>`);
+    availableChannels('scalar').map(c=>c.name).forEach(o => h += `<option value="${o}" ${o===n.objective?'selected':''}>${escapeHtml((channels[o]||{}).displayName||o)} · ${escapeHtml(o)}</option>`);
     h += `</select>`;
+    const arrayInputs=availableChannels().filter(c=>c.valueType!=='scalar');
+    if(arrayInputs.length) h+=`<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">⚡ 从数组元素快速创建目标</summary>
+      <label>数组通道</label><select id="quickArraySource">${arrayInputs.map(c=>`<option value="${c.name}" data-type="${c.valueType}">${c.name}（${c.valueType==='vector'?'向量':'矩阵'}）</option>`).join('')}</select>
+      <label>索引</label><div class="lim"><input id="quickArrayI" type="number" min="0" step="1" value="0" title="向量索引 / 矩阵行"><input id="quickArrayJ" type="number" min="0" step="1" value="0" title="矩阵列；向量时忽略"></div>
+      <button class="ghost sm" style="margin-top:6px" onclick="quickElementTarget('${n.id}')">创建并设为本节点目标</button>
+      <p class="hint">矩阵填写行、列；向量只使用第一个索引。平台会自动插入元素提取节点。</p></details>`;
     const comp = compWeights(n);
     h += `<label style="margin-top:8px"><input type="checkbox" style="width:auto" ${comp?'checked':''} onchange="toggleComposite('${n.id}',this.checked)"> 加权组合多目标
           <span class="info" data-tip="把多个目标按权重合成一个单目标（Σ w·目标，每个目标按各自的最大/最小/逼近模式计分）。单目标算子(单纯形/坐标/梯度/拟合)即可优化多目标折中，如 0.7·y1+0.3·y2。">i</span></label>`;
     if(comp){
-      Object.keys(vocs.objectives).forEach(o => {
-        h += `<div class="lim" style="grid-template-columns:34px 1fr"><b>${o}</b>
+      h+=`<input placeholder="搜索组合目标…" oninput="filterChecks('compositeTargets',this.value)"><div id="compositeTargets" class="check-list">`;
+      availableChannels('scalar').map(c=>c.name).forEach(o => {
+        h += `<div class="lim channel-opt" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}" style="grid-template-columns:minmax(70px,1fr) 80px"><b title="${escapeHtml(o)}">${escapeHtml((channels[o]||{}).displayName||o)}</b>
           <input type="number" step="0.1" value="${comp[o]!=null?comp[o]:0}" oninput="setWeight('${n.id}','${o}',this.value)" title="权重(0=不参与)"></div>`; });
-      h += `<p class="hint">权重和不必为 1；每个目标按其『目标模式』计分后加权。</p>`;
+      h += `</div><p class="hint">权重和不必为 1；每个目标按其『目标模式』计分后加权。</p>`;
     } else {
       h += `<label>目标模式 <span class="info" data-tip="默认=按问题声明。最大化/最小化把目标推大/小；逼近目标值=驱动到某个数（标定）；扫描=只扫不寻优。">i</span></label><select onchange="setMode('${n.id}',this.value)">`;
       Object.entries(MODE_LABEL).forEach(([k,lab]) => h += `<option value="${k}" ${k===n.objectiveMode?'selected':''}>${lab}</option>`);
@@ -627,20 +765,170 @@ function inspectNode(n){
   Object.entries(s.params||{}).forEach(([k,meta]) => {
     if(isSolve && (k==='targets'||k==='sensitivity')) return;      // handled by the solve editor
     if(meta.type==='axis_steps'){ h += renderAxisSteps(n,k,meta); return; }  // per-axis table
+    if(meta.type==='axis_ranges'){ h += renderAxisRanges(n,k,meta); return; }
+    if(meta.type==='output_map'){ h += renderOutputMap(n,k,meta); return; }
+    if(meta.type==='bool'){
+      h+=`<label style="display:flex;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" style="width:auto" ${n.params[k]?'checked':''} onchange="setBoolParam('${n.id}','${k}',this.checked)"> ${meta.label||k}${meta.hint?` <span class="info" data-tip="${meta.hint}">i</span>`:''}</label>`;
+      return;
+    }
+    if(meta.type==='enum'){
+      h+=`<label>${meta.label||k}${meta.hint?` <span class="info" data-tip="${meta.hint}">i</span>`:''}</label><select onchange="setParam('${n.id}','${k}',this.value)">${(meta.options||[]).map(o=>`<option value="${o}" ${o===(n.params[k]??meta.default)?'selected':''}>${o}</option>`).join('')}</select>`;
+      return;
+    }
+    if(k==='input_channel'){
+      const matrices=objKeys.filter(o=>(channels[o]||{}).valueType==='matrix');
+      h+=`<label>${meta.label||k}</label><select onchange="setParam('${n.id}','${k}',this.value)">${matrices.map(o=>`<option ${o===n.params[k]?'selected':''}>${o}</option>`).join('')}</select>`;
+      if(!matrices.length) h+='<p class="hint">先在「通道规范」把一个 y 声明为矩阵。</p>';
+      return;
+    }
+    if(['matrix','list','dict'].includes(meta.type)){
+      h+=`<label>${meta.label||k}${meta.hint?` <span class="info" data-tip="${meta.hint}">i</span>`:''}</label><textarea rows="3" onchange="setJsonParam('${n.id}','${k}',this.value)">${escapeHtml(JSON.stringify(n.params[k]??meta.default??[]))}</textarea>`;
+      return;
+    }
     const lab = meta.label ? `${meta.label} <span style="color:var(--muted)">(${k})</span>` : k;
     const tip = meta.hint ? ` <span class="info" data-tip="${meta.hint}">i</span>` : '';
-    h += `<label>${lab}${tip}</label><input value="${n.params[k]??meta.default??''}" onchange="setParam('${n.id}','${k}',this.value)">`;
+    const numeric=meta.type==='int'||meta.type==='float';
+    h += `<label>${lab}${tip}</label><input ${numeric?'type="number"':''} ${meta.min!=null?`min="${meta.min}"`:''} ${meta.max!=null?`max="${meta.max}"`:''} ${numeric?`step="${meta.type==='int'?1:'any'}"`:''} value="${n.params[k]??meta.default??''}" onchange="setParam('${n.id}','${k}',this.value)">`;
   });
   h += `<label>keep 约束（可空，如 y1>0.8） <span class="info" data-tip="优化本目标时必须保持的约束，破坏约束的点会被重罚。">i</span></label><input value="${n.keep}" onchange="setF('${n.id}','keep',this.value)">`;
   h += `<label>stop.target（可空，如 y1>0.2） <span class="info" data-tip="本阶段的提前结束条件，达到即停进入下一节点。">i</span></label><input value="${n.stopTarget}" onchange="setF('${n.id}','stopTarget',this.value)">`;
   document.getElementById('inspBody').innerHTML = h;
+  if(isSolve) restoreCheckList('solveTargetChecks');
 }
+
+function observerValue(n){ const visits=lastObservations[n.id]||[]; return visits.length?visits[visits.length-1].values:null; }
+function matrixOf(v){ return Array.isArray(v)&&Array.isArray(v[0])?v:null; }
+function matrixTable(m){
+  if(!matrixOf(m)) return '<p class="hint">该通道当前不是二维矩阵。</p>';
+  return `<div style="overflow:auto;max-height:300px"><table class="sens"><tr><th></th>${m[0].map((_,j)=>`<th>${j}</th>`).join('')}</tr>`+
+    m.map((row,i)=>`<tr><th>${i}</th>${row.map(v=>`<td>${typeof v==='number'?Number(v).toPrecision(6):escapeHtml(v)}</td>`).join('')}</tr>`).join('')+'</table></div>';
+}
+function smoothSvgPath(points){
+  if(points.length<2) return points.length?`M ${points[0][0]} ${points[0][1]}`:'';
+  let d=`M ${points[0][0]} ${points[0][1]}`;
+  for(let i=0;i<points.length-1;i++){
+    const p0=points[Math.max(0,i-1)],p1=points[i],p2=points[i+1],p3=points[Math.min(points.length-1,i+2)];
+    const c1=[p1[0]+(p2[0]-p0[0])/6,p1[1]+(p2[1]-p0[1])/6];
+    const c2=[p2[0]-(p3[0]-p1[0])/6,p2[1]-(p3[1]-p1[1])/6];
+    d+=` C ${c1[0]} ${c1[1]}, ${c2[0]} ${c2[1]}, ${p2[0]} ${p2[1]}`;
+  }
+  return d;
+}
+function matrixFeaturePlot(m,axis,plotStyle='line',showPeaks=false){
+  if(!matrixOf(m)) return '<p class="hint">该通道当前不是二维矩阵。</p>';
+  const series=axis==='column'?m[0].map((_,j)=>m.map(r=>Number(r[j]))):m.map(r=>r.map(Number));
+  const vals=series.flat().filter(Number.isFinite); if(!vals.length) return '<p class="hint">矩阵中没有可绘制的数值。</p>';
+  const W=330,H=190,p={l:42,r:12,t:12,b:25},iw=W-p.l-p.r,ih=H-p.t-p.b;
+  const lo=Math.min(...vals),hi=Math.max(...vals),rg=hi-lo||1,n=Math.max(...series.map(s=>s.length));
+  const X=i=>p.l+(n<2?iw/2:i/(n-1)*iw),Y=v=>p.t+ih-(v-lo)/rg*ih,cs=['#2563eb','#16a34a','#ea580c','#9333ea','#0891b2','#dc2626'];
+  let svg=`<svg width="${W}" height="${H}" style="background:var(--chartbg);border:1px solid var(--line);border-radius:6px">`;
+  [0,.5,1].forEach(f=>{const v=lo+rg*f,y=Y(v);svg+=`<line x1="${p.l}" y1="${y}" x2="${W-p.r}" y2="${y}" stroke="var(--line)"/><text x="${p.l-4}" y="${y+3}" text-anchor="end" fill="var(--muted)" font-size="9">${v.toPrecision(3)}</text>`;});
+  series.forEach((s,i)=>{
+    const points=s.map((v,j)=>[X(j),Y(v)]),color=cs[i%cs.length];
+    svg+=plotStyle==='spline'
+      ?`<path d="${smoothSvgPath(points)}" fill="none" stroke="${color}" stroke-width="1.8"/>`
+      :`<polyline points="${points.map(p=>p.join(',')).join(' ')}" fill="none" stroke="${color}" stroke-width="1.6"/>`;
+    if(showPeaks&&s.length){
+      const peak=Math.max(...s),peakIndex=s.indexOf(peak),px=X(peakIndex),py=Y(peak);
+      svg+=`<line x1="${px}" y1="${p.t+ih}" x2="${px}" y2="${py}" stroke="${color}" stroke-width="1" stroke-dasharray="4 3"/><circle cx="${px}" cy="${py}" r="3" fill="${color}"><title>${axis==='column'?'列':'行'} ${i} · 峰值索引 ${peakIndex} · ${peak}</title></circle>`;
+    }
+  });
+  svg+=`<text x="${p.l+iw/2}" y="${H-5}" text-anchor="middle" fill="var(--muted)" font-size="9">元素索引</text></svg>`;
+  return svg+`<div class="legend">${series.map((_,i)=>`<span class="chip"><span class="sw" style="background:${cs[i%cs.length]}"></span>${axis==='column'?'列':'行'} ${i}</span>`).join('')}</div>`;
+}
+function vectorPlot(v){
+  if(!Array.isArray(v)||Array.isArray(v[0])) return '<p class="hint">该通道当前不是一维向量。</p>';
+  const vals=v.map(Number); if(!vals.length||!vals.every(Number.isFinite)) return '<p class="hint">向量没有可绘制的有限数值。</p>';
+  const W=330,H=190,p={l:42,r:12,t:12,b:25},iw=W-p.l-p.r,ih=H-p.t-p.b,lo=Math.min(...vals),hi=Math.max(...vals),rg=hi-lo||1;
+  const X=i=>p.l+(vals.length<2?iw/2:i/(vals.length-1)*iw),Y=x=>p.t+ih-(x-lo)/rg*ih;
+  return `<svg width="${W}" height="${H}" style="background:var(--chartbg);border:1px solid var(--line);border-radius:6px"><polyline points="${vals.map((x,i)=>`${X(i)},${Y(x)}`).join(' ')}" fill="none" stroke="#14b8a6" stroke-width="1.8"/><text x="${p.l+iw/2}" y="${H-5}" text-anchor="middle" fill="var(--muted)" font-size="9">元素索引（${vals.length} 项）</text></svg><p class="hint">min ${lo.toPrecision(5)} · max ${hi.toPrecision(5)} · mean ${(vals.reduce((a,b)=>a+b,0)/vals.length).toPrecision(5)}</p>`;
+}
+const checkFilters={};
+function filterChecks(id,q){
+  q=(q||'').toLowerCase();checkFilters[id]=q;
+  let shown=0,total=0;
+  document.querySelectorAll(`#${id} .channel-opt`).forEach(el=>{total++;const on=(el.dataset.name||'').toLowerCase().includes(q);el.style.display=on?'':'none';if(on)shown++;});
+  const stat=document.querySelector(`[data-filter-count="${id}"]`);if(stat)stat.textContent=q?`筛选到 ${shown}/${total}`:`共 ${total} 项`;
+}
+function filterValue(id){return escapeHtml(checkFilters[id]||'');}
+function visibleCheckValues(id){return [...document.querySelectorAll(`#${id} .channel-opt`)].filter(el=>el.style.display!=='none').map(el=>el.dataset.value).filter(v=>v!=null);}
+function updateSelectedCount(id,n,total){const el=document.getElementById(id);if(el)el.textContent=`已选 ${n}/${total}`;}
+function restoreCheckList(id,top=0){filterChecks(id,checkFilters[id]||'');const el=document.getElementById(id);if(el)el.scrollTop=top;}
+function inspectObserver(n){
+  const picked=new Set(n.channels||[]); let h=`<label>名称</label><input value="${escapeHtml(n.label)}" onchange="setObserver('${n.id}','label',this.value)">`;
+  if(n.observerKind==='scalar'){
+    const scalars=availableChannels('scalar').map(c=>c.name);
+    h+=`<label>观测通道（<span id="observerSelectedCount">已选 ${picked.size}/${scalars.length}</span>）</label><input value="${filterValue('observerChecks')}" placeholder="搜索通道…" oninput="filterChecks('observerChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setObserverChannels('${n.id}',true)">全选筛选结果</button><button class="ghost sm" onclick="setObserverChannels('${n.id}',false)">清空筛选结果</button><span class="hint" data-filter-count="observerChecks"></span></div><div id="observerChecks" class="check-list">`+scalars.map(o=>`<label class="channel-opt" data-value="${escapeHtml(o)}" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><input type="checkbox" style="width:auto" ${picked.has(o)?'checked':''} onchange="toggleObserverChannel('${n.id}','${o}',this.checked)"> ${escapeHtml((channels[o]||{}).displayName||o)} <span class="hint">${escapeHtml(o)}</span></label>`).join('')+'</div>';
+  } else {
+    const isVector=n.observerKind==='vector_plot', arrays=availableChannels(isVector?'vector':'matrix').map(c=>c.name);
+    h+=`<label>${isVector?'向量':'矩阵'}通道</label><select onchange="setObserver('${n.id}','matrixChannel',this.value)">${arrays.map(o=>`<option value="${o}" ${o===n.matrixChannel?'selected':''}>${escapeHtml((channels[o]||{}).displayName||o)} · ${escapeHtml(o)}</option>`).join('')}</select>`;
+    if(!arrays.length) h+=`<p class="hint">当前设备没有声明 ${isVector?'vector':'matrix'} 通道。</p>`;
+    if(n.observerKind==='matrix_plot') h+=`<label>Feature 方向</label><select onchange="setObserver('${n.id}','featureAxis',this.value)"><option value="row" ${n.featureAxis==='row'?'selected':''}>每一行作为 feature</option><option value="column" ${n.featureAxis==='column'?'selected':''}>每一列作为 feature</option></select>
+      <label>曲线样式</label><select onchange="setObserver('${n.id}','plotStyle',this.value)"><option value="line" ${(n.plotStyle||'line')==='line'?'selected':''}>折线图（保留原始采样点形状）</option><option value="spline" ${n.plotStyle==='spline'?'selected':''}>Spline 平滑曲线</option></select>
+      <label style="display:flex;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" style="width:auto" ${n.showPeaks?'checked':''} onchange="setObserver('${n.id}','showPeaks',this.checked)"> 显示各 Feature 峰值虚线</label>`;
+  }
+  const values=observerValue(n); h+='<h2 style="margin-top:14px">观测结果</h2>';
+  if(!values) h+='<p class="hint">运行流程后显示。观测仪会在流程走到此节点时，于当前操作点重新采集。</p>';
+  else if(n.observerKind==='scalar') h+=Object.entries(values).map(([k,v])=>`<div class="metric" style="display:block;margin:5px 0">${k} = <b>${typeof v==='number'?Number(v).toPrecision(7):escapeHtml(JSON.stringify(v))}</b></div>`).join('');
+  else { const m=values[n.matrixChannel]; h+=n.observerKind==='vector_plot'?vectorPlot(m):(n.observerKind==='matrix'?matrixTable(m):matrixFeaturePlot(m,n.featureAxis,n.plotStyle,n.showPeaks)); }
+  const visits=lastObservations[n.id]||[]; if(visits.length>1) h+=`<p class="hint">循环中共观测 ${visits.length} 次，当前显示最后一次。</p>`;
+  document.getElementById('inspBody').innerHTML=h;
+  if(n.observerKind==='scalar') restoreCheckList('observerChecks');
+}
+window.setObserver=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n[k]=v;if(k==='matrixChannel')n.channels=[v];render();inspectObserver(n);};
+window.toggleObserverChannel=(id,o,on)=>{const n=nodes.find(x=>x.id===id),s=new Set(n.channels||[]);on?s.add(o):s.delete(o);n.channels=[...s];updateSelectedCount('observerSelectedCount',s.size,availableChannels('scalar').length);render();};
+window.setObserverChannels=(id,on)=>{const n=nodes.find(x=>x.id===id),s=new Set(n.channels||[]),vals=visibleCheckValues('observerChecks');vals.forEach(o=>on?s.add(o):s.delete(o));n.channels=[...s];document.querySelectorAll('#observerChecks .channel-opt').forEach(el=>{if(vals.includes(el.dataset.value))el.querySelector('input[type=checkbox]').checked=on;});updateSelectedCount('observerSelectedCount',s.size,availableChannels('scalar').length);render();};
+
+function inspectTransform(n){
+  const ops={identity:'原样转换',transpose:'转置',flatten:'展平',row_mean:'每行均值',column_mean:'每列均值',element:'提取单个元素',mean:'整体均值',max:'最大值',min:'最小值',std:'标准差',normalize_minmax:'Min-Max 归一化',select_row:'选择行',select_column:'选择列',roi:'裁剪 ROI',add:'双输入相加',subtract:'双输入相减',multiply:'双输入相乘',divide:'双输入相除'};
+  const inputs=availableChannels().filter(c=>c.name!==n.outputChannel);
+  let h=`<label>输入通道</label><select onchange="setTransform('${n.id}','inputChannel',this.value)">${inputs.map(c=>`<option value="${c.name}" ${c.name===n.inputChannel?'selected':''}>${c.name}（${c.valueType}）</option>`).join('')}</select>
+    <label>输出通道名</label><input value="${escapeHtml(n.outputChannel)}" onchange="setTransform('${n.id}','outputChannel',this.value.trim())">
+    <label>变换</label><select onchange="setTransform('${n.id}','operation',this.value)">${Object.entries(ops).map(([k,v])=>`<option value="${k}" ${k===n.operation?'selected':''}>${v}</option>`).join('')}</select>`;
+  if(n.operation==='select_row'||n.operation==='select_column') h+=`<label>索引（从 0 开始）</label><input type="number" min="0" step="1" value="${n.params.index||0}" onchange="setTransformParam('${n.id}','index',this.value)">`;
+  if(n.operation==='element') h+=`<label>索引（JSON；向量如 [2]，矩阵如 [1,3]）</label><input value="${escapeHtml(JSON.stringify(n.params.indices||[0,0]))}" onchange="setTransformIndices('${n.id}',this.value)">`;
+  if(n.operation==='roi') h+=`<label>ROI [起始, 结束)</label><div class="lim"><input type="number" min="0" value="${n.params.row_start||0}" onchange="setTransformParam('${n.id}','row_start',this.value)" title="行起始"><input type="number" min="0" value="${n.params.row_end||1}" onchange="setTransformParam('${n.id}','row_end',this.value)" title="行结束"></div><div class="lim"><input type="number" min="0" value="${n.params.column_start||0}" onchange="setTransformParam('${n.id}','column_start',this.value)" title="列起始"><input type="number" min="0" value="${n.params.column_end||1}" onchange="setTransformParam('${n.id}','column_end',this.value)" title="列结束"></div>`;
+  h+=`<p class="hint">输出类型：<b>${SCALAR_TRANSFORMS.has(n.operation)?'标量':'矩阵/向量'}</b>。基础 ndarray/DataFrame JSON 转换自动完成；此节点只表达有业务含义的变换。</p>`;
+  document.getElementById('inspBody').innerHTML=h;
+}
+window.setTransform=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n[k]=v;render();inspectTransform(n);};
+window.setTransformParam=(id,k,v)=>{const n=nodes.find(x=>x.id===id);n.params[k]=Math.trunc(Number(v)||0);render();inspectTransform(n);};
+window.setTransformIndices=(id,v)=>{const n=nodes.find(x=>x.id===id);try{const a=JSON.parse(v);if(!Array.isArray(a))throw Error();n.params.indices=a.map(x=>Math.trunc(Number(x)));render();inspectTransform(n);}catch(e){alert('索引必须是 JSON 数组，例如 [2] 或 [1,3]');}};
+window.quickElementTarget=(targetId)=>{
+  const target=nodes.find(n=>n.id===targetId), sourceEl=document.getElementById('quickArraySource');
+  if(!target||!sourceEl)return;
+  const source=sourceEl.value, type=sourceEl.selectedOptions[0].dataset.type;
+  const i=Math.max(0,Math.trunc(Number(document.getElementById('quickArrayI').value)||0));
+  const j=Math.max(0,Math.trunc(Number(document.getElementById('quickArrayJ').value)||0));
+  const base=(source+'_'+(type==='vector'?i:(i+'_'+j))).replace(/[^A-Za-z0-9_]/g,'_');
+  const used=new Set(availableChannels().map(c=>c.name)); let output=base, suffix=2;
+  while(used.has(output))output=base+'_'+suffix++;
+  const node={id:'n'+(++seq),type:'data_transform',label:'元素目标',inputChannel:source,outputChannel:output,
+    operation:'element',params:{indices:type==='vector'?[i]:[i,j]},color:'#14b8a6',x:Math.max(10,target.x-220),y:target.y};
+  const index=nodes.indexOf(target); nodes.splice(index,0,node);
+  edges.filter(e=>e.target===targetId).forEach(e=>e.target=node.id);
+  edges.push({id:'e'+(++seq),source:node.id,target:targetId,condition:'',role:''});
+  target.objective=output; target.objectiveWeights=null;
+  render(); select(targetId);
+};
+
+function inspectForLoop(n){
+  const h=`<label>节点</label><input value="For 循环" disabled>
+    <label>重复次数</label><input type="number" min="0" max="1000" step="1" value="${n.iterations}" onchange="setForIterations('${n.id}',this.value)">
+    <p class="hint">从右侧端口依次连接：第一条自动标为<b>循环体</b>，第二条标为<b>退出</b>；再把循环体最后一个节点连回本节点。</p>`;
+  document.getElementById('inspBody').innerHTML=h;
+}
+window.setForIterations=(id,v)=>{const n=nodes.find(x=>x.id===id);n.iterations=Math.max(0,Math.min(1000,Math.trunc(Number(v)||0)));render();inspectForLoop(n);};
+function inspectControl(n){ document.getElementById('inspBody').innerHTML=`<label>控制节点</label><input value="${n.type==='start'?'开始':'结束'}" disabled><p class="hint">此节点来自 Agent graph，用于明确流程入口或出口。</p>`; }
 
 function inspectEdge(ed){
   if(!ed) return;
   const back = (()=>{ const a=anchors(ed.source), b=anchors(ed.target); return a&&b&&b.left.x<a.right.x-10; })();
+  const fromLoop=(nodes.find(n=>n.id===ed.source)||{}).type==='for_loop';
+  const roleEditor=fromLoop?`<label>For 分支</label><select id="edgeRole"><option value="body" ${ed.role==='body'?'selected':''}>循环体</option><option value="exit" ${ed.role==='exit'?'selected':''}>退出</option></select>`:'';
   const h = `<h2 style="margin-top:0">连线${ed.source===ed.target?'（自循环）':back?'（循环回边）':''}</h2>
-    <p class="hint">${labelOf(nodes.find(n=>n.id===ed.source)?.algorithm||'?')} → ${labelOf(nodes.find(n=>n.id===ed.target)?.algorithm||'?')}</p>
+    <p class="hint">${nodeLabel(nodes.find(n=>n.id===ed.source))} → ${nodeLabel(nodes.find(n=>n.id===ed.target))}</p>
+    ${roleEditor}
     <label>条件表达式（可空） <span class="info" data-tip="留空=普通顺序边。填表达式则条件成立才走这条边（分支/循环）。例：not (y1>=0.95 and y2>=0.9)">i</span></label>
     <textarea rows="2" id="edgeCond" placeholder="留空=默认边；如 not (y1>=0.95 and y2>=0.9)">${ed.condition||''}</textarea>
     <div class="row" style="margin-top:8px">
@@ -650,7 +938,7 @@ function inspectEdge(ed){
     <p class="hint" style="margin-top:10px">也可选中后按 <b>Delete</b>，或在连线上点<b>右键</b>删除。</p>`;
   document.getElementById('inspBody').innerHTML = h;
 }
-window.saveEdgeCond=(id)=>{ const ed=edges.find(e=>e.id===id); if(ed){ ed.condition=document.getElementById('edgeCond').value.trim(); render(); } };
+window.saveEdgeCond=(id)=>{ const ed=edges.find(e=>e.id===id); if(ed){ ed.condition=document.getElementById('edgeCond').value.trim(); const role=document.getElementById('edgeRole'); if(role)ed.role=role.value; render(); } };
 window.toggleVar=(id,v,on)=>{const n=nodes.find(x=>x.id===id);const s=spec(n.algorithm);
   if(s.single_var){n.variables=on?[v]:[];} else {n.variables=on?[...new Set([...n.variables,v])]:n.variables.filter(x=>x!==v);} render(); if(sel===id) inspectNode(n);};
 // per-axis hyperparameter table (坐标下降每轴步距 / 单纯形每轴初始 simplex)
@@ -667,11 +955,31 @@ function renderAxisSteps(n,k,meta){
 }
 window.setAxisStep=(id,k,x,v)=>{ const n=nodes.find(z=>z.id===id); ensureDictParam(n,k);
   if(v===''||v==null) delete n.params[k][x]; else n.params[k][x]=+v; };
+function renderAxisRanges(n,k,meta){
+  ensureDictParam(n,k); const d=n.params[k]||{};
+  let h=`<label>${meta.label||k}${meta.hint?` <span class="info" data-tip="${meta.hint}">i</span>`:''}</label>`;
+  if(!n.variables.length) return h+'<p class="hint">先在上方勾选变量。</p>';
+  h+='<div style="overflow-x:auto"><table class="sens"><tr><th>启用</th><th>轴</th><th>下限</th><th>上限</th></tr>';
+  n.variables.forEach(x=>{ const vr=vocs.variables[x],on=Array.isArray(d[x]),r=on?d[x]:[vr.low,vr.high];
+    h+=`<tr><td><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleAxisRange('${n.id}','${k}','${x}',this.checked)"></td><th>${escapeHtml(x)}</th><td><input type="number" value="${r[0]}" min="${vr.low}" max="${vr.high}" ${on?'':'disabled'} onchange="setAxisRangeBound('${n.id}','${k}','${x}',0,this.value)"></td><td><input type="number" value="${r[1]}" min="${vr.low}" max="${vr.high}" ${on?'':'disabled'} onchange="setAxisRangeBound('${n.id}','${k}','${x}',1,this.value)"></td></tr>`; });
+  return h+'</table></div><p class="hint">勾选后该轴使用这里的绝对范围；未勾选则使用相对窗口，若相对窗口为 0 则使用设备全量程。</p>';
+}
+window.toggleAxisRange=(id,k,x,on)=>{const n=nodes.find(z=>z.id===id);ensureDictParam(n,k);const v=vocs.variables[x];if(on)n.params[k][x]=[v.low,v.high];else delete n.params[k][x];inspectNode(n);};
+window.setAxisRangeBound=(id,k,x,i,value)=>{const n=nodes.find(z=>z.id===id);ensureDictParam(n,k);const v=vocs.variables[x],old=n.params[k][x]||[v.low,v.high],r=[...old];r[i]=Math.max(v.low,Math.min(v.high,Number(value)));if(r[0]>r[1]){alert('搜索范围下限不能大于上限');inspectNode(n);return;}n.params[k][x]=r;};
+window.setBoolParam=(id,k,on)=>{const n=nodes.find(z=>z.id===id);n.params[k]=!!on;render();inspectNode(n);};
+function renderOutputMap(n,k,meta){
+  ensureDictParam(n,k); let h=`<label>${meta.label||k} <span class="info" data-tip="模型输出是向量；这里指定 output[几] 驱动每个已选 x。">i</span></label>`;
+  h+='<div style="overflow-x:auto"><table class="sens"><tr><th>自变量</th><th>模型输出下标</th></tr>'+
+    n.variables.map((v,i)=>`<tr><th>${v}</th><td><input type="number" min="0" step="1" value="${n.params[k][v]!=null?n.params[k][v]:i}" onchange="setOutputMap('${n.id}','${k}','${v}',this.value)"></td></tr>`).join('')+'</table></div>';
+  return h;
+}
+window.setOutputMap=(id,k,v,index)=>{const n=nodes.find(z=>z.id===id);ensureDictParam(n,k);n.params[k][v]=Math.max(0,parseInt(index)||0);};
+window.setJsonParam=(id,k,value)=>{try{nodes.find(x=>x.id===id).params[k]=JSON.parse(value);}catch(e){alert('JSON 格式错误：'+e.message);}};
 window.setF=(id,f,v)=>{nodes.find(x=>x.id===id)[f]=v; render();};
 window.setMode=(id,v)=>{const n=nodes.find(x=>x.id===id); n.objectiveMode=v; render(); inspectNode(n);};
 function compWeights(n){ const w=n.objectiveWeights; if(!w) return null; const nz=Object.entries(w).filter(([k,v])=>+v); return nz.length?Object.fromEntries(nz.map(([k,v])=>[k,+v])):null; }
 window.toggleComposite=(id,on)=>{ const n=nodes.find(x=>x.id===id);
-  if(on){ n.objectiveWeights={}; Object.keys(vocs.objectives).forEach((o,i)=>n.objectiveWeights[o]=i===0?1:0); }
+  if(on){ n.objectiveWeights={}; availableChannels('scalar').map(c=>c.name).forEach((o,i)=>n.objectiveWeights[o]=i===0?1:0); }
   else n.objectiveWeights=null;
   render(); inspectNode(n); };
 window.setWeight=(id,o,v)=>{ const n=nodes.find(x=>x.id===id); if(!n.objectiveWeights) n.objectiveWeights={}; n.objectiveWeights[o]=+v; render(); };
@@ -686,28 +994,29 @@ function renderSolveEditor(n){
   const tg=n.params.targets, sens=n.params.sensitivity;
   const ys=Object.keys(vocs.objectives), xs=n.variables;
   // ---- 因变量目标表：勾选要定值的 y，并逐行填目标值 ----
-  let h=`<label>因变量目标表 y* <span class="info" data-tip="勾选要驱动到目标值的因变量 y，逐行填目标值。可选多个 → 多进多出定值/标定。求解会把选中的 y 同时逼到各自目标。">i</span></label>`;
-  h+=`<div style="overflow-x:auto"><table class="sens"><tr><th>选</th><th>y</th><th>目标值 y*</th></tr>`;
+  let h=`<label>因变量目标表 y*（<span id="solveTargetCount">已选 ${Object.keys(tg).length}/${ys.length}</span>） <span class="info" data-tip="勾选要驱动到目标值的因变量 y，逐行填目标值。可选多个 → 多进多出定值/标定。求解会把选中的 y 同时逼到各自目标。">i</span></label>`;
+  h+=`<input value="${filterValue('solveTargetChecks')}" placeholder="搜索因变量…" oninput="filterChecks('solveTargetChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setSolveTargets('${n.id}',true)">全选筛选结果</button><button class="ghost sm" onclick="setSolveTargets('${n.id}',false)">清空筛选结果</button><span class="hint" data-filter-count="solveTargetChecks"></span></div><div id="solveTargetChecks" class="check-list" style="padding:0"><table class="sens" style="width:100%"><tr><th>选</th><th>y</th><th>目标值 y*</th></tr>`;
   ys.forEach(o=>{ const on=(o in tg);
-    h+=`<tr><td><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleTarget('${n.id}','${o}',this.checked)"></td>
+    h+=`<tr class="channel-opt" data-value="${escapeHtml(o)}" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><td><input type="checkbox" style="width:auto" ${on?'checked':''} onchange="toggleTarget('${n.id}','${o}',this.checked)"></td>
       <th>${o}</th>
       <td><input type="number" step="0.1" value="${on?tg[o]:''}" ${on?'':'disabled'} placeholder="目标值" oninput="setTargetVal('${n.id}','${o}',this.value)"></td></tr>`; });
   h+=`</table></div>`;
   const rows=ys.filter(o=>o in tg);
   // ---- 灵敏度矩阵表：行=选中的 y，列=选中的 x ----
-  h+=`<label style="margin-top:10px">灵敏度矩阵 ∂y/∂x <span class="info" data-tip="行=选中的目标 y、列=上方勾选的自变量 x；每格填对应偏导 ∂y/∂x（照着表格填即可）。求解用阻尼最小二乘(SVD 正则伪逆)，比 pinv 数值更稳，行列数不等/病态也不发散。">i</span></label>`;
+  h+=`<label style="margin-top:10px">灵敏度矩阵 ∂y/∂x <span class="info" data-tip="行=选中的目标 y、列=上方勾选的自变量 x；每格填对应偏导 ∂y/∂x。正则 λ 抑制矩阵求逆中的弱/病态方向；阻尼 d 则缩放求逆之后的整次修正步长。">i</span></label>`;
   if(!rows.length || !xs.length){ h+=`<p class="hint">先在上表勾选至少一个目标 y，并在上方『变量』勾选至少一个自变量 x。</p>`; return h; }
   h+=`<div style="overflow-x:auto"><table class="sens"><tr><th>∂y/∂x</th>${xs.map(x=>`<th>${x}</th>`).join('')}</tr>`;
   rows.forEach(o=>{ h+=`<tr><th>${o}</th>`+xs.map(x=>{ const val=((sens[o]||{})[x]);
     return `<td><input type="number" step="0.01" value="${val!=null?val:''}" placeholder="0" oninput="setSensCell('${n.id}','${o}','${x}',this.value)"></td>`; }).join('')+`</tr>`; });
   h+=`</table></div>`;
-  h+=`<p class="hint">Δx = 阻尼 · SVD正则伪逆(∂y/∂x) · (y* − 当前 y)，逐轮迭代把选中的 y 同时逼到目标。</p>`;
+  h+=`<div class="sub"><b>次数与两个稳定参数</b><p class="hint" style="margin-bottom:0">Δx = d · S⁺<sub>λ</sub> · (y* − 当前 y)。<br><b>最大修正次数</b>：安全上限，满足残差容差可提前停；测量点最多为次数+1。<br><b>阻尼 d</b>：缩放整步，管“每轮走多远”。<br><b>正则 λ</b>：压制弱/病态方向，管“哪些方向不可信”。</p></div>`;
   return h;
 }
-window.toggleTarget=(id,o,on)=>{ const n=nodes.find(x=>x.id===id); ensureSolve(n);
+window.toggleTarget=(id,o,on)=>{ const n=nodes.find(x=>x.id===id),top=(document.getElementById('solveTargetChecks')||{}).scrollTop||0; ensureSolve(n);
   if(on){ if(n.params.targets[o]==null) n.params.targets[o]=0; }
   else { delete n.params.targets[o]; delete n.params.sensitivity[o]; }
-  render(); inspectNode(n); };
+  render(); inspectNode(n); restoreCheckList('solveTargetChecks',top); };
+window.setSolveTargets=(id,on)=>{const n=nodes.find(x=>x.id===id),top=(document.getElementById('solveTargetChecks')||{}).scrollTop||0;ensureSolve(n);visibleCheckValues('solveTargetChecks').forEach(o=>{if(on){if(n.params.targets[o]==null)n.params.targets[o]=0;}else{delete n.params.targets[o];delete n.params.sensitivity[o];}});render();inspectNode(n);restoreCheckList('solveTargetChecks',top);};
 window.setTargetVal=(id,o,v)=>{ const n=nodes.find(x=>x.id===id); ensureSolve(n); n.params.targets[o]=(v===''?0:+v); };
 window.setSensCell=(id,o,x,v)=>{ const n=nodes.find(x=>x.id===id); ensureSolve(n);
   (n.params.sensitivity[o]=n.params.sensitivity[o]||{})[x]=(v===''?0:+v); };
@@ -733,12 +1042,14 @@ function renderEvalExtras(){
   // 通道规范：每个 y 一个读取通道（设备/参数/耗时/测量组），每个 x 一个执行器。始终可配。
   h += `<div class="sub"><div class="glab">通道规范 <span class="info" data-tip="把每个因变量 y 映射到读取设备(如光功率计/偏振分析仪)+参数，标注读取耗时(秒)，并填『测量组』——同组并行测(耗时取最大)、不同组串行测(相加)。每个自变量 x 映射到执行器。引擎只读取某步真正需要的通道。">i</span></div>`;
   h += `<div class="glab" style="margin-top:2px">因变量（读取通道）：设备 / 参数 / 耗时s / <b>测量组</b></div>`;
-  objKeys.forEach(o=>{ const c=channels[o];
-    h += `<div class="lim4"><b>${o}</b>
+  objKeys.forEach(o=>{ const c=channels[o]; const expr=(vocs.objectives[o]||{}).expression;
+    if(expr){ h += `<div class="lim4"><b title="${escapeHtml(o)}">${escapeHtml((c.displayName||o)+' · '+o)}</b><span style="grid-column:1/-1;color:var(--accent);font-family:monospace;overflow-wrap:anywhere">= ${escapeHtml(expr)}</span></div>`; return; }
+    h += `<div class="lim4"><b title="${escapeHtml(o)}">${escapeHtml((c.displayName||o)+' · '+o)}</b>
       <input value="${c.device}" oninput="channels['${o}'].device=this.value" title="读取设备">
       <input value="${c.param}" oninput="channels['${o}'].param=this.value" title="参数">
       <input type="number" step="0.5" min="0" value="${c.cost}" oninput="channels['${o}'].cost=+this.value; renderEvalExtras()" title="读取耗时(秒)">
-      <input value="${c.group||''}" oninput="channels['${o}'].group=this.value; renderEvalExtras()" title="测量组：同组并行、不同组串行；留空=独立串行" placeholder="组"></div>`; });
+      <input value="${c.group||''}" oninput="channels['${o}'].group=this.value; renderEvalExtras()" title="测量组：同组并行、不同组串行；留空=独立串行" placeholder="组">
+      <select onchange="channels['${o}'].valueType=this.value; renderEvalExtras()"><option value="scalar" ${c.valueType==='scalar'?'selected':''}>标量</option><option value="vector" ${c.valueType==='vector'?'selected':''}>向量</option><option value="matrix" ${c.valueType==='matrix'?'selected':''}>矩阵</option></select></div>`; });
   h += timingPreview();
   h += `<div class="glab" style="margin-top:6px">自变量（执行器）：设备 / 参数</div>`;
   varKeys.forEach(v=>{ const a=actuators[v];
@@ -773,6 +1084,12 @@ function toGraph(){
   lastStages = {'init':{color:'var(--muted)', label:'初始/中间点'}}; stageToNode={};
   const used={};
   const gnodes = nodes.map(n => {
+    if(n.type==='start'||n.type==='end') return {id:n.id,type:n.type,position:{x:n.x,y:n.y}};
+    if(n.type==='data_transform') return {id:n.id,type:'data_transform',data:{label:n.label,input:n.inputChannel,inputs:n.inputs||undefined,output:n.outputChannel,output_type:n.outputType||undefined,operation:n.operation,params:n.params||{}},position:{x:n.x,y:n.y}};
+    if(n.type==='for_loop') return {id:n.id,type:'for_loop',data:{iterations:Number(n.iterations)},position:{x:n.x,y:n.y}};
+    if(n.type==='observer') return {id:n.id,type:'observer',data:{label:n.label,kind:n.observerKind,
+      channels:n.observerKind==='scalar'?(n.channels||[]):[n.matrixChannel],feature_axis:n.featureAxis,
+      plot_style:n.plotStyle||'line',show_peaks:!!n.showPeaks},position:{x:n.x,y:n.y}};
     let base=labelOf(n.algorithm); let sName=base;
     used[base]=(used[base]||0)+1; if(used[base]>1) sName=base+'#'+used[base];
     lastStages[sName]={color:n.color, label:sName}; stageToNode[sName]=n.id;
@@ -788,7 +1105,7 @@ function toGraph(){
     if(n.stopTarget) data.stop={target:n.stopTarget};
     return {id:n.id, type:'algorithm', data, position:{x:n.x,y:n.y}};
   });
-  const gedges = edges.map(e => e.condition ? {source:e.source,target:e.target,condition:e.condition} : {source:e.source,target:e.target});
+  const gedges = edges.map(e => ({source:e.source,target:e.target,...(e.condition?{condition:e.condition}:{}),...(e.role?{role:e.role}:{})}));
   const g = {nodes:gnodes, edges:gedges}; if(untilExpr) g.until=untilExpr; return g;
 }
 function readEvalConfig(){
@@ -798,6 +1115,15 @@ function readEvalConfig(){
     noise:+document.getElementById('evNoise').value, averages:+document.getElementById('evAvg').value,
     safety:document.getElementById('evSafety').checked, safety_limits:safetyLimits,
     channel_costs, channel_groups, channels, actuators }; }
+
+function currentVocs(){
+  const objectives={}; objKeys.forEach(o=>{ const m=vocs.objectives[o]||{}, c=channels[o]||{};
+    objectives[o]={mode:m.mode||'maximize', target:m.target==null?null:m.target,
+      cost:m.expression?0:(+c.cost||0), device:m.expression?null:(c.device||null),
+      param:m.expression?null:(c.param||null), group:m.expression?null:(c.group||null),
+      expression:m.expression||null, value_type:m.expression?'scalar':(c.valueType||'scalar')}; });
+  return {variables:vocs.variables, objectives, constraints:vocs.constraints||[]};
+}
 
 // ==================== 右栏「实时状态」：跑的时候看得见 x/y 在动 ====================
 // 走 /run/graph/stream（SSE）：每测一个点后端推一条，前端刷新。执行仍是同一个
@@ -820,16 +1146,18 @@ function renderLive(){
   varKeys.forEach(v=>{
     const val=d.x[v]; if(val==null) return;
     const [lo,hi]=R[v]; const f=Math.max(0,Math.min(1,(val-lo)/((hi-lo)||1)));
-    h+=`<div class="lvRow" data-tip="${v} ∈ [${lo}, ${hi}]"><b>${v}</b>
+    h+=`<div class="lvRow" data-tip="${escapeHtml(v)} ∈ [${lo}, ${hi}]"><b class="lvName" title="${escapeHtml(v)}">${escapeHtml(v)}</b>
       <div class="lvBar"><div class="lvFill" style="left:${(f*100).toFixed(1)}%;width:4px;background:var(--accent)"></div></div>
       <span class="lvVal">${(+val).toPrecision(5)}</span></div>`;
   });
   h+=`<div style="font-size:11px;color:var(--muted);margin:8px 0 3px">因变量 y（条=本次运行内的相对高低）</div>`;
   objKeys.forEach(o=>{
     const val=d.y[o]; if(val==null) return;
+    if(typeof val!=='number') return; // matrices belong in observer table/feature plot
     const sp=liveSpan[o]||{lo:val,hi:val};
     const f=sp.hi>sp.lo ? (val-sp.lo)/(sp.hi-sp.lo) : 1;
-    h+=`<div class="lvRow" data-tip="本次运行内 ${o} 的范围 ${sp.lo.toPrecision(4)} ~ ${sp.hi.toPrecision(4)}"><b>${o}</b>
+    const label=(channels[o]||{}).displayName||o;
+    h+=`<div class="lvRow" data-tip="本次运行内 ${escapeHtml(o)} 的范围 ${sp.lo.toPrecision(4)} ~ ${sp.hi.toPrecision(4)}"><b class="lvName" title="${escapeHtml(label+' · '+o)}">${escapeHtml(label)}</b>
       <div class="lvBar"><div class="lvFill" style="left:0;width:${(Math.max(0.02,f)*100).toFixed(1)}%;background:var(--ok)"></div></div>
       <span class="lvVal">${(+val).toPrecision(5)}</span></div>`;
   });
@@ -838,7 +1166,7 @@ function renderLive(){
 function liveReset(){ liveLast=null; liveSeen=0; liveSpan={}; renderLive(); }
 function liveFeed(ev){
   liveSeen++;
-  objKeys.forEach(o=>{ const v=ev.y[o]; if(v==null) return;
+  objKeys.forEach(o=>{ const v=ev.y[o]; if(typeof v!=='number') return;
     const sp=liveSpan[o]||(liveSpan[o]={lo:v,hi:v}); sp.lo=Math.min(sp.lo,v); sp.hi=Math.max(sp.hi,v); });
   liveLast=ev; renderLive();
 }
@@ -865,7 +1193,7 @@ async function streamRun(body, onEvent){
 
 async function run(){
   const btn=document.getElementById('runBtn'); btn.disabled=true; btn.textContent='运行中…';
-  const body = {graph:toGraph(), evaluator:readEvalConfig(), delay:liveDelay};
+  const body = {graph:toGraph(), vocs:currentVocs(), evaluator:readEvalConfig(), delay:liveDelay};
   if(useStartPoint){ const sp={}; varKeys.forEach(v=>sp[v]=+startPoint[v]); body.start_point=sp; }
   liveReset(); liveOn=true; renderLive();
   try {
@@ -878,12 +1206,14 @@ async function run(){
     liveOn=false; renderLive();
     if(err || !d){ showResults(`<p style="color:var(--danger)">${err||'运行出错'}</p>`); return; }
     lastHistory = d.history || []; lastFits = d.fits||{}; lastReads = d.reads||{}; lastSim = d.sim_seconds||0; lastState = d.state||{};
+    lastObservations = d.observations||{};
     showSurface = false; lastSurface = null;
     nodes.forEach(n=> n.fitInfo='');                       // clear old fit formulas
     Object.entries(lastFits).forEach(([st,f])=>{ const nid=stageToNode[st]; const n=nodes.find(x=>x.id===nid); if(n) n.fitInfo=f; });
     render();
+    if(sel){ const sn=nodes.find(x=>x.id===sel); if(sn&&sn.type==='observer') inspectObserver(sn); }
     let h=`<h2>结果 <span class="info" data-tip="各目标最终值、评估次数与测量耗时(按通道 cost 累计)。下方轨迹图可切收敛/1D/2D 三视图。">i</span></h2>`;
-    Object.entries(d.objectives).forEach(([k,v])=>h+=`<span class="metric">${k} <b>${(+v).toFixed(4)}</b></span>`);
+    Object.entries(d.objectives).forEach(([k,v])=>{ const shown=typeof v==='number'?(+v).toFixed(4):(matrixOf(v)?`${v.length}×${v[0].length} 矩阵`:'非标量'); h+=`<span class="metric">${k} <b>${shown}</b></span>`; });
     h+=`<span class="metric">评估 <b>${d.n_evals}</b></span>`;
     if(lastSim) h+=`<span class="metric" data-tip="按每个通道的读取耗时(cost)累计的模拟测量时间。">测量耗时 <b>${(+lastSim).toFixed(1)}s</b></span>`;
     const rd=Object.entries(lastReads).map(([k,v])=>`${k}×${v}`).join(' ');
@@ -949,14 +1279,14 @@ function opLegend(baresUsed){
 
 function convChart(){
   const group = chartSeries==='vars'?varKeys:objKeys;
-  const keys = group.filter(k=>lastHistory.some(r=>k in r && r[k]!=null));
+  const keys = group.filter(k=>lastHistory.some(r=>typeof r[k]==='number'));
   if(!keys.length) return '<p class="hint">该分组无数据。</p>';
   const total=lastHistory.length;
   let idx=[...lastHistory.keys()];
   if(chartMode==='interval' && chartInterval>1){ idx=idx.filter(i=>i%chartInterval===0); if(idx[idx.length-1]!==total-1) idx.push(total-1); }
   const W=300,H=150,pad={l:38,r:12,t:10,b:28}, iw=W-pad.l-pad.r, ih=H-pad.t-pad.b;
   let vmin=Infinity,vmax=-Infinity;
-  keys.forEach(k=>idx.forEach(i=>{const v=lastHistory[i][k]; if(v!=null){vmin=Math.min(vmin,v);vmax=Math.max(vmax,v);}}));
+  keys.forEach(k=>idx.forEach(i=>{const v=lastHistory[i][k]; if(typeof v==='number'){vmin=Math.min(vmin,v);vmax=Math.max(vmax,v);}}));
   if(!isFinite(vmin)) return '';
   const rg=(vmax-vmin)||1;
   const X=j=>pad.l+(idx.length<2?iw/2:(j/(idx.length-1))*iw), Y=v=>pad.t+ih-((v-vmin)/rg)*ih;
@@ -970,10 +1300,10 @@ function convChart(){
     g+=`<rect x="${X(j)-w/2}" y="${bandY}" width="${Math.max(1.5,w)}" height="6" fill="${c}"/>`; });
   g+=`<text x="${pad.l+iw/2}" y="${H-3}" fill="var(--muted)" font-size="9" text-anchor="middle">评估次数 →（下方色带=算子）</text>`;
   keys.forEach((k,ki)=>{ const col=kcol[ki%kcol.length];
-    const pts=idx.map((i,j)=>{const v=lastHistory[i][k]; return v==null?null:`${X(j)},${Y(v)}`;}).filter(Boolean);
+    const pts=idx.map((i,j)=>{const v=lastHistory[i][k]; return typeof v!=='number'?null:`${X(j)},${Y(v)}`;}).filter(Boolean);
     if(pts.length>=2) g+=`<polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="1.6"/>`;
-    idx.forEach((i,j)=>{const v=lastHistory[i][k]; if(v!=null) g+=`<circle cx="${X(j)}" cy="${Y(v)}" r="2.4" fill="${stageColor(stageBase(lastHistory[i].stage))}" stroke="${col}" stroke-width="1"/>`;});
-    const lv=lastHistory[idx[idx.length-1]][k]; if(lv!=null) g+=`<text x="${W-pad.r}" y="${Y(lv)-3}" fill="${col}" font-size="9" text-anchor="end">${(+lv).toFixed(3)}</text>`;
+    idx.forEach((i,j)=>{const v=lastHistory[i][k]; if(typeof v==='number') g+=`<circle cx="${X(j)}" cy="${Y(v)}" r="2.4" fill="${stageColor(stageBase(lastHistory[i].stage))}" stroke="${col}" stroke-width="1"/>`;});
+    const lv=lastHistory[idx[idx.length-1]][k]; if(typeof lv==='number') g+=`<text x="${W-pad.r}" y="${Y(lv)-3}" fill="${col}" font-size="9" text-anchor="end">${(+lv).toFixed(3)}</text>`;
   });
   g+='</svg>';
   const keyLeg=`<div class="legend">`+keys.map((k,i)=>`<span class="chip"><span class="sw" style="background:${kcol[i%kcol.length]}"></span>${k}(线)</span>`).join('')+`</div>`;
@@ -982,7 +1312,7 @@ function convChart(){
 
 function oneDChart(){
   const xk=c1dVar, ok=c1dObj;
-  const pts=lastHistory.map(r=>({x:r[xk], y:r[ok], s:stageBase(r.stage)})).filter(p=>p.x!=null&&p.y!=null);
+  const pts=lastHistory.map(r=>({x:r[xk], y:r[ok], s:stageBase(r.stage)})).filter(p=>typeof p.x==='number'&&typeof p.y==='number');
   if(!pts.length) return '<p class="hint">无数据。</p>';
   const W=300,H=160,pad={l:44,r:12,t:10,b:26}, iw=W-pad.l-pad.r, ih=H-pad.t-pad.b;
   const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
@@ -1018,7 +1348,7 @@ async function fetchSurface(){
 }
 function twoDChart(){
   const xk=c2dX, yk=c2dY, ok=c2dObj;
-  const pts=lastHistory.map((r,i)=>({x:r[xk], y:r[yk], v:r[ok], i})).filter(p=>p.x!=null&&p.y!=null&&p.v!=null);
+  const pts=lastHistory.map((r,i)=>({x:r[xk], y:r[yk], v:r[ok], i})).filter(p=>typeof p.x==='number'&&typeof p.y==='number'&&typeof p.v==='number');
   if(!pts.length) return '<p class="hint">无数据。</p>';
   const W=300,H=190,pad={l:44,r:44,t:10,b:26}, iw=W-pad.l-pad.r, ih=H-pad.t-pad.b;
   const surf = (showSurface && lastSurface && lastSurface.xs) ? lastSurface : null;
@@ -1091,7 +1421,7 @@ function downloadTrajectory(){
 // ---------- save / load solution ----------
 function saveSolution(){
   const name = prompt('方案名称', '优化方案') || '优化方案';
-  const obj = {version:1, name, until:untilExpr, evaluator:readEvalConfig(),
+  const obj = {version:2, name, until:untilExpr, evaluator:readEvalConfig(), derivedObjectives:derivedRows,
     useStartPoint, startPoint:{...startPoint},
     nodes:nodes.map(n=>({...n})), edges:edges.map(e=>({...e})), seq};
   const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
@@ -1107,6 +1437,7 @@ function applySolution(o){
   if(o.useStartPoint!=null) useStartPoint=!!o.useStartPoint;
   if(o.startPoint) varKeys.forEach(v=>{ if(o.startPoint[v]!=null) startPoint[v]=+o.startPoint[v]; });
   if(o.evaluator) applyEvalConfig(o.evaluator);
+  if(o.derivedObjectives){ derivedRows=JSON.parse(JSON.stringify(o.derivedObjectives)); applyDerived(); }
   sel=null; selEdge=null; render(); inspectEmpty(); renderUntilRows();
   document.getElementById('conn').textContent='已加载方案：'+(o.name||'');
 }
@@ -1231,7 +1562,80 @@ function toggleTheme(){ theme = theme==='light'?'dark':'light'; document.documen
   document.getElementById('themeBtn').textContent = theme==='light'?'🌙':'☀'; if(lastHistory.length) renderChart(); }
 function showModal(id){ document.getElementById('modalBack').style.display='block'; document.getElementById(id).style.display='block'; }
 function openHelp(){ showModal('helpModal'); }
+function openAgentGuide(){ showModal('agentGuideModal'); }
+function channelMeta(name){ const c=channels[name]||{}, p=probeData&&probeData.channels&&probeData.channels[name]; return {...c,shape:(p&&p.shape)||c.shape,dtype:(p&&p.dtype)||c.dtype||'—',probe:p}; }
+function fmtShape(s){ return s==null?'未知':('['+s.join(' × ')+']'); }
+function renderDataCenter(){
+  const box=document.getElementById('dataCenterBody'); if(!box)return;
+  let h=`<h3>自变量与优化起点</h3><table class="data-table"><tr><th>自变量</th><th>范围</th><th>当前硬件位置</th><th>本次优化起点</th></tr>`;
+  varKeys.forEach(v=>{const V=vocs.variables[v];h+=`<tr><td><b>${escapeHtml(v)}</b><div class="hint">${escapeHtml(V.device||'未标设备')} · ${escapeHtml(V.param||v)}</div></td><td>${V.low} ～ ${V.high}</td><td>${V.current==null?'未知':V.current}</td><td><input type="number" step="any" value="${startPoint[v]}" onchange="startPoint['${v}']=+this.value"></td></tr>`;});
+  h+=`</table><p class="hint">当前硬件位置是只读值；修改“本次优化起点”只影响下一次运行，不会移动设备。</p>`;
+  h+=`<h3>测量通道（${objKeys.length}） <button class="ghost sm" id="probeBtn" onclick="probeChannels()">试读一次</button></h3><input placeholder="搜索显示名、原始名、设备、类型…" oninput="filterDataRows(this.value)" style="margin-bottom:5px"><div style="max-height:330px;overflow:auto"><table class="data-table"><tr><th>名称</th><th>类型与格式</th><th>来源</th><th>预览摘要</th></tr>`;
+  objKeys.forEach(o=>{const c=channelMeta(o),p=c.probe;h+=`<tr class="data-channel-row" data-name="${escapeHtml([o,c.displayName,c.device,c.param,c.valueType].join(' '))}"><td title="${escapeHtml(o)}"><div class="name-short">${escapeHtml(c.displayName||o)}</div><div class="name-raw">${escapeHtml(o)}</div></td><td><b>${c.valueType}</b> · ${fmtShape(c.shape)}<div class="hint">${escapeHtml(c.dtype||'dtype 未知')} ${c.unit?'· '+escapeHtml(c.unit):''}</div></td><td>${escapeHtml(c.device||'—')}<div class="hint">${escapeHtml(c.param||'—')}</div></td><td>${p?`min ${Number(p.min).toPrecision(4)} · max ${Number(p.max).toPrecision(4)}<div class="hint">mean ${Number(p.mean).toPrecision(4)}</div>`:'点击“试读一次”获取实际 shape 和数值范围'}</td></tr>`;});
+  h+='</table></div>';
+  h+=`<h3>快速构建向量差值</h3><div class="trow2"><div><label>输出名称</label><input id="featName" value="vector_diff"></div><div><label>显示名称</label><input id="featDisplay" value="向量差值"></div></div>`;
+  const vecs=availableChannels().filter(c=>c.valueType==='vector').map(c=>c.name); const opts=vecs.map(v=>`<option value="${v}">${escapeHtml((channels[v]||{}).displayName||v)} · ${escapeHtml(v)}</option>`).join('');
+  h+=`<div class="trow2"><div><label>向量 A</label><select id="featA">${opts}</select><div class="slice-range"><input id="featAStart" type="number" min="0" value="0" placeholder="起始下标"><input id="featAStop" type="number" min="1" value="10" placeholder="结束下标"></div></div><div><label>向量 B</label><select id="featB">${opts}</select><div class="slice-range"><input id="featBStart" type="number" min="0" value="0" placeholder="起始下标"><input id="featBStop" type="number" min="1" value="10" placeholder="结束下标"></div></div></div>`;
+  h+=vecs.length>=2?`<button class="ghost sm" onclick="createVectorDifference()">创建 A[start:stop] − B[start:stop]</button><span id="featStatus" class="hint" style="margin-left:8px"></span>`:`<p class="hint">至少需要两个 vector 通道。请在 device template 中声明 value_type="vector"。</p>`;
+  box.innerHTML=h;
+}
+function openDataCenter(){ renderDataCenter(); showModal('dataCenterModal'); }
+function filterDataRows(q){q=(q||'').toLowerCase();document.querySelectorAll('.data-channel-row').forEach(r=>r.style.display=(r.dataset.name||'').toLowerCase().includes(q)?'table-row':'none');}
+async function probeChannels(){ const b=document.getElementById('probeBtn');b.disabled=true;b.textContent='读取中…';try{const r=await fetch(API+'/device/probe',{method:'POST'}),d=await r.json();if(!r.ok)throw Error(d.detail||r.statusText);probeData=d;renderDataCenter();}catch(e){alert('试读失败：'+e.message);} }
+function sliceSpec(prefix){return {start:+document.getElementById(prefix+'Start').value,stop:+document.getElementById(prefix+'Stop').value,step:1};}
+function createVectorDifference(){
+  const output=document.getElementById('featName').value.trim(),a=document.getElementById('featA').value,b=document.getElementById('featB').value,sa=sliceSpec('featA'),sb=sliceSpec('featB');
+  if(!/^[A-Za-z_]\w*$/.test(output)){alert('输出名称必须是合法标识符');return;} if(availableChannels().some(c=>c.name===output)){alert('输出名称已存在');return;}
+  const na=sa.stop-sa.start,nb=sb.stop-sb.start;if(na<=0||nb<=0||na!==nb){document.getElementById('featStatus').textContent=`Shape 不匹配：[${na}] vs [${nb}]`;return;}
+  nodes.push({id:'n'+(++seq),type:'data_transform',label:document.getElementById('featDisplay').value.trim()||output,inputChannel:a,inputs:[{channel:a,selector:sa},{channel:b,selector:sb}],outputChannel:output,outputType:'vector',operation:'subtract',params:{},color:'#14b8a6',x:80+(nodes.length%4)*30,y:70+nodes.length*70});
+  render();renderDataCenter();document.getElementById('featStatus').textContent=`已创建 ${output}，Shape [${na}]`;
+}
+function applyDataCenter(){useStartPoint=true;renderEvalExtras();closeModals();document.getElementById('conn').textContent='✅ 数据配置已应用；下一次运行使用所示优化起点';}
 function closeModals(){ document.getElementById('modalBack').style.display='none'; document.querySelectorAll('.modal').forEach(m=>m.style.display='none'); }
+
+// ---------- calculated/derived objectives ----------
+function openDerived(){ renderDerivedRows(); showModal('derivedModal'); }
+function addDerivedRow(){ derivedRows.push({name:'z'+(derivedRows.length+1),expression:'',mode:'maximize',target:null}); renderDerivedRows(); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function renderDerivedRows(){
+  const box=document.getElementById('derivedRows'); if(!box) return;
+  if(!derivedRows.length){ box.innerHTML='<p class="hint">尚未定义。示例：z1 = y1+y2；z2 = max(y1,y2,y3)-min(y1,y2,y3)。</p>'; return; }
+  const channelOptions=objKeys.map(o=>`<option value="${escapeHtml(o)}">${escapeHtml((channels[o]||{}).displayName||o)} · ${escapeHtml(o)}</option>`).join('');
+  box.innerHTML=`<p class="hint">先选择已有因变量并点击“插入”，再点击运算符；系统会插到当前光标位置，无需手敲长名称。</p><div style="overflow-x:auto"><table class="sens"><tr><th>名称</th><th>表达式与快速构建</th><th>默认模式</th><th>目标值</th><th></th></tr>`+
+    derivedRows.map((r,i)=>`<tr><td><input value="${escapeHtml(r.name||'')}" oninput="derivedRows[${i}].name=this.value.trim();updateDerivedPreview(${i})" placeholder="z1"></td>
+      <td class="expr-builder"><input id="derivedExpr${i}" value="${escapeHtml(r.expression||'')}" oninput="derivedRows[${i}].expression=this.value;updateDerivedPreview(${i})" placeholder="点击下方通道与运算符构建" style="min-width:340px;font-family:monospace">
+        <div class="row" style="margin-top:5px"><select id="derivedChannel${i}" style="min-width:220px">${channelOptions}</select><button class="ghost sm" onclick="insertSelectedDerivedChannel(${i})">插入因变量</button></div>
+        <div class="expr-tools">${['+','−','×','÷','**','(',')','abs( )','min( , )','max( , )'].map(t=>`<button type="button" class="ghost" onclick="insertDerivedTool(${i},'${t}')">${t}</button>`).join('')}</div>
+        <div id="derivedPreview${i}" class="expr-preview">${escapeHtml((r.name||('z'+(i+1)))+' = '+(r.expression||'…'))}</div></td>
+      <td><select onchange="derivedRows[${i}].mode=this.value"><option value="maximize" ${r.mode==='maximize'?'selected':''}>最大化</option><option value="minimize" ${r.mode==='minimize'?'selected':''}>最小化</option><option value="target" ${r.mode==='target'?'selected':''}>逼近目标</option><option value="scan" ${r.mode==='scan'?'selected':''}>扫描</option></select></td>
+      <td><input type="number" step="any" value="${r.target==null?'':r.target}" oninput="derivedRows[${i}].target=this.value===''?null:+this.value" placeholder="仅逼近模式"></td>
+      <td><button class="ghost sm" onclick="derivedRows.splice(${i},1);renderDerivedRows()">✕</button></td></tr>`).join('')+'</table></div>';
+}
+function insertAtCursor(input,text,cursorBack=0){const a=input.selectionStart??input.value.length,b=input.selectionEnd??a;input.value=input.value.slice(0,a)+text+input.value.slice(b);const p=a+text.length-cursorBack;input.focus();input.setSelectionRange(p,p);input.dispatchEvent(new Event('input',{bubbles:true}));}
+window.insertSelectedDerivedChannel=i=>{const s=document.getElementById('derivedChannel'+i),input=document.getElementById('derivedExpr'+i);if(s&&input)insertAtCursor(input,s.value);};
+window.insertDerivedTool=(i,t)=>{const input=document.getElementById('derivedExpr'+i);if(!input)return;const tools={'+':' + ','−':' - ','×':' * ','÷':' / ','**':' ** ','(':'(',')':')','abs( )':'abs()', 'min( , )':'min(,)', 'max( , )':'max(,)'};const backs={'abs( )':1,'min( , )':2,'max( , )':2};insertAtCursor(input,tools[t],backs[t]||0);};
+window.updateDerivedPreview=i=>{const el=document.getElementById('derivedPreview'+i),r=derivedRows[i];if(el)el.textContent=(r.name||('z'+(i+1)))+' = '+(r.expression||'…');};
+function applyDerived(){
+  const base=Object.keys(vocs.objectives).filter(o=>!(vocs.objectives[o]||{}).expression), seen=new Set(base);
+  for(const r of derivedRows){
+    if(!/^[A-Za-z_]\w*$/.test(r.name||'')){ alert('因变量名称必须是字母或下划线开头的标识符：'+r.name); return; }
+    if(seen.has(r.name)){ alert('因变量名称重复或与外部通道重名：'+r.name); return; }
+    if(!(r.expression||'').trim()){ alert(r.name+' 的表达式不能为空'); return; }
+    if(!/^[A-Za-z0-9_+*/%().,\s-]+$/.test(r.expression)){ alert(r.name+' 的表达式含有不支持的字符'); return; }
+    let depth=0; for(const c of r.expression){if(c==='(')depth++;if(c===')'&&--depth<0)break;} if(depth!==0){alert(r.name+' 的括号不匹配');return;}
+    const refText=r.expression.replace(/\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g,'');
+    const refs=(refText.match(/[A-Za-z_]\w*/g)||[]).filter(x=>!['abs','min','max'].includes(x));
+    const unknown=refs.filter(x=>!seen.has(x)); if(unknown.length){alert(r.name+' 引用了未知因变量：'+[...new Set(unknown)].join(', '));return;}
+    if(r.mode==='target' && r.target==null){ alert(r.name+' 使用逼近目标模式时必须填写目标值'); return; }
+    seen.add(r.name);
+  }
+  Object.keys(vocs.objectives).filter(o=>(vocs.objectives[o]||{}).expression).forEach(o=>delete vocs.objectives[o]);
+  derivedRows.forEach(r=>{ vocs.objectives[r.name]={mode:r.mode||'maximize',target:r.target,cost:0,expression:r.expression.trim(),value_type:'scalar'}; channels[r.name]={device:'',param:r.name,cost:0,group:'',valueType:'scalar'}; });
+  objKeys=Object.keys(vocs.objectives); sensObjs=sensObjs.filter(o=>objKeys.includes(o));
+  if(!objKeys.includes(c1dObj)) c1dObj=objKeys[0]; if(!objKeys.includes(c2dObj)) c2dObj=objKeys[0];
+  renderEvalExtras(); render(); if(sel) select(sel); closeModals();
+  document.getElementById('conn').textContent='已应用 '+derivedRows.length+' 个自定义因变量';
+}
 
 const tip=document.getElementById('tipbox');
 document.addEventListener('mouseover', e=>{ const el=e.target.closest('[data-tip]'); if(!el||!el.getAttribute('data-tip')) return; tip.textContent=el.getAttribute('data-tip'); tip.style.display='block'; positionTip(e); });
@@ -1308,6 +1712,8 @@ const EXAMPLES = {
 
 // ---------- AutoTuner (L1) ----------
 let tuneResult = null, tuneSpace = null, varState = {};
+let tuneDemoResult=null, tuneDemoCandidate=-1, tuneDemoCase=0;
+let tuneDemoX=null,tuneDemoY=null,tuneDemoObj=null;
 let paretoX = 'time', paretoY = 'quality';
 const METRICS = {time:{label:'时长',better:'low'}, quality:{label:'质量',better:'high'}, stability:{label:'稳定',better:'high'}, evals:{label:'评估次数',better:'low'}};
 
@@ -1315,19 +1721,22 @@ const METRICS = {time:{label:'时长',better:'low'}, quality:{label:'质量',bet
 // 这是【测量】不是优化：每次只动一个 x、其余钉在原点，看每个 y 怎么变。
 function openSens(){
   if(!sensVars.length) sensVars = varKeys.slice(0, 2);
-  if(!sensObjs.length) sensObjs = Object.keys(vocs.objectives);
+  if(!sensObjs.length) sensObjs = availableChannels('scalar').map(c=>c.name);
   if(!sensOrigins.length) sensOrigins = [{}];
   renderSensForm(); showModal('sensModal');
 }
 function renderSensForm(){
-  document.getElementById('sensVars').innerHTML = varKeys.map(v =>
-    `<label style="display:inline;margin:0 8px 0 0"><input type="checkbox" style="width:auto" ${sensVars.includes(v)?'checked':''} onchange="toggleSensVar('${v}',this.checked)"> ${v}</label>`).join('');
-  document.getElementById('sensObjs').innerHTML = Object.keys(vocs.objectives).map(o =>
-    `<label style="display:inline;margin:0 8px 0 0"><input type="checkbox" style="width:auto" ${sensObjs.includes(o)?'checked':''} onchange="toggleSensObj('${o}',this.checked)"> ${o}</label>`).join('');
+  const scalarObjs=availableChannels('scalar').map(c=>c.name);
+  document.getElementById('sensVars').innerHTML = `<span class="hint" id="sensVarCount">已选 ${sensVars.length}/${varKeys.length}</span><div class="check-list">`+varKeys.map(v =>
+    `<label class="channel-opt"><input type="checkbox" style="width:auto" ${sensVars.includes(v)?'checked':''} onchange="toggleSensVar('${v}',this.checked)"> ${escapeHtml(v)}</label>`).join('')+'</div>';
+  document.getElementById('sensObjs').innerHTML = `<span class="hint" id="sensObjCount">已选 ${sensObjs.length}/${scalarObjs.length}</span><input value="${filterValue('sensObjChecks')}" placeholder="搜索因变量…" oninput="filterChecks('sensObjChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setSensObjs(true)">全选筛选结果</button><button class="ghost sm" onclick="setSensObjs(false)">清空筛选结果</button><span class="hint" data-filter-count="sensObjChecks"></span></div><div id="sensObjChecks" class="check-list">`+scalarObjs.map(o =>
+    `<label class="channel-opt" data-value="${escapeHtml(o)}" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><input type="checkbox" style="width:auto" ${sensObjs.includes(o)?'checked':''} onchange="toggleSensObj('${o}',this.checked)"> ${escapeHtml((channels[o]||{}).displayName||o)} <span class="hint">${escapeHtml(o)}</span></label>`).join('')+'</div>';
+  restoreCheckList('sensObjChecks');
   renderSensOrigins();
 }
-window.toggleSensVar=(v,on)=>{ sensVars = on ? [...new Set([...sensVars,v])] : sensVars.filter(x=>x!==v); renderSensForm(); };
-window.toggleSensObj=(o,on)=>{ sensObjs = on ? [...new Set([...sensObjs,o])] : sensObjs.filter(x=>x!==o); renderSensForm(); };
+window.toggleSensVar=(v,on)=>{ sensVars = on ? [...new Set([...sensVars,v])] : sensVars.filter(x=>x!==v); updateSelectedCount('sensVarCount',sensVars.length,varKeys.length); };
+window.toggleSensObj=(o,on)=>{ sensObjs = on ? [...new Set([...sensObjs,o])] : sensObjs.filter(x=>x!==o); updateSelectedCount('sensObjCount',sensObjs.length,availableChannels('scalar').length); };
+window.setSensObjs=on=>{const s=new Set(sensObjs),vals=visibleCheckValues('sensObjChecks');vals.forEach(o=>on?s.add(o):s.delete(o));sensObjs=[...s];document.querySelectorAll('#sensObjChecks .channel-opt').forEach(el=>{if(vals.includes(el.dataset.value))el.querySelector('input[type=checkbox]').checked=on;});updateSelectedCount('sensObjCount',sensObjs.length,availableChannels('scalar').length);};
 function sensDefault(v){ const V=vocs.variables[v]; return (V.low+V.high)/2; }
 window.sensAddOrigin=()=>{ sensOrigins.push({}); renderSensOrigins(); };
 window.sensDelOrigin=(i)=>{ sensOrigins.splice(i,1); if(!sensOrigins.length) sensOrigins=[{}]; renderSensOrigins(); };
@@ -1350,7 +1759,7 @@ async function runSens(){
   if(!sensVars.length || !sensObjs.length){ document.getElementById('sensBody').innerHTML='<p class="hint">请至少选一个自变量和一个因变量。</p>'; return; }
   const btn=document.getElementById('sensRun'); btn.disabled=true; btn.textContent='采集中…';
   const origins = sensOrigins.map(o=>{ const full={}; varKeys.forEach(v=> full[v] = o[v]!=null ? +o[v] : sensDefault(v)); return full; });
-  const body = {variables:sensVars, objectives:sensObjs,
+  const body = {variables:sensVars, objectives:sensObjs, vocs:currentVocs(),
     step:+document.getElementById('sensStep').value, n_points:+document.getElementById('sensN').value,
     fit:document.getElementById('sensFit').value, linear_tol:+document.getElementById('sensTol').value,
     origins, evaluator:readEvalConfig()};
@@ -1459,9 +1868,34 @@ async function openTune(){
   const t=untilExpr||document.getElementById('tuneTarget').value;
   document.getElementById('tuneTarget').value=t||'y1>=0.95 and y2>=0.9';
   if(!tuneSpace){ try{ tuneSpace=(await (await fetch(API+'/autotune/space')).json()).phases; initVarState(); }catch(e){ tuneSpace=null; } }
+  if(!tuneVars.length) tuneVars=varKeys.slice();
+  if(!tuneObjs.length) tuneObjs=availableChannels('scalar').slice(0,Math.min(4,availableChannels('scalar').length)).map(c=>c.name);
   const rc=document.getElementById('tuneRandom'); if(rc) rc.checked=tuneRandomStart;
-  renderStartDomain(); renderVarTable(); showModal('tuneModal');
+  renderTuneChannelSelect(); renderStartDomain(); renderVarTable(); showModal('tuneModal');
 }
+function renderTuneChannelSelect(){
+  const box=document.getElementById('tuneChannelSelect');if(!box)return;const scalar=availableChannels('scalar').map(c=>c.name);
+  box.innerHTML=`<div class="trow2"><div><label>候选自变量（<span id="tuneVarCount">已选 ${tuneVars.length}/${varKeys.length}</span>）</label><div class="toolbar" style="margin-bottom:4px"><button class="ghost sm" onclick="setTuneVars(true)">全选</button><button class="ghost sm" onclick="setTuneVars(false)">清空</button></div><div id="tuneVarChecks" class="check-list">${varKeys.map(v=>`<label class="channel-opt" data-value="${escapeHtml(v)}"><input type="checkbox" style="width:auto" ${tuneVars.includes(v)?'checked':''} onchange="toggleTuneVar('${v}',this.checked)"> ${escapeHtml(v)}</label>`).join('')}</div></div>
+  <div><label>目标因变量（<span id="tuneObjCount">已选 ${tuneObjs.length}/${scalar.length}</span>）</label><input value="${filterValue('tuneObjChecks')}" placeholder="搜索因变量…" oninput="filterChecks('tuneObjChecks',this.value)"><div class="toolbar" style="margin:4px 0"><button class="ghost sm" onclick="setTuneObjs(true)">全选筛选结果</button><button class="ghost sm" onclick="setTuneObjs(false)">清空筛选结果</button><span class="hint" data-filter-count="tuneObjChecks"></span></div><div id="tuneObjChecks" class="check-list">${scalar.map(o=>`<label class="channel-opt" data-value="${escapeHtml(o)}" data-name="${escapeHtml(o+' '+((channels[o]||{}).displayName||''))}"><input type="checkbox" style="width:auto" ${tuneObjs.includes(o)?'checked':''} onchange="toggleTuneObj('${o}',this.checked)"> ${escapeHtml((channels[o]||{}).displayName||o)} <span class="hint">${escapeHtml(o)}</span></label>`).join('')}</div></div></div>
+  <div class="glab">组合求解目标值</div><div id="tuneTargetInputs" class="trow2"></div>`;
+  restoreCheckList('tuneObjChecks');renderTuneTargets();
+}
+function renderTuneTargets(){const el=document.getElementById('tuneTargetInputs');if(el)el.innerHTML=tuneObjs.map(o=>`<div><label>${escapeHtml((channels[o]||{}).displayName||o)} · ${escapeHtml(o)}</label><input class="subset-target" data-objective="${escapeHtml(o)}" type="number" step="any" value="${subsetTargets[o]??0}" oninput="subsetTargets['${o}']=+this.value"></div>`).join('');}
+window.toggleTuneVar=(v,on)=>{tuneVars=on?[...new Set([...tuneVars,v])]:tuneVars.filter(x=>x!==v);updateSelectedCount('tuneVarCount',tuneVars.length,varKeys.length);};
+window.toggleTuneObj=(o,on)=>{tuneObjs=on?[...new Set([...tuneObjs,o])]:tuneObjs.filter(x=>x!==o);updateSelectedCount('tuneObjCount',tuneObjs.length,availableChannels('scalar').length);renderTuneTargets();};
+window.setTuneVars=on=>{tuneVars=on?varKeys.slice():[];document.querySelectorAll('#tuneVarChecks input[type=checkbox]').forEach(x=>x.checked=on);updateSelectedCount('tuneVarCount',tuneVars.length,varKeys.length);};
+window.setTuneObjs=on=>{const s=new Set(tuneObjs),vals=visibleCheckValues('tuneObjChecks');vals.forEach(o=>on?s.add(o):s.delete(o));tuneObjs=[...s];document.querySelectorAll('#tuneObjChecks .channel-opt').forEach(el=>{if(vals.includes(el.dataset.value))el.querySelector('input[type=checkbox]').checked=on;});updateSelectedCount('tuneObjCount',tuneObjs.length,availableChannels('scalar').length);renderTuneTargets();};
+async function runVariableSubsetTest(){
+  const box=document.getElementById('subsetBody');
+  if(!lastSens){box.innerHTML='<p style="color:var(--danger)">请先打开“灵敏度采集”，选择这些 x/y 并完成一次采集。</p>';return;}
+  if(!tuneVars.length||!tuneObjs.length){box.innerHTML='<p style="color:var(--danger)">请至少选择一个自变量和一个因变量。</p>';return;}
+  const targets=Object.fromEntries([...document.querySelectorAll('.subset-target')].map(e=>[e.dataset.objective,+e.value]));
+  box.innerHTML='<p class="hint">正在评估组合…</p>';
+  const body={sensitivity:lastSens.matrix,objectives:tuneObjs,candidates:tuneVars,select_n:+document.getElementById('subsetN').value,targets};
+  try{const r=await fetch(API+'/autotune/variable-subsets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json();if(!r.ok)throw Error(d.detail||r.statusText);subsetResult=d;renderSubsetResults();}catch(e){box.innerHTML=`<p style="color:var(--danger)">${escapeHtml(e.message)}</p>`;}
+}
+function renderSubsetResults(){const rows=(subsetResult&&subsetResult.ranked)||[],box=document.getElementById('subsetBody');if(!rows.length){box.innerHTML='<p class="hint">没有可比较的组合。</p>';return;}box.innerHTML=`<p><b>共测试 ${rows.length} 个组合</b>；推荐 ${rows[0].variables.join(', ')}</p><div style="max-height:280px;overflow:auto"><table class="data-table"><tr><th>#</th><th>自变量组合</th><th>秩</th><th>条件数↓</th><th>操作</th></tr>${rows.map((r,i)=>`<tr><td>${i+1}</td><td>${r.variables.map(escapeHtml).join(', ')}</td><td>${r.rank}/${tuneObjs.length}${r.full_rank?' ✅':' ❌'}</td><td>${r.condition==null?'∞':Number(r.condition).toPrecision(5)}</td><td><button class="ghost sm" onclick="adoptSubset(${i})">采用</button></td></tr>`).join('')}</table></div>`;}
+window.adoptSubset=i=>{const row=subsetResult&&subsetResult.ranked[i];if(!row)return;adoptGraph(row.graph);closeModals();document.getElementById('conn').textContent='已采用变量组合：'+row.variables.join(', ');};
 function renderStartDomain(){
   const box=document.getElementById('startDomainBox'); if(!box) return;
   if(!tuneRandomStart){ box.innerHTML=''; return; }
@@ -1510,7 +1944,10 @@ function buildVariationSpec(){
 }
 async function runTune(){
   const btn=document.getElementById('tuneRun'); btn.disabled=true; btn.textContent='搜索中…';
+  if(!tuneVars.length||!tuneObjs.length){document.getElementById('tuneBody').innerHTML='<p style="color:var(--danger)">请至少选择一个自变量和一个标量因变量。</p>';btn.disabled=false;btn.textContent='▶ 开始搜索';return;}
   const spec={ bench:document.getElementById('evBench').value,
+    landscape_vars:tuneVars.slice(), landscape_obj:tuneObjs[0], quality_obj:tuneObjs[0],
+    balance_vars:[], balance_obj:null,
     target:(document.getElementById('tuneTarget').value.trim()||null),
     weights:{quality:+document.getElementById('wQ').value, time:+document.getElementById('wT').value, stability:+document.getElementById('wS').value},
     noise_levels:document.getElementById('tuneNoise').value.split(',').map(s=>+s.trim()).filter(s=>!isNaN(s)),
@@ -1544,9 +1981,68 @@ function renderTuneResults(){
         <span class="metric" data-tip="按通道成本累计的平均测量耗时">时长 <b>${(+r.time).toFixed(0)}s</b></span>
         <span class="metric" data-tip="有目标时=达标率；否则=重复性">稳定 <b>${(r.stability*100).toFixed(0)}%</b></span>
         ${r.pareto?'<span class="metric" style="color:var(--ok)">帕累托</span>':''}
+        <button class="ghost sm" onclick="demoCandidate(${i})" data-tip="用调优时相同的每个随机初始点/噪声 case 重放，并显示 2D 操作轨迹与目标收敛曲线。">▶ 演示</button>
         <button class="ghost sm" onclick="adoptCandidate(${i})" data-tip="把这个方案放到画布（切到该场景，可直接运行/微调）。">采用</button>
       </div></div>`).join('');
   document.getElementById('tuneBody').innerHTML=h;
+}
+async function demoCandidate(i){
+  const r=tuneResult.ranked[i], box=document.getElementById('tuneDemo'); if(!r||!box)return;
+  tuneDemoCandidate=i; box.innerHTML='<p class="hint">正在按全部随机初始点重放策略…</p>';
+  try{
+    const resp=await fetch(API+'/autotune/demo',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({spec:tuneResult.spec,graph:r.graph})});
+    const d=await resp.json(); if(!resp.ok)throw new Error(d.detail||'演示失败');
+    tuneDemoResult=d;tuneDemoCase=0;
+    tuneDemoX=d.variables[0];tuneDemoY=d.variables[1]||d.variables[0];tuneDemoObj=d.quality_obj||d.objectives[0];
+    renderTuneDemo();
+  }catch(e){box.innerHTML=`<p style="color:var(--danger)">${escapeHtml(e.message||e)}</p>`;}
+}
+function renderTuneDemo(){
+  const d=tuneDemoResult,box=document.getElementById('tuneDemo');if(!d||!box)return;
+  const s=d.summary,cases=d.cases||[],c=cases[tuneDemoCase];
+  let h=`<h3>策略 #${tuneDemoCandidate+1} · 多 Case 演示</h3><div class="row" style="gap:6px;flex-wrap:wrap">
+    <span class="metric">Case <b>${s.n_success}/${s.n_cases}</b></span><span class="metric">质量均值 <b>${(+s.quality_mean).toFixed(4)}</b></span>
+    <span class="metric">范围 <b>${(+s.quality_min).toFixed(3)}~${(+s.quality_max).toFixed(3)}</b></span><span class="metric">达标率 <b>${(s.reached_rate*100).toFixed(0)}%</b></span>
+    <span class="metric">平均评估 <b>${(+s.evals_mean).toFixed(1)}</b></span><span class="metric">平均耗时 <b>${(+s.time_mean).toFixed(1)}s</b></span></div>`;
+  h+=`<div class="paxes" style="margin-top:8px">选择 Case <select onchange="tuneDemoCase=+this.value;renderTuneDemo()">${cases.map((x,j)=>`<option value="${j}" ${j===tuneDemoCase?'selected':''}>#${j+1} · seed ${x.seed} · σ=${x.noise}${x.error?' · 失败':''}</option>`).join('')}</select></div>`;
+  const vopts=(selected)=>(d.variables||[]).map(v=>`<option value="${v}" ${v===selected?'selected':''}>${v}</option>`).join('');
+  const oopts=(d.objectives||[]).filter(o=>(channels[o]||{}).valueType==='scalar').map(o=>`<option value="${o}" ${o===tuneDemoObj?'selected':''}>${o}</option>`).join('');
+  h+=`<div class="chart-ctl" style="margin:7px 0"><span>轨迹坐标</span>
+    X<select onchange="tuneDemoX=this.value;renderTuneDemo()">${vopts(tuneDemoX)}</select>
+    Y<select onchange="tuneDemoY=this.value;renderTuneDemo()">${vopts(tuneDemoY)}</select>
+    <span>收敛因变量</span><select onchange="tuneDemoObj=this.value;renderTuneDemo()">${oopts}</select>
+    <span class="info" data-tip="与右侧结果轨迹一致：可自由选择 2D 横纵坐标和收敛因变量；鼠标悬停每个点可查看序号、阶段和精确坐标。">i</span></div>`;
+  if(c){if(c.error)h+=`<p style="color:var(--danger)">${escapeHtml(c.error)}</p>`;else{
+    h+=`<p class="hint">随机起点：${Object.entries(c.start).map(([k,v])=>`${k}=${(+v).toFixed(3)}`).join('，')}　→　最终：${Object.entries(c.final_state).map(([k,v])=>`${k}=${(+v).toFixed(3)}`).join('，')}　· ${c.reached?'✓ 达标':'未达标'}</p>`;
+    h+=`<div style="display:flex;gap:10px;flex-wrap:wrap">${tuneCase2D(c,tuneDemoX,tuneDemoY)}${tuneCaseConvergence(c,tuneDemoObj)}</div>`;
+    h+=tuneCasePointTable(c,tuneDemoX,tuneDemoY,tuneDemoObj);
+  }}
+  box.innerHTML=h;
+}
+function tuneCasePointTable(c,xk,yk,obj){
+  const rows=(c.history||[]).filter(r=>typeof r[xk]==='number'&&typeof r[yk]==='number');
+  return `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">采样点坐标表（${rows.length} 点）</summary>
+    <div style="overflow:auto;max-height:260px"><table class="sens"><tr><th>#</th><th>阶段</th><th>${xk}</th><th>${yk}</th><th>${obj}</th></tr>${rows.map((r,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(r.stage||'')}</td><td>${Number(r[xk]).toPrecision(7)}</td><td>${Number(r[yk]).toPrecision(7)}</td><td>${typeof r[obj]==='number'?Number(r[obj]).toPrecision(7):'—'}</td></tr>`).join('')}</table></div></details>`;
+}
+function tuneCase2D(c,xk,yk){
+  const pts=(c.history||[]).map((r,i)=>({...r,_i:i})).filter(r=>typeof r[xk]==='number'&&typeof r[yk]==='number');
+  if(!pts.length)return '<p class="hint">无 2D 轨迹。</p>';const W=330,H=210,p={l:42,r:12,t:12,b:28},iw=W-p.l-p.r,ih=H-p.t-p.b;
+  const Vx=vocs.variables[xk],Vy=vocs.variables[yk],X=v=>p.l+(v-Vx.low)/(Vx.high-Vx.low)*iw,Y=v=>p.t+ih-(v-Vy.low)/(Vy.high-Vy.low)*ih;
+  let g=`<div><b style="font-size:11px">2D 操作轨迹 · ${xk}/${yk}</b><br><svg width="${W}" height="${H}" style="background:var(--chartbg);border:1px solid var(--line);border-radius:6px">`;
+  g+=`<polyline points="${pts.map(r=>`${X(r[xk])},${Y(r[yk])}`).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.3"/>`;
+  pts.forEach((r,i)=>g+=`<circle cx="${X(r[xk])}" cy="${Y(r[yk])}" r="${i===0||i===pts.length-1?4:2.6}" fill="${i===0?'var(--warn)':i===pts.length-1?'var(--ok)':'var(--accent)'}"><title>#${r._i+1} · ${r.stage||'—'} · ${xk}=${Number(r[xk]).toPrecision(7)} · ${yk}=${Number(r[yk]).toPrecision(7)}</title></circle>`);
+  return g+`<text x="${p.l+iw/2}" y="${H-5}" text-anchor="middle" fill="var(--muted)" font-size="9">${xk} →　↑ ${yk}　黄=起点 绿=终点</text></svg><p class="hint" style="margin:2px 0">悬停采样点查看序号、阶段和精确坐标。</p></div>`;
+}
+function tuneCaseConvergence(c,obj){
+  const vals=(c.history||[]).map(r=>r[obj]).filter(v=>typeof v==='number');if(!vals.length)return '<p class="hint">无目标收敛轨迹。</p>';
+  const W=330,H=210,p={l:42,r:12,t:12,b:28},iw=W-p.l-p.r,ih=H-p.t-p.b,lo=Math.min(...vals),hi=Math.max(...vals),rg=hi-lo||1;
+  const X=i=>p.l+(vals.length<2?iw/2:i/(vals.length-1)*iw),Y=v=>p.t+ih-(v-lo)/rg*ih;
+  let g=`<div><b style="font-size:11px">因变量收敛 · ${obj}</b><br><svg width="${W}" height="${H}" style="background:var(--chartbg);border:1px solid var(--line);border-radius:6px">`;
+  [0,.5,1].forEach(f=>{const v=lo+rg*f,y=Y(v);g+=`<line x1="${p.l}" y1="${y}" x2="${W-p.r}" y2="${y}" stroke="var(--line)"/><text x="${p.l-4}" y="${y+3}" text-anchor="end" fill="var(--muted)" font-size="9">${v.toPrecision(3)}</text>`;});
+  g+=`<polyline points="${vals.map((v,i)=>`${X(i)},${Y(v)}`).join(' ')}" fill="none" stroke="var(--ok)" stroke-width="1.8"/>`;
+  vals.forEach((v,i)=>g+=`<circle cx="${X(i)}" cy="${Y(v)}" r="2.6" fill="var(--ok)"><title>评估 #${i+1} · ${obj}=${Number(v).toPrecision(7)}</title></circle>`);
+  return g+`<text x="${p.l+iw/2}" y="${H-5}" text-anchor="middle" fill="var(--muted)" font-size="9">评估次数 →</text></svg><p class="hint" style="margin:2px 0">悬停采样点查看评估序号和精确值。</p></div>`;
 }
 function pareto2D(rows, xk, yk){
   const geq=(a,b,k)=> METRICS[k].better==='high' ? a>=b : a<=b;
@@ -1579,18 +2075,23 @@ function adoptCandidate(i){ const r=tuneResult.ranked[i]; if(!r) return; adoptGr
   document.getElementById('conn').textContent='已采用方案 #'+(i+1); }
 function adoptGraph(graph){
   const known=new Set(['algorithm','variables','objective','stage','objective_mode','objective_target','keep','stop']);
-  // skip start/end control nodes (agent-built graphs carry them; autotune ones don't)
-  const algoNodes=(graph.nodes||[]).filter(gn=>{const t=gn.type||(gn.data&&gn.data.algorithm?'algorithm':''); return t!=='start'&&t!=='end';});
+  const algoNodes=graph.nodes||[];
   const keptIds=new Set(algoNodes.map((gn,i)=>gn.id||('n'+(i+1))));
-  nodes=algoNodes.map((gn,i)=>{ const d=gn.data||{}; const params={};
+  nodes=algoNodes.map((gn,i)=>{ const d=gn.data||{}, type=gn.type||(d.algorithm?'algorithm':'');
+    const pos=gn.position||{x:40+i*240,y:100};
+    if(type==='start'||type==='end') return {id:gn.id||('n'+(i+1)),type,color:'#64748b',x:pos.x,y:pos.y};
+    if(type==='data_transform') return {id:gn.id||('n'+(i+1)),type,label:d.label||'数据变换',inputChannel:d.input||(d.inputs&&d.inputs[0]&&d.inputs[0].channel)||'',inputs:d.inputs||null,outputChannel:d.output||'',outputType:d.output_type||'',operation:d.operation||'identity',params:d.params||{},color:'#14b8a6',x:pos.x,y:pos.y};
+    if(type==='for_loop') return {id:gn.id||('n'+(i+1)),type:'for_loop',label:'For 循环',iterations:Number(d.iterations??1),color:'#f97316',x:pos.x,y:pos.y};
+    if(type==='observer') return {id:gn.id||('n'+(i+1)),type:'observer',observerKind:d.kind||'scalar',label:d.label||'观测仪',color:d.kind==='matrix_plot'?'#a855f7':d.kind==='matrix'?'#0ea5e9':d.kind==='vector_plot'?'#14b8a6':'#64748b',channels:d.channels||[],matrixChannel:(d.channels||[])[0]||'',featureAxis:d.feature_axis||'row',plotStyle:d.plot_style||'line',showPeaks:!!d.show_peaks,x:pos.x,y:pos.y};
+    const params={};
     Object.keys(d).forEach(k=>{ if(!known.has(k)) params[k]=d[k]; });
     return {id:gn.id||('n'+(i+1)), algorithm:d.algorithm, color:NODE_COLORS[i%NODE_COLORS.length],
       variables:d.variables||[], objective:d.objective||objKeys[0],
       objectiveMode:d.objective_mode||'', objectiveTarget:(d.objective_target!=null?d.objective_target:''),
       objectiveWeights:d.objective_weights||null,
-      params, keep:d.keep||'', stopTarget:(d.stop&&d.stop.target)||'', fitInfo:'', x:40+i*240, y:100}; });
+      params, keep:d.keep||'', stopTarget:(d.stop&&d.stop.target)||'', fitInfo:'', x:pos.x, y:pos.y}; });
   edges=(graph.edges||[]).filter(e=>keptIds.has(e.source)&&keptIds.has(e.target))
-    .map((e,i)=>({id:'e'+(i+1), source:e.source, target:e.target, condition:e.condition||''}));
+    .map((e,i)=>({id:'e'+(i+1), source:e.source, target:e.target, condition:e.condition||'', role:e.role||''}));
   untilExpr=graph.until||''; untilRawEdited=false; untilRows=[]; seq=nodes.length+edges.length+1;
   sel=null; selEdge=null; render(); inspectEmpty(); renderUntilRows();
 }
@@ -1633,7 +2134,7 @@ function sendAgentMessage(){
     headers:Object.assign({'Content-Type':'application/json'}, tok?{'Authorization':'Bearer '+tok}:{}),
     body:JSON.stringify({user_message:text})})
     .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-    .then(d=>{ agentLogPush('已送到会话「'+sid+'」收件箱。平台无法主动叫醒 Agent——在 Hermes 里对它说一句(哪怕「看下画布」)，它会 poll_messages 读到并执行；要马上执行也可直接在 Hermes 对话里下指令。','sys'); })
+    .then(d=>{ agentLogPush('已送到会话「'+sid+'」收件箱。若已部署常驻 Agent gateway，它会通过 wait_for_messages 立即接收；否则需在 Hermes 发起下一轮，让 Agent 调用 poll_messages。点顶部「Agent 对话教程」查看说明。','sys'); })
     .catch(e=>agentLogPush('发送失败：'+e+'（消息发往实时会话工作区，需要后端在运行、会话 ID 一致）','sys'));
 }
 function applyLiveSnapshot(s){

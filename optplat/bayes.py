@@ -28,7 +28,8 @@ class BayesianGenerator(Generator):
 
     def __init__(self, vocs: VOCS, variables: list[str], objective: str,
                  sampler: str = "tpe", n_calls: int = 40, seed: Optional[int] = None,
-                 span_frac: float = 0.0, n_startup: int = 10, explore: float = 0.1):
+                 span_frac: float = 0.0, n_startup: int = 10, explore: float = 0.1,
+                 search_ranges=None):
         super().__init__(vocs, variables, objective)
         import optuna
 
@@ -61,6 +62,7 @@ class BayesianGenerator(Generator):
         self._study = optuna.create_study(direction="maximize", sampler=smp)
         self.n_calls = n_calls
         self.span_frac = max(0.0, float(span_frac))
+        self.search_ranges = search_ranges or {}
         self._n = 0
         self._trial = None
 
@@ -68,6 +70,14 @@ class BayesianGenerator(Generator):
         """本次搜索的取值范围。span_frac=0 → 全量程；>0 → 以**起点**为中心、
         该比例的相对窗口（真实台架无绝对坐标，初始搜索通常只在当前位置附近展开）。"""
         var = self.vocs.variables[v]
+        explicit = self.search_ranges.get(v)
+        if explicit is not None:
+            if not isinstance(explicit, (list, tuple)) or len(explicit) != 2:
+                raise ValueError(f"search_ranges[{v!r}] must be [low, high]")
+            lo, hi = var.clip(float(explicit[0])), var.clip(float(explicit[1]))
+            if lo > hi:
+                raise ValueError(f"search_ranges[{v!r}] low must be <= high")
+            return lo, hi
         if not self.span_frac:
             return var.low, var.high
         half = 0.5 * self.span_frac * (var.high - var.low)

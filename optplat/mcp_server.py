@@ -310,6 +310,21 @@ def poll_messages(session: str = "default", mark_read: bool = True) -> dict:
     return {"session": session, "messages": msgs, "count": len(msgs)}
 
 
+@mcp.tool()
+def wait_for_messages(session: str = "default", timeout_seconds: float = 25.0,
+                      mark_read: bool = True) -> dict:
+    """等待画布发来新指令（Agent worker / gateway 的长轮询收件箱）。
+
+    和 poll_messages 不同，本工具在没有消息时最多等待 timeout_seconds（上限 60 秒），
+    一有用户消息就立即返回。它用于**常驻 Agent host**：host 循环调用本工具，收到消息后
+    唤起模型、调用平台工具处理，再用 push_to_canvas(note=回复) 回传。普通 Hermes 对话关闭后
+    没有常驻 host，MCP server 无权反向唤醒客户端；仅连接 MCP 并不会改变这个协议事实。
+    """
+    msgs = WORKSPACE.wait_user_messages(session, timeout_seconds, mark_read)
+    return {"session": session, "messages": msgs, "count": len(msgs),
+            "timed_out": not bool(msgs)}
+
+
 # ============================ auto-tune ============================
 @mcp.tool()
 def autotune(bench: str = "single_peak", target: Optional[str] = "y1>=0.95 and y2>=0.9",

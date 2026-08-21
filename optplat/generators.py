@@ -74,7 +74,7 @@ class CoordinateDescent(Generator):
     """
 
     def __init__(self, vocs, variables, objective, init_step_frac=0.25, tol_frac=1e-3,
-                 steps=None):
+                 steps=None, refine_step=True, shrink_factor=0.5, shrink_patience=1):
         super().__init__(vocs, variables, objective)
         steps = steps or {}
         # per-axis step: an explicit ABSOLUTE value per axis overrides the fraction
@@ -87,6 +87,12 @@ class CoordinateDescent(Generator):
             v: tol_frac * (vocs.variables[v].high - vocs.variables[v].low)
             for v in variables
         }
+        self.refine_step = bool(refine_step)
+        self.shrink_factor = float(shrink_factor)
+        self.shrink_patience = max(1, int(shrink_patience))
+        if not 0 < self.shrink_factor < 1:
+            raise ValueError("shrink_factor must be in (0, 1)")
+        self._stalled_sweeps = 0
         self._base_val: Optional[float] = None
         self._queue: list[dict[str, float]] = []
         self._sweep_best: tuple[float, dict[str, float]] = (float("-inf"), {})
@@ -127,9 +133,17 @@ class CoordinateDescent(Generator):
         if not self._queue:                   # sweep finished -> decide
             if self._sweep_best[0] > self._base_val:
                 self._base_val, self._base = self._sweep_best
+                self._stalled_sweeps = 0
             else:                             # no improvement: refine
+                self._stalled_sweeps += 1
+                if not self.refine_step:
+                    self.done = True
+                    return
+                if self._stalled_sweeps < self.shrink_patience:
+                    return
                 for v in self._step:
-                    self._step[v] *= 0.5
+                    self._step[v] *= self.shrink_factor
+                self._stalled_sweeps = 0
                 if all(self._step[v] < self._tol[v] for v in self._step):
                     self.done = True
 
@@ -256,7 +270,8 @@ class GridScan(Generator):
     "y1 > first_light"), otherwise it stops when the grid is exhausted.
     """
 
-    def __init__(self, vocs, variables, objective, n_per_axis=7, span_frac=0.0):
+    def __init__(self, vocs, variables, objective, n_per_axis=7, span_frac=0.0,
+                 search_ranges=None):
         super().__init__(vocs, variables, objective)
         self.n_per_axis = n_per_axis
         # span_frac == 0 → absolute full-range raster (the default). span_frac > 0 →
@@ -265,6 +280,7 @@ class GridScan(Generator):
         # stage origin, so a local scan around where we already are is what a real
         # alignment does; the window is clipped into the variable bounds.
         self.span_frac = span_frac
+        self.search_ranges = search_ranges or {}
         self._grid: list[dict[str, float]] = []
 
     def _build_grid(self) -> None:
@@ -274,7 +290,14 @@ class GridScan(Generator):
         for v in self.variables:
             var = self.vocs.variables[v]
             n = self.n_per_axis
-            if self.span_frac and self.span_frac > 0:          # relative window around base
+            explicit = self.search_ranges.get(v)
+            if explicit is not None:
+                if not isinstance(explicit, (list, tuple)) or len(explicit) != 2:
+                    raise ValueError(f"search_ranges[{v!r}] must be [low, high]")
+                lo, hi = var.clip(float(explicit[0])), var.clip(float(explicit[1]))
+                if lo > hi:
+                    raise ValueError(f"search_ranges[{v!r}] low must be <= high")
+            elif self.span_frac and self.span_frac > 0:        # relative window around base
                 half = 0.5 * self.span_frac * (var.high - var.low)
                 c = self._base[v]
                 lo, hi = var.clip(c - half), var.clip(c + half)
@@ -640,13 +663,21 @@ class GradientAscent(Generator):
     """
 
     def __init__(self, vocs, variables, objective,
-                 probe_frac=0.02, step_frac=0.15, tol_frac=1e-3, max_line=6):
+                 probe_frac=0.02, step_frac=0.15, tol_frac=1e-3, max_line=6,
+                 shrink_on_fail=True, shrink_factor=0.5, grow_factor=1.5):
         super().__init__(vocs, variables, objective)
         self.range = {v: vocs.variables[v].high - vocs.variables[v].low for v in variables}
         self.h = {v: probe_frac * self.range[v] for v in variables}
         self.lr = step_frac
         self.tol = tol_frac
         self.max_line = max_line
+        self.shrink_on_fail = bool(shrink_on_fail)
+        self.shrink_factor = float(shrink_factor)
+        self.grow_factor = float(grow_factor)
+        if not 0 < self.shrink_factor < 1:
+            raise ValueError("shrink_factor must be in (0, 1)")
+        if self.grow_factor < 1:
+            raise ValueError("grow_factor must be >= 1")
         self._phase = "base"
         self._base_val: Optional[float] = None
         self._dir: dict[str, float] = {}
@@ -697,10 +728,13 @@ class GradientAscent(Generator):
         if score > self._base_val + 1e-12:                # improved → accept, grow step
             self._base = {v: x[v] for v in self.variables}
             self._base_val = score
-            self.lr = min(self.lr * 1.5, 0.5)
+            self.lr = min(self.lr * self.grow_factor, 0.5)
             self._probe_i = 0; self._slope = {}; self._phase = "probe"
         else:                                             # no gain → shrink & retry
-            self.lr *= 0.5; self._line_tries += 1
+            if not self.shrink_on_fail:
+                self.done = True
+                return
+            self.lr *= self.shrink_factor; self._line_tries += 1
             if self.lr < self.tol or self._line_tries >= self.max_line:
                 self.done = True
 
@@ -728,7 +762,9 @@ class DampedSensitivity(Generator):
 
     Dimensions are free: the node picks which x it drives and which y it targets;
     `sensitivity` and `targets` just have to match those. Iterates until the
-    residual norm falls below `tol` or `max_solves` steps are taken.
+    residual norm falls below `tol` or `max_solves` actuator corrections are taken.
+    The initial measurement and the final verification measurement do not consume
+    that correction count, so at most ``max_solves + 1`` points are evaluated.
     """
 
     def __init__(self, vocs, variables, objective, sensitivity=None, targets=None,
@@ -748,9 +784,15 @@ class DampedSensitivity(Generator):
         self.reg = float(reg)
         self.tol = float(tol)
         self.max_solves = int(max_solves)
+        if not 0 < self.damping <= 1:
+            raise ValueError("damping must be in (0, 1]")
+        if self.reg < 0:
+            raise ValueError("reg must be >= 0")
+        if self.max_solves < 1:
+            raise ValueError("max_solves must be >= 1")
         self._S = self._as_matrix(sensitivity)         # n_y × n_x
         self._next: Optional[dict[str, float]] = None
-        self._solves = 0
+        self._solves = 0                              # actuator corrections applied
 
     def channels(self) -> set:
         """Objective channels this solver must read every step (all its targets)."""
@@ -789,22 +831,22 @@ class DampedSensitivity(Generator):
         dy = np.asarray(resid, float)
         u, s, vt = np.linalg.svd(S, full_matrices=False)
         # damped inverse singular values: σ/(σ²+λ) — bounded even as σ→0
-        d = s / (s * s + self.reg)
+        denom = s * s + self.reg
+        d = np.divide(s, denom, out=np.zeros_like(s), where=denom > 0)
         dx = vt.T @ (d * (u.T @ dy))
         return [float(v) for v in dx]
 
     def observe(self, x: dict[str, float], y: dict[str, float]) -> None:
         import numpy as np
-        self._solves += 1
         resid = [self.targets[o] - float(y.get(o, 0.0)) for o in self.objs]
         err = float(np.linalg.norm(resid))
         score = -err                                   # smaller residual = better
         if score > self.best_score:
             self.best_score = score
             self.best_x = {v: x[v] for v in self.variables}
-        self.fit_info = ("阻尼灵敏度求解：残差‖Δy‖=%.3g，目标 %s（阻尼 d=%.2g, λ=%.1g）"
+        self.fit_info = ("阻尼灵敏度求解：残差‖Δy‖=%.3g，目标 %s（修正 %d/%d，阻尼 d=%.2g, λ=%.1g）"
                          % (err, ", ".join(f"{o}→{self.targets[o]:.4g}" for o in self.objs),
-                            self.damping, self.reg))
+                            self._solves, self.max_solves, self.damping, self.reg))
         if err < self.tol or self._solves >= self.max_solves:
             self.done = True
             return
@@ -813,10 +855,109 @@ class DampedSensitivity(Generator):
         for i, v in enumerate(self.variables):
             nxt[v] = self.vocs.variables[v].clip(x[v] + self.damping * dx[i])
         self._next = nxt
+        self._solves += 1
 
     def tell(self, x: dict[str, float], score: float) -> None:
         # best-x / stopping are handled in observe() with the full y vector; the
         # scalar score path is intentionally a no-op here.
+        return
+
+
+class MatrixPolicy(Generator):
+    """Matrix measurement -> model vector -> explicitly mapped actuator values.
+
+    This is a dependency-free reference for a future CNN/Transformer controller:
+    the matrix is converted to features, an affine model produces an output
+    vector, then ``output_map`` assigns vector indices to named x axes.  Replacing
+    ``_infer`` with a registered deep-learning model does not change the graph or
+    the safety-clipped actuator mapping contract.
+    """
+
+    def __init__(self, vocs, variables, objective, input_channel, output_map=None,
+                 weights=None, bias=None, feature_mode="flatten", action_mode="absolute",
+                 gain=1.0, max_actions=1):
+        super().__init__(vocs, variables, objective)
+        if not input_channel or input_channel not in vocs.objectives:
+            raise ValueError("matrix_policy needs a valid input_channel")
+        if vocs.objectives[input_channel].value_type.value != "matrix":
+            raise ValueError(f"matrix_policy input {input_channel!r} is not declared as matrix")
+        self.input_channel = input_channel
+        self.feature_mode = feature_mode
+        self.action_mode = action_mode
+        self.gain = float(gain)
+        self.max_actions = max(1, int(max_actions))
+        self.weights = weights or []
+        self.bias = list(bias or [])
+        mapping = output_map or {v: i for i, v in enumerate(variables)}
+        self.output_map = {str(v): int(i) for v, i in mapping.items()}
+        unknown = set(self.output_map) - set(variables)
+        if unknown:
+            raise ValueError(f"matrix_policy output_map contains unselected axes: {sorted(unknown)}")
+        self._next = None
+        self._actions = 0
+
+    def channels(self) -> set:
+        return {self.input_channel}
+
+    def set_base(self, point):
+        super().set_base(point)
+        self._next = dict(self._base)
+
+    def ask(self):
+        return dict(self._next or self._base)
+
+    def _features(self, matrix):
+        import numpy as np
+        a = np.asarray(matrix, dtype=float)
+        if a.ndim != 2:
+            raise ValueError(f"matrix_policy expects a 2-D matrix, got shape {a.shape}")
+        if self.feature_mode == "row_mean":
+            return a.mean(axis=1)
+        if self.feature_mode == "column_mean":
+            return a.mean(axis=0)
+        if self.feature_mode != "flatten":
+            raise ValueError(f"unknown matrix feature_mode: {self.feature_mode}")
+        return a.reshape(-1)
+
+    def _infer(self, features):
+        import numpy as np
+        f = np.asarray(features, dtype=float)
+        if self.weights:
+            w = np.asarray(self.weights, dtype=float)
+            if w.ndim != 2 or w.shape[1] != f.size:
+                raise ValueError(f"matrix_policy weights need [n_outputs,{f.size}], got {w.shape}")
+            out = w @ f
+        else:
+            out = f.copy()  # useful identity reference; output_map selects elements
+        if self.bias:
+            b = np.asarray(self.bias, dtype=float)
+            if b.size != out.size:
+                raise ValueError(f"matrix_policy bias needs {out.size} values, got {b.size}")
+            out = out + b
+        return out
+
+    def observe(self, x, y):
+        out = self._infer(self._features(y[self.input_channel]))
+        nxt = dict(x)
+        for axis, index in self.output_map.items():
+            if index < 0 or index >= out.size:
+                raise ValueError(f"matrix_policy output index {index} for {axis} outside vector length {out.size}")
+            value = self.gain * float(out[index])
+            if self.action_mode == "delta":
+                value += float(x[axis])
+            elif self.action_mode != "absolute":
+                raise ValueError(f"unknown matrix action_mode: {self.action_mode}")
+            nxt[axis] = self.vocs.variables[axis].clip(value)
+        self._actions += 1
+        self.best_x = dict(nxt)
+        self.best_score = 0.0
+        self._next = nxt
+        self.fit_info = (f"矩阵策略：{self.input_channel} → 向量({out.size}) → "
+                         + ", ".join(f"{v}=output[{i}]" for v, i in self.output_map.items()))
+        if self._actions >= self.max_actions:
+            self.done = True
+
+    def tell(self, x, score):
         return
 
 
